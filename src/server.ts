@@ -202,35 +202,49 @@ export class MCPServer {
         }
     }
 
-    public async stop(): Promise<void> {
+    public async stop(forceTimeout: number = 5000): Promise<void> {
         logger.info('[MCPServer.stop] Starting server shutdown process');
         const stopStartTime = Date.now();
         
         try {
-            // Close HTTP server
+            // Close HTTP server with timeout
             if (this.httpServer) {
-                logger.info('[MCPServer.stop] Closing HTTP server');
+                logger.info('[MCPServer.stop] Closing HTTP server (with timeout)');
                 const httpServerCloseStart = Date.now();
                 
-                await new Promise<void>((resolve, reject) => {
-                    this.httpServer!.close((err) => {
-                        const httpCloseTime = Date.now() - httpServerCloseStart;
-                        logger.info(`[MCPServer.stop] HTTP server closed ${err ? 'with error' : 'successfully'} (took ${httpCloseTime}ms)`);
-                        
-                        if (err) reject(err);
-                        else resolve();
-                    });
-                });
+                await Promise.race([
+                    // Normal close operation
+                    new Promise<void>((resolve, reject) => {
+                        this.httpServer!.close((err) => {
+                            const httpCloseTime = Date.now() - httpServerCloseStart;
+                            if (err) {
+                                logger.error(`[MCPServer.stop] HTTP server closed with error: ${err.message} (took ${httpCloseTime}ms)`);
+                                reject(err);
+                            } else {
+                                logger.info(`[MCPServer.stop] HTTP server closed successfully (took ${httpCloseTime}ms)`);
+                                resolve();
+                            }
+                        });
+                    }),
+                    
+                    // Timeout fallback
+                    new Promise<void>((resolve) => {
+                        setTimeout(() => {
+                            logger.warn(`[MCPServer.stop] HTTP server close timed out after ${forceTimeout}ms - forcing close`);
+                            // We resolve anyway to continue with the shutdown process
+                            resolve();
+                        }, forceTimeout);
+                    })
+                ]);
             }
 
-            // Close transport
+            // Rest of the shutdown process...
             logger.info('[MCPServer.stop] Closing transport');
             const transportCloseStart = Date.now();
             await this.transport.close();
             const transportCloseTime = Date.now() - transportCloseStart;
             logger.info(`[MCPServer.stop] Transport closed (took ${transportCloseTime}ms)`);
             
-            // Close server
             logger.info('[MCPServer.stop] Closing MCP server');
             const serverCloseStart = Date.now();
             await this.server.close();

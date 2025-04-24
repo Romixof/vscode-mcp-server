@@ -69,6 +69,9 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
     const config = vscode.workspace.getConfiguration('vscode-mcp-server');
     const port = config.get<number>('port') || 3000;
     
+    // Update status bar immediately to provide feedback
+    updateStatusBar(port);
+    
     if (serverEnabled) {
         // Start the server if it was disabled
         if (!mcpServer) {
@@ -98,20 +101,30 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
     } else {
         // Stop the server if it was enabled
         if (mcpServer) {
-            logger.info(`[toggleServerState] Stopping server at ${new Date().toISOString()}`);
-            const stopTime = Date.now();
+            // Show progress indicator
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: 'Stopping MCP Server',
+                cancellable: false
+            }, async (progress) => {
+                logger.info(`[toggleServerState] Stopping server at ${new Date().toISOString()}`);
+                progress.report({ message: 'Closing connections...' });
+                
+                const stopTime = Date.now();
+                if (mcpServer) {
+                    await mcpServer.stop();
+                }
+                
+                const duration = Date.now() - stopTime;
+                logger.info(`[toggleServerState] Server stopped successfully at ${new Date().toISOString()} (took ${duration}ms)`);
+                
+                mcpServer = undefined;
+            });
             
-            await mcpServer.stop();
-            
-            const duration = Date.now() - stopTime;
-            logger.info(`[toggleServerState] Server stopped successfully at ${new Date().toISOString()} (took ${duration}ms)`);
-            
-            mcpServer = undefined;
             vscode.window.showInformationMessage('MCP Server has been disabled');
         }
     }
     
-    updateStatusBar(port);
     logger.info(`[toggleServerState] Toggle operation completed`);
 }
 
