@@ -6,6 +6,9 @@ This extension can allow for execution of shell commands. This means that there 
 
 PRs are welcome!
 
+## Demo Video
+https://github.com/user-attachments/assets/20b87dfb-fc39-4710-a910-b9481dde1e90
+
 ## Server Toggle Functionality
 
 For enhanced security and control, the MCP server can be easily toggled on and off:
@@ -13,6 +16,8 @@ For enhanced security and control, the MCP server can be easily toggled on and o
 - **Default State**: The MCP server is **disabled by default** when you first install the extension.
 - **Toggle Method**: Click on the MCP Server status item in the status bar to toggle the server on or off.
 - **Visual Indicator**: The status bar shows the current state:
+
+
   - `MCP Server: Off` - Server is disabled
   - `MCP Server: <port>` - Server is running on the specified port
 
