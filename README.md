@@ -9,19 +9,9 @@ PRs are welcome!
 ## Demo Video
 https://github.com/user-attachments/assets/20b87dfb-fc39-4710-a910-b9481dde1e90
 
-## Server Toggle Functionality
+## Installation
 
-For enhanced security and control, the MCP server can be easily toggled on and off:
-
-- **Default State**: The MCP server is **disabled by default** when you first install the extension.
-- **Toggle Method**: Click on the MCP Server status item in the status bar to toggle the server on or off.
-- **Visual Indicator**: The status bar shows the current state:
-
-
-  - `MCP Server: Off` - Server is disabled
-  - `MCP Server: <port>` - Server is running on the specified port
-
-This toggle feature allows you to enable the server only when needed and disable it when not in use for better security.
+1. Install the extension from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=JuehangQin.vscode-mcp-server) or clone this repository and run `npm install` and `npm run compile` to build it.
 
 ## Claude Desktop Configuration
 
@@ -59,6 +49,8 @@ The VS Code MCP Server extension implements an MCP-compliant server that allows 
 - **Read file contents** with encoding support and size limits
 - **Create new files** using VS Code's WorkspaceEdit API
 - **Check for diagnostics** (errors and warnings) in your workspace
+- **Execute shell commands** in the integrated terminal with shell integration
+- **Toggle the server** on and off via a status bar item
 
 This extension enables AI assistants and other tools to interact with your VS Code workspace through the standardized MCP protocol.
 
