@@ -58,6 +58,8 @@ function updateStatusBar(port: number) {
 
 // Function to toggle server state
 async function toggleServerState(context: vscode.ExtensionContext): Promise<void> {
+    console.log(`[toggleServerState] Starting toggle operation - changing from ${serverEnabled} to ${!serverEnabled}`);
+    
     serverEnabled = !serverEnabled;
     
     // Store state for persistence
@@ -69,6 +71,7 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
     if (serverEnabled) {
         // Start the server if it was disabled
         if (!mcpServer) {
+            console.log(`[toggleServerState] Creating MCP server instance`);
             const terminal = getExtensionTerminal(context);
             mcpServer = new MCPServer(port, terminal);
             mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
@@ -80,19 +83,35 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
                 }
             });
             mcpServer.setupTools();
+            
+            console.log(`[toggleServerState] Starting server at ${new Date().toISOString()}`);
+            const startTime = Date.now();
+            
             await mcpServer.start();
+            
+            const duration = Date.now() - startTime;
+            console.log(`[toggleServerState] Server started successfully at ${new Date().toISOString()} (took ${duration}ms)`);
+            
             vscode.window.showInformationMessage(`MCP Server enabled and running at http://localhost:${port}/mcp`);
         }
     } else {
         // Stop the server if it was enabled
         if (mcpServer) {
+            console.log(`[toggleServerState] Stopping server at ${new Date().toISOString()}`);
+            const stopTime = Date.now();
+            
             await mcpServer.stop();
+            
+            const duration = Date.now() - stopTime;
+            console.log(`[toggleServerState] Server stopped successfully at ${new Date().toISOString()} (took ${duration}ms)`);
+            
             mcpServer = undefined;
             vscode.window.showInformationMessage('MCP Server has been disabled');
         }
     }
     
     updateStatusBar(port);
+    console.log(`[toggleServerState] Toggle operation completed`);
 }
 
 export async function activate(context: vscode.ExtensionContext) {

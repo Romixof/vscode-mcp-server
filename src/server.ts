@@ -186,22 +186,42 @@ export class MCPServer {
     }
 
     public async stop(): Promise<void> {
+        console.log('[MCPServer.stop] Starting server shutdown process');
+        const stopStartTime = Date.now();
+        
         try {
             // Close HTTP server
             if (this.httpServer) {
+                console.log('[MCPServer.stop] Closing HTTP server');
+                const httpServerCloseStart = Date.now();
+                
                 await new Promise<void>((resolve, reject) => {
                     this.httpServer!.close((err) => {
+                        const httpCloseTime = Date.now() - httpServerCloseStart;
+                        console.log(`[MCPServer.stop] HTTP server closed ${err ? 'with error' : 'successfully'} (took ${httpCloseTime}ms)`);
+                        
                         if (err) reject(err);
                         else resolve();
                     });
                 });
             }
 
-            // Close transport and server
+            // Close transport
+            console.log('[MCPServer.stop] Closing transport');
+            const transportCloseStart = Date.now();
             await this.transport.close();
-            await this.server.close();
+            const transportCloseTime = Date.now() - transportCloseStart;
+            console.log(`[MCPServer.stop] Transport closed (took ${transportCloseTime}ms)`);
             
-            console.log('MCP Server shutdown complete');
+            // Close server
+            console.log('[MCPServer.stop] Closing MCP server');
+            const serverCloseStart = Date.now();
+            await this.server.close();
+            const serverCloseTime = Date.now() - serverCloseStart;
+            console.log(`[MCPServer.stop] MCP server closed (took ${serverCloseTime}ms)`);
+            
+            const totalStopTime = Date.now() - stopStartTime;
+            console.log(`[MCPServer.stop] MCP Server shutdown complete (total: ${totalStopTime}ms)`);
         } catch (error) {
             console.error('Error during server shutdown:', error);
             throw error;
