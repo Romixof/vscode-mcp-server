@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { MCPServer } from './server';
 import { listWorkspaceFiles } from './tools/file-tools';
+import { logger } from './utils/logger';
 
 // Re-export for testing purposes
 export { MCPServer };
@@ -25,13 +26,13 @@ export function getExtensionTerminal(context: vscode.ExtensionContext): vscode.T
     
     if (existingTerminal && existingTerminal.exitStatus === undefined) {
         // Reuse the existing terminal if it's still open
-        console.log('[getExtensionTerminal] Reusing existing terminal for shell commands');
+        logger.info('[getExtensionTerminal] Reusing existing terminal for shell commands');
         return existingTerminal;
     }
     
     // Create a new terminal if it doesn't exist or if it has exited
     sharedTerminal = vscode.window.createTerminal(TERMINAL_NAME);
-    console.log('[getExtensionTerminal] Created new terminal for shell commands');
+    logger.info('[getExtensionTerminal] Created new terminal for shell commands');
     context.subscriptions.push(sharedTerminal);
 
     return sharedTerminal;
@@ -58,7 +59,7 @@ function updateStatusBar(port: number) {
 
 // Function to toggle server state
 async function toggleServerState(context: vscode.ExtensionContext): Promise<void> {
-    console.log(`[toggleServerState] Starting toggle operation - changing from ${serverEnabled} to ${!serverEnabled}`);
+    logger.info(`[toggleServerState] Starting toggle operation - changing from ${serverEnabled} to ${!serverEnabled}`);
     
     serverEnabled = !serverEnabled;
     
@@ -71,39 +72,39 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
     if (serverEnabled) {
         // Start the server if it was disabled
         if (!mcpServer) {
-            console.log(`[toggleServerState] Creating MCP server instance`);
+            logger.info(`[toggleServerState] Creating MCP server instance`);
             const terminal = getExtensionTerminal(context);
             mcpServer = new MCPServer(port, terminal);
             mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
                 try {
                     return await listWorkspaceFiles(path, recursive);
                 } catch (error) {
-                    console.error('Error listing files:', error);
+                    logger.error(`[toggleServerState] Error listing files: ${error instanceof Error ? error.message : String(error)}`);
                     throw error;
                 }
             });
             mcpServer.setupTools();
             
-            console.log(`[toggleServerState] Starting server at ${new Date().toISOString()}`);
+            logger.info(`[toggleServerState] Starting server at ${new Date().toISOString()}`);
             const startTime = Date.now();
             
             await mcpServer.start();
             
             const duration = Date.now() - startTime;
-            console.log(`[toggleServerState] Server started successfully at ${new Date().toISOString()} (took ${duration}ms)`);
+            logger.info(`[toggleServerState] Server started successfully at ${new Date().toISOString()} (took ${duration}ms)`);
             
             vscode.window.showInformationMessage(`MCP Server enabled and running at http://localhost:${port}/mcp`);
         }
     } else {
         // Stop the server if it was enabled
         if (mcpServer) {
-            console.log(`[toggleServerState] Stopping server at ${new Date().toISOString()}`);
+            logger.info(`[toggleServerState] Stopping server at ${new Date().toISOString()}`);
             const stopTime = Date.now();
             
             await mcpServer.stop();
             
             const duration = Date.now() - stopTime;
-            console.log(`[toggleServerState] Server stopped successfully at ${new Date().toISOString()} (took ${duration}ms)`);
+            logger.info(`[toggleServerState] Server stopped successfully at ${new Date().toISOString()} (took ${duration}ms)`);
             
             mcpServer = undefined;
             vscode.window.showInformationMessage('MCP Server has been disabled');
@@ -111,11 +112,12 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
     }
     
     updateStatusBar(port);
-    console.log(`[toggleServerState] Toggle operation completed`);
+    logger.info(`[toggleServerState] Toggle operation completed`);
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('Activating vscode-mcp-server extension');
+    logger.info('Activating vscode-mcp-server extension');
+    logger.showChannel(); // Show the output channel for easy access to logs
 
     try {
         // Get configuration
@@ -126,8 +128,8 @@ export async function activate(context: vscode.ExtensionContext) {
         // Load saved state or use configured default
         serverEnabled = context.globalState.get('mcpServerEnabled', defaultEnabled);
         
-        console.log(`[activate] Using port ${port} from configuration`);
-        console.log(`[activate] Server enabled: ${serverEnabled}`);
+        logger.info(`[activate] Using port ${port} from configuration`);
+        logger.info(`[activate] Server enabled: ${serverEnabled}`);
 
         // Create status bar item
         statusBarItem = vscode.window.createStatusBarItem(
@@ -149,7 +151,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 try {
                     return await listWorkspaceFiles(path, recursive);
                 } catch (error) {
-                    console.error('Error listing files:', error);
+                    logger.error(`Error listing files: ${error instanceof Error ? error.message : String(error)}`);
                     throw error;
                 }
             });
@@ -158,9 +160,9 @@ export async function activate(context: vscode.ExtensionContext) {
             mcpServer.setupTools();
 
             await mcpServer.start();
-            console.log('MCP Server started successfully');
+            logger.info('MCP Server started successfully');
         } else {
-            console.log('MCP Server is disabled by default');
+            logger.info('MCP Server is disabled by default');
         }
         
         // Update status bar after server state is determined
@@ -191,7 +193,7 @@ export async function activate(context: vscode.ExtensionContext) {
             { dispose: async () => mcpServer && await mcpServer.stop() }
         );
     } catch (error) {
-        console.error('Failed to start MCP Server:', error);
+        logger.error(`Failed to start MCP Server: ${error instanceof Error ? error.message : 'Unknown error'}`);
         vscode.window.showErrorMessage(`Failed to start MCP Server: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 }
@@ -211,12 +213,15 @@ export async function deactivate() {
     if (!mcpServer) return;
     
     try {
+        logger.info('Stopping MCP Server during extension deactivation');
         await mcpServer.stop();
-        console.log('MCP Server stopped successfully');
+        logger.info('MCP Server stopped successfully');
     } catch (error) {
-        console.error('Error stopping MCP Server:', error);
+        logger.error(`Error stopping MCP Server: ${error instanceof Error ? error.message : String(error)}`);
         throw error; // Re-throw to ensure VS Code knows about the failure
     } finally {
         mcpServer = undefined;
+        // Dispose the logger
+        logger.dispose();
     }
 }
