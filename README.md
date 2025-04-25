@@ -48,6 +48,7 @@ The VS Code MCP Server extension implements an MCP-compliant server that allows 
 - **List files and directories** in your VS Code workspace
 - **Read file contents** with encoding support and size limits
 - **Search for symbols** across your workspace
+- **Get symbol definitions** and hover information by line and symbol name
 - **Create new files** using VS Code's WorkspaceEdit API
 - **Make line replacements** in files
 - **Check for diagnostics** (errors and warnings) in your workspace
@@ -110,6 +111,22 @@ The extension creates an MCP server that:
   - Finding definitions of symbols (functions, classes, variables, etc.) across the codebase
   - Exploring project structure and organization
   - Locating specific elements by name
+
+- **get_symbol_definition_code**: Gets definition information for a symbol in a file
+  - Parameters:
+    - `path`: The path to the file containing the symbol
+    - `line`: The line number of the symbol (0-based)
+    - `symbol`: The symbol name to look for on the specified line
+  
+  This tool provides:
+  - Type information, documentation, and source details for symbols
+  - Code context showing the line where the symbol appears
+  - Symbol range information
+  
+  It's particularly useful for:
+  - Understanding what a symbol represents without navigating away
+  - Checking function signatures, type definitions, or documentation
+  - Quick reference for APIs or library functions
 
 ### Shell Tools
 - **execute_shell_command_code**: Executes a shell command in the VS Code integrated terminal with shell integration
