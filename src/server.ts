@@ -8,6 +8,7 @@ import { registerFileTools, FileListingCallback } from './tools/file-tools';
 import { registerEditTools } from './tools/edit-tools';
 import { registerShellTools } from './tools/shell-tools';
 import { registerDiagnosticsTools } from './tools/diagnostics-tools';
+import { registerSymbolTools } from './tools/symbol-tools';
 import { logger } from './utils/logger';
 
 export class MCPServer {
@@ -70,6 +71,10 @@ export class MCPServer {
             // Register diagnostics tools
             registerDiagnosticsTools(this.server);
             logger.info('MCP diagnostics tools registered successfully');
+            
+            // Register symbol tools
+            registerSymbolTools(this.server);
+            logger.info('MCP symbol tools registered successfully');
         } else {
             logger.warn('File listing callback not set during tools setup');
         }

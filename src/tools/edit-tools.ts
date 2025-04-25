@@ -189,7 +189,16 @@ export function registerEditTools(server: McpServer): void {
     // Add replace_lines_code tool
     server.tool(
         'replace_lines_code',
-        'Use this tool to selectively replace specific lines of code in a file. The function takes both the original code and line numbers to prevent mistakes. Always verify the line numbers and content before using this tool. This is useful for making targeted changes to specific parts of a file without modifying the rest of the content.',
+        `Use this tool to selectively replace specific lines of code in a file. The tool implements several safety features:
+        
+            1. Line number validation - Ensures start and end lines are within valid range
+            2. Content verification - Requires original code to match exactly before making changes
+            3. Atomic operations - Changes are applied as a single edit operation
+        
+        Best practices:
+            - Verify line numbers match your intended target using read_file if you are unsure
+            - Use for targeted changes when modifying specific sections of large files
+            - Consider using create_file_code instead for complete or near-complete file rewrites`,
         {
             path: z.string().describe('The path to the file to modify'),
             startLine: z.number().describe('The start line number (0-based, inclusive)'),

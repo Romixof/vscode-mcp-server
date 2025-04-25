@@ -47,7 +47,9 @@ The VS Code MCP Server extension implements an MCP-compliant server that allows 
 
 - **List files and directories** in your VS Code workspace
 - **Read file contents** with encoding support and size limits
+- **Search for symbols** across your workspace
 - **Create new files** using VS Code's WorkspaceEdit API
+- **Make line replacements** in files
 - **Check for diagnostics** (errors and warnings) in your workspace
 - **Execute shell commands** in the integrated terminal with shell integration
 - **Toggle the server** on and off via a status bar item
@@ -97,6 +99,17 @@ The extension creates an MCP server that:
   - Code quality checks before committing changes
   - Verifying fixes resolved all reported issues
   - Identifying problems in specific files or the entire workspace
+
+### Symbol Tools
+- **search_symbols_code**: Searches for symbols across the workspace
+  - Parameters:
+    - `query`: The search query for symbol names
+    - `maxResults` (optional): Maximum number of results to return (default: 10)
+  
+  This tool is useful for:
+  - Finding definitions of symbols (functions, classes, variables, etc.) across the codebase
+  - Exploring project structure and organization
+  - Locating specific elements by name
 
 ### Shell Tools
 - **execute_shell_command_code**: Executes a shell command in the VS Code integrated terminal with shell integration
