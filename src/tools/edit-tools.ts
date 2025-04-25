@@ -198,7 +198,8 @@ export function registerEditTools(server: McpServer): void {
         Best practices:
             - Verify line numbers match your intended target using read_file if you are unsure
             - Use for targeted changes when modifying specific sections of large files
-            - Consider using create_file_code instead for complete or near-complete file rewrites`,
+            - Consider using create_file_code instead for complete or near-complete file rewrites
+            - This tool should be preferred for small to medium changes to existing files.`,
         {
             path: z.string().describe('The path to the file to modify'),
             startLine: z.number().describe('The start line number (0-based, inclusive)'),

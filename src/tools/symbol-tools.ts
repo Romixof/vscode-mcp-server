@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as path from 'path';
+import * as fs from 'fs';
 import { logger } from '../utils/logger';
 
 /**
@@ -58,6 +59,130 @@ function uriToWorkspacePath(uri: vscode.Uri): string {
     // Convert to relative path
     const relativePath = path.relative(workspaceRoot, uri.fsPath);
     return relativePath;
+}
+
+/**
+ * Get a preview of the code at a specific line
+ * @param uri The URI of the document
+ * @param line The line number (0-based)
+ * @returns The line content as a string or undefined if not available
+ */
+async function getPreview(uri: vscode.Uri, line?: number): Promise<string | undefined> {
+    if (line === undefined) {
+        return undefined;
+    }
+
+    try {
+        // Try to open the document from VS Code's text document manager
+        const documents = vscode.workspace.textDocuments;
+        let document = documents.find(doc => doc.uri.toString() === uri.toString());
+        
+        // If document is not already open, try to read it from the file system
+        if (!document) {
+            try {
+                const content = await vscode.workspace.fs.readFile(uri);
+                const text = Buffer.from(content).toString('utf8');
+                const lines = text.split(/\r?\n/);
+                
+                if (line >= 0 && line < lines.length) {
+                    return lines[line].trim();
+                }
+            } catch (error) {
+                logger.warn(`[getPreview] Could not read file: ${error instanceof Error ? error.message : String(error)}`);
+                return undefined;
+            }
+        } else {
+            // Document is open, get the line directly
+            if (line >= 0 && line < document.lineCount) {
+                return document.lineAt(line).text.trim();
+            }
+        }
+    } catch (error) {
+        logger.warn(`[getPreview] Error getting preview: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    return undefined;
+}
+
+/**
+ * Process hover content to extract string value
+ * @param content The hover content item
+ * @returns String representation of the content
+ */
+function processHoverContent(content: any): string {
+    if (typeof content === 'string') {
+        return content;
+    } else if (content && typeof content === 'object' && 'value' in content) {
+        return content.value;
+    }
+    return String(content);
+}
+
+/**
+ * Get hover information for a symbol at a specific position in a document
+ * @param uri The URI of the text document
+ * @param position The position of the symbol
+ * @returns Hover information for the symbol
+ */
+export async function getSymbolHoverInfo(
+    uri: vscode.Uri,
+    position: vscode.Position
+): Promise<{
+    hovers: Array<{
+        contents: string[];
+        range?: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+        };
+        preview?: string;
+    }>;
+}> {
+    logger.info(`[getSymbolHoverInfo] Getting hover info for ${uri.toString()} at position (${position.line},${position.character})`);
+    
+    try {
+        // Execute the hover provider
+        const commandResult = await vscode.commands.executeCommand<vscode.Hover[]>(
+            'vscode.executeHoverProvider',
+            uri,
+            position
+        ) || [];
+        
+        logger.info(`[getSymbolHoverInfo] Found ${commandResult.length} hover results`);
+        
+        // Map the hover results to a more friendly format
+        const hovers = await Promise.all(commandResult.map(async hover => {
+            // Process the contents
+            let contents: string[] = [];
+            
+            if (Array.isArray(hover.contents)) {
+                contents = hover.contents.map(processHoverContent);
+            } else if (hover.contents) {
+                contents = [processHoverContent(hover.contents)];
+            }
+            
+            // Format the range if available
+            const range = hover.range ? {
+                start: {
+                    line: hover.range.start.line,
+                    character: hover.range.start.character
+                },
+                end: {
+                    line: hover.range.end.line,
+                    character: hover.range.end.character
+                }
+            } : undefined;
+            
+            // Get a preview of the code if range is available
+            const preview = await getPreview(uri, hover.range?.start.line);
+            
+            return { contents, range, preview };
+        }));
+        
+        return { hovers };
+    } catch (error) {
+        logger.error(`[getSymbolHoverInfo] Error: ${error instanceof Error ? error.message : String(error)}`);
+        throw error;
+    }
 }
 
 /**
@@ -200,6 +325,91 @@ export function registerSymbolTools(server: McpServer): void {
                 return callResult;
             } catch (error) {
                 logger.error(`[search_symbols_code] Error in tool: ${error instanceof Error ? error.message : String(error)}`);
+                throw error;
+            }
+        }
+    );
+
+    // Add get_symbol_definition_code tool
+    server.tool(
+        'get_symbol_definition_code',
+        `Get definition information for a symbol in a file using hover data.
+
+        Key features:
+        - Provides definition information for a symbol at a specific position
+        - Returns hover information which typically includes type, documentation, and source
+
+        Use cases:
+        - Understanding what a symbol represents without navigating away
+        - Checking function signatures, type definitions, or documentation
+        - Quick reference for APIs or library functions`,
+        {
+            path: z.string().describe('The path to the file containing the symbol'),
+            line: z.number().describe('The line number of the symbol (0-based)'),
+            character: z.number().describe('The character position of the symbol (0-based)')
+        },
+        async ({ path, line, character }): Promise<CallToolResult> => {
+            logger.info(`[get_symbol_definition_code] Tool called with path="${path}", line=${line}, character=${character}`);
+            
+            try {
+                if (!vscode.workspace.workspaceFolders) {
+                    throw new Error('No workspace folder open');
+                }
+                
+                const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                const fullPath = require('path').resolve(workspaceRoot, path);
+                const uri = vscode.Uri.file(fullPath);
+                
+                // Check if file exists
+                try {
+                    await vscode.workspace.fs.stat(uri);
+                } catch (error) {
+                    throw new Error(`File not found: ${path}`);
+                }
+                
+                // Create a position object
+                const position = new vscode.Position(line, character);
+                
+                // Get hover information
+                const hoverResult = await getSymbolHoverInfo(uri, position);
+                
+                let resultText: string;
+                
+                if (hoverResult.hovers.length === 0) {
+                    resultText = `No definition information found for symbol at ${path}:${line}:${character}.`;
+                } else {
+                    resultText = `Definition information for symbol at ${path}:${line}:${character}:\n\n`;
+                    
+                    for (const hover of hoverResult.hovers) {
+                        // Add preview if available
+                        if (hover.preview) {
+                            resultText += `Code context: \`${hover.preview}\`\n\n`;
+                        }
+                        
+                        // Add contents
+                        for (const content of hover.contents) {
+                            resultText += `${content}\n\n`;
+                        }
+                        
+                        // Add range if available
+                        if (hover.range) {
+                            resultText += `Symbol range: [${hover.range.start.line}:${hover.range.start.character}] to [${hover.range.end.line}:${hover.range.end.character}]\n\n`;
+                        }
+                    }
+                }
+                
+                const callResult: CallToolResult = {
+                    content: [
+                        {
+                            type: 'text',
+                            text: resultText
+                        }
+                    ]
+                };
+                logger.info('[get_symbol_definition_code] Successfully completed');
+                return callResult;
+            } catch (error) {
+                logger.error(`[get_symbol_definition_code] Error in tool: ${error instanceof Error ? error.message : String(error)}`);
                 throw error;
             }
         }
