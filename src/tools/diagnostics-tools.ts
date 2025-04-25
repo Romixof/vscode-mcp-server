@@ -164,6 +164,7 @@ export function registerDiagnosticsTools(server: McpServer): void {
     server.tool(
         'get_diagnostics_code',
         `Analyzes code for warnings and errors in the VS Code workspace.
+        Note that unlike all other tools, the line numbers in the output are 1-based.
 
         Features:
         - Supports single file or workspace-wide analysis

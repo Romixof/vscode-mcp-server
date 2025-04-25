@@ -105,6 +105,38 @@ async function getPreview(uri: vscode.Uri, line?: number): Promise<string | unde
 }
 
 /**
+ * Get the text content of a specific line in a file
+ * @param uri The URI of the document
+ * @param line The line number (0-based)
+ * @returns The text content of the line or undefined if line doesn't exist
+ */
+async function getLineText(uri: vscode.Uri, line: number): Promise<string | undefined> {
+    try {
+        // Open the document using VS Code's API
+        const document = await vscode.workspace.openTextDocument(uri);
+        
+        // Check if the line exists
+        if (line >= 0 && line < document.lineCount) {
+            return document.lineAt(line).text;
+        }
+        return undefined;
+    } catch (error) {
+        logger.warn(`[getLineText] Error getting line text: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
+    }
+}
+
+/**
+ * Find the first occurrence of a symbol in a line of text
+ * @param lineText The text content of the line
+ * @param symbolName The exact symbol name to search for
+ * @returns The character position (index) where the symbol starts, or -1 if not found
+ */
+function findSymbolInLine(lineText: string, symbolName: string): number {
+    return lineText.indexOf(symbolName);
+}
+
+/**
  * Process hover content to extract string value
  * @param content The hover content item
  * @returns String representation of the content
@@ -330,14 +362,15 @@ export function registerSymbolTools(server: McpServer): void {
         }
     );
 
-    // Add get_symbol_definition_code tool
+    // Add get_symbol_definition_code tool with updated parameters
     server.tool(
         'get_symbol_definition_code',
         `Get definition information for a symbol in a file using hover data.
 
         Key features:
-        - Provides definition information for a symbol at a specific position
+        - Provides definition information for a symbol by name and line
         - Returns hover information which typically includes type, documentation, and source
+        - Works with any language supported by VS Code
 
         Use cases:
         - Understanding what a symbol represents without navigating away
@@ -346,10 +379,10 @@ export function registerSymbolTools(server: McpServer): void {
         {
             path: z.string().describe('The path to the file containing the symbol'),
             line: z.number().describe('The line number of the symbol (0-based)'),
-            character: z.number().describe('The character position of the symbol (0-based)')
+            symbol: z.string().describe('The symbol name to look for on the specified line')
         },
-        async ({ path, line, character }): Promise<CallToolResult> => {
-            logger.info(`[get_symbol_definition_code] Tool called with path="${path}", line=${line}, character=${character}`);
+        async ({ path, line, symbol }): Promise<CallToolResult> => {
+            logger.info(`[get_symbol_definition_code] Tool called with path="${path}", line=${line}, symbol="${symbol}"`);
             
             try {
                 if (!vscode.workspace.workspaceFolders) {
@@ -367,6 +400,25 @@ export function registerSymbolTools(server: McpServer): void {
                     throw new Error(`File not found: ${path}`);
                 }
                 
+                // Get the content of the specified line
+                const lineText = await getLineText(uri, line);
+                if (!lineText) {
+                    throw new Error(`Line ${line} not found in file: ${path}`);
+                }
+                
+                // Find the character position of the symbol in the line
+                const character = findSymbolInLine(lineText, symbol);
+                if (character === -1) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Symbol "${symbol}" not found on line ${line} in file: ${path}`
+                            }
+                        ]
+                    };
+                }
+                
                 // Create a position object
                 const position = new vscode.Position(line, character);
                 
@@ -376,9 +428,9 @@ export function registerSymbolTools(server: McpServer): void {
                 let resultText: string;
                 
                 if (hoverResult.hovers.length === 0) {
-                    resultText = `No definition information found for symbol at ${path}:${line}:${character}.`;
+                    resultText = `No definition information found for symbol "${symbol}" at ${path}:${line}:${character}.`;
                 } else {
-                    resultText = `Definition information for symbol at ${path}:${line}:${character}:\n\n`;
+                    resultText = `Definition information for symbol "${symbol}" at ${path}:${line}:${character}:\n\n`;
                     
                     for (const hover of hoverResult.hovers) {
                         // Add preview if available
