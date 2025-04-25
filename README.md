@@ -88,6 +88,14 @@ The extension creates an MCP server that:
     - `overwrite` (optional): Whether to overwrite if the file exists (default: false)
     - `ignoreIfExists` (optional): Whether to ignore if the file exists (default: false)
 
+- **replace_lines_code**: Replaces specific lines in a file
+  - Parameters:
+    - `path`: The path to the file to modify
+    - `startLine`: The start line number (0-based, inclusive)
+    - `endLine`: The end line number (0-based, inclusive)
+    - `content`: The new content to replace the lines with
+    - `originalCode`: The original code for validation
+
 ### Diagnostics Tools
 - **get_diagnostics_code**: Checks for warnings and errors in your workspace
   - Parameters:
