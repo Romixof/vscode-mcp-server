@@ -196,10 +196,12 @@ export function registerEditTools(server: McpServer): void {
             3. Atomic operations - Changes are applied as a single edit operation
         
         Best practices:
-            - Verify line numbers match your intended target using read_file if you are unsure
+            - Verify line numbers match your intended target using read_file if you are unsure.
+            - If this tool fails, use a targeted call to read_file_code to check the specific lines you want to modify.
             - Use for targeted changes when modifying specific sections of large files
             - Consider using create_file_code instead for complete or near-complete file rewrites
-            - This tool should be preferred for small to medium changes to existing files.`,
+            - This tool should be preferred for small to medium changes to existing files.
+            `,
         {
             path: z.string().describe('The path to the file to modify'),
             startLine: z.number().describe('The start line number (0-based, inclusive)'),
