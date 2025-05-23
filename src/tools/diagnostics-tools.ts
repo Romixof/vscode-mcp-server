@@ -164,7 +164,6 @@ export function registerDiagnosticsTools(server: McpServer): void {
     server.tool(
         'get_diagnostics_code',
         `Analyzes code for warnings and errors in the VS Code workspace.
-        Note that unlike all other tools, the line numbers in the output are 1-based.
 
         Features:
         - Supports single file or workspace-wide analysis
@@ -175,7 +174,7 @@ export function registerDiagnosticsTools(server: McpServer): void {
         IMPORTANT: Ensure that you run this tool to check for issues
         before considering any task complete!`,
         {
-            path: z.string().optional().default('').describe('Optional file path to check. If not provided, checks the entire workspace'),
+            path: z.string().optional().default('').describe('Optional file path to check. If not provided, checks the entire workspace. The file path must be a file, not a directory.'),
             severities: z.array(z.number()).optional().default([0, 1]).describe('Array of severity levels to include (0=Error, 1=Warning, 2=Information, 3=Hint)'),
             format: z.enum(['text', 'json']).optional().default('text').describe('Output format'),
             includeSource: z.boolean().optional().default(true).describe('Whether to include the diagnostic source to identify which linter/extension flagged each issue')

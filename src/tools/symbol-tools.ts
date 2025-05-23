@@ -259,14 +259,14 @@ export async function searchWorkspaceSymbols(query: string, maxResults: number =
                 const formatted = {
                     name: symbol.name,
                     kind: symbolKindToString(symbol.kind),
-                    location: `${uriToWorkspacePath(symbol.location.uri)}:${symbol.location.range.start.line}:${symbol.location.range.start.character}`,
+                    location: `${uriToWorkspacePath(symbol.location.uri)}:${symbol.location.range.start.line + 1}:${symbol.location.range.start.character}`,
                     range: {
                         start: {
-                            line: symbol.location.range.start.line,
+                            line: symbol.location.range.start.line + 1,
                             character: symbol.location.range.start.character
                         },
                         end: {
-                            line: symbol.location.range.end.line,
+                            line: symbol.location.range.end.line + 1,
                             character: symbol.location.range.end.character
                         }
                     }
@@ -378,12 +378,14 @@ export function registerSymbolTools(server: McpServer): void {
         - Quick reference for APIs or library functions`,
         {
             path: z.string().describe('The path to the file containing the symbol'),
-            line: z.number().describe('The line number of the symbol (0-based)'),
+            line: z.number().describe('The line number of the symbol (1-based)'),
             symbol: z.string().describe('The symbol name to look for on the specified line')
         },
         async ({ path, line, symbol }): Promise<CallToolResult> => {
             logger.info(`[get_symbol_definition_code] Tool called with path="${path}", line=${line}, symbol="${symbol}"`);
             
+            // Convert 1-based input to 0-based for VS Code API
+            const zeroBasedLine = line - 1;
             try {
                 if (!vscode.workspace.workspaceFolders) {
                     throw new Error('No workspace folder open');
@@ -401,7 +403,7 @@ export function registerSymbolTools(server: McpServer): void {
                 }
                 
                 // Get the content of the specified line
-                const lineText = await getLineText(uri, line);
+                const lineText = await getLineText(uri, zeroBasedLine);
                 if (!lineText) {
                     throw new Error(`Line ${line} not found in file: ${path}`);
                 }
@@ -420,7 +422,7 @@ export function registerSymbolTools(server: McpServer): void {
                 }
                 
                 // Create a position object
-                const position = new vscode.Position(line, character);
+                const position = new vscode.Position(zeroBasedLine, character);
                 
                 // Get hover information
                 const hoverResult = await getSymbolHoverInfo(uri, position);

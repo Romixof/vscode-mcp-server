@@ -98,10 +98,10 @@ export async function replaceWorkspaceFileLines(
         
         // Validate line numbers
         if (startLine < 0 || startLine >= document.lineCount) {
-            throw new Error(`Start line ${startLine} is out of range (0-${document.lineCount-1})`);
+            throw new Error(`Start line ${startLine + 1} is out of range (1-${document.lineCount})`);
         }
         if (endLine < startLine || endLine >= document.lineCount) {
-            throw new Error(`End line ${endLine} is out of range (${startLine}-${document.lineCount-1})`);
+            throw new Error(`End line ${endLine + 1} is out of range (${startLine + 1}-${document.lineCount})`);
         }
         
         // Get the current content of the lines
@@ -199,22 +199,27 @@ export function registerEditTools(server: McpServer): void {
             - Verify line numbers match your intended target using read_file if you are unsure.
             - If this tool fails, use a targeted call to read_file_code to check the specific lines you want to modify.
             - Use for targeted changes when modifying specific sections of large files
-            - Consider using create_file_code instead for complete or near-complete file rewrites
-            - This tool should be preferred for small to medium changes to existing files.
+            - When making an edit, replace the minimum number of lines necessary to achieve the desired change.
+            - Consider using create_file_code instead with overwrite for complete or file rewrites, or for large operations where the matching the original code is challenging.
+            - This tool should be preferred for small changes to existing files, or for inserts where very little original code needs to be matched.
             `,
         {
             path: z.string().describe('The path to the file to modify'),
-            startLine: z.number().describe('The start line number (0-based, inclusive)'),
-            endLine: z.number().describe('The end line number (0-based, inclusive)'),
+            startLine: z.number().describe('The start line number (1-based, inclusive)'),
+            endLine: z.number().describe('The end line number (1-based, inclusive)'),
             content: z.string().describe('The new content to replace the lines with'),
             originalCode: z.string().describe('The original code for validation - must match exactly')
         },
         async ({ path, startLine, endLine, content, originalCode }): Promise<CallToolResult> => {
             console.log(`[replace_lines_code] Tool called with path=${path}, startLine=${startLine}, endLine=${endLine}`);
             
+            // Convert 1-based input to 0-based for VS Code API
+            const zeroBasedStartLine = startLine - 1;
+            const zeroBasedEndLine = endLine - 1;
+            
             try {
                 console.log('[replace_lines_code] Replacing lines');
-                await replaceWorkspaceFileLines(path, startLine, endLine, content, originalCode);
+                await replaceWorkspaceFileLines(path, zeroBasedStartLine, zeroBasedEndLine, content, originalCode);
                 
                 const result: CallToolResult = {
                     content: [

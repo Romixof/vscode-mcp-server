@@ -35,12 +35,14 @@ async function waitForShellIntegration(terminal: vscode.Terminal, timeout = 1000
  * @param terminal The terminal with shell integration
  * @param command The command to execute
  * @param cwd Optional working directory for the command
- * @returns Promise that resolves with the command output and exit code
+ * @param timeout Command timeout in milliseconds (default: 10000)
+ * @returns Promise that resolves with the command output
  */
 export async function executeShellCommand(
     terminal: vscode.Terminal,
     command: string,
-    cwd?: string
+    cwd?: string,
+    timeout: number = 10000
 ): Promise<{ output: string }> {
     terminal.show();
     
@@ -55,23 +57,34 @@ export async function executeShellCommand(
         }
     }
     
-    // Execute the command using shell integration API
-    const execution = terminal.shellIntegration!.executeCommand(fullCommand);
+    // Create timeout promise
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`Command timed out after ${timeout}ms`)), timeout);
+    });
     
-    // Capture output using the stream
-    let output = '';
-    
-    try {
-        // Access the read stream (handling possible API differences)
-        const outputStream = (execution as any).read();
-        for await (const data of outputStream) {
-            output += data;
+    // Create execution promise
+    const executionPromise = async (): Promise<{ output: string }> => {
+        // Execute the command using shell integration API
+        const execution = terminal.shellIntegration!.executeCommand(fullCommand);
+        
+        // Capture output using the stream
+        let output = '';
+        
+        try {
+            // Access the read stream (handling possible API differences)
+            const outputStream = (execution as any).read();
+            for await (const data of outputStream) {
+                output += data;
+            }
+        } catch (error) {
+            throw new Error(`Failed to read command output: ${error}`);
         }
-    } catch (error) {
-        throw new Error(`Failed to read command output: ${error}`);
-    }
+        
+        return { output };
+    };
     
-    return { output };
+    // Race between execution and timeout
+    return Promise.race([executionPromise(), timeoutPromise]);
 }
 
 /**
@@ -83,12 +96,15 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
     // Add execute_shell_command tool
     server.tool(
         'execute_shell_command_code',
-        'Executes a shell command in the VS Code integrated terminal with shell integration. Returns both the command output and exit code. This is useful for running CLI commands, build operations, git commands, or any other shell operations. Note: This tool requires shell integration to be available in the terminal.',
+        `Executes a shell command in the VS Code integrated terminal with shell integration. Returns both the command output and exit code. This is useful for running CLI commands, build operations, git commands, or any other shell operations.
+        Note: This tool requires shell integration to be available in the terminal.
+        If you get unexpected results, remember to check the working directory.`,
         {
             command: z.string().describe('The shell command to execute'),
-            cwd: z.string().optional().default('.').describe('Optional working directory for the command')
+            cwd: z.string().optional().default('.').describe('Optional working directory for the command'),
+            timeout: z.number().optional().default(10000).describe('Command timeout in milliseconds (default: 10000)')
         },
-        async ({ command, cwd }): Promise<CallToolResult> => {
+        async ({ command, cwd, timeout = 10000 }): Promise<CallToolResult> => {
             try {
                 if (!terminal) {
                     throw new Error('Terminal not available');
@@ -102,7 +118,7 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
                     }
                 }
                 
-                const { output } = await executeShellCommand(terminal, command, cwd);
+                const { output } = await executeShellCommand(terminal, command, cwd, timeout);
                 
                 const result: CallToolResult = {
                     content: [

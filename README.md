@@ -91,8 +91,8 @@ The extension creates an MCP server that:
 - **replace_lines_code**: Replaces specific lines in a file
   - Parameters:
     - `path`: The path to the file to modify
-    - `startLine`: The start line number (0-based, inclusive)
-    - `endLine`: The end line number (0-based, inclusive)
+    - `startLine`: The start line number (1-based, inclusive)
+    - `endLine`: The end line number (1-based, inclusive)
     - `content`: The new content to replace the lines with
     - `originalCode`: The original code for validation
 
@@ -123,7 +123,7 @@ The extension creates an MCP server that:
 - **get_symbol_definition_code**: Gets definition information for a symbol in a file
   - Parameters:
     - `path`: The path to the file containing the symbol
-    - `line`: The line number of the symbol (0-based)
+    - `line`: The line number of the symbol
     - `symbol`: The symbol name to look for on the specified line
   
   This tool provides:

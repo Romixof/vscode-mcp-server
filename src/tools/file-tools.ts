@@ -118,17 +118,17 @@ export async function readWorkspaceFile(
                 
                 // Validate line numbers
                 if (effectiveStartLine >= lines.length) {
-                    throw new Error(`Start line ${effectiveStartLine} is out of range (0-${lines.length-1})`);
+                    throw new Error(`Start line ${effectiveStartLine + 1} is out of range (1-${lines.length})`);
                 }
                 
                 // Make sure endLine is not less than startLine
                 if (effectiveEndLine < effectiveStartLine) {
-                    throw new Error(`End line ${effectiveEndLine} is less than start line ${effectiveStartLine}`);
+                    throw new Error(`End line ${effectiveEndLine + 1} is less than start line ${effectiveStartLine + 1}`);
                 }
                 
                 // Extract the requested lines and join them back together
                 const partialContent = lines.slice(effectiveStartLine, effectiveEndLine + 1).join('\n');
-                console.log(`[readWorkspaceFile] Returning lines ${effectiveStartLine}-${effectiveEndLine}, length: ${partialContent.length} characters`);
+                console.log(`[readWorkspaceFile] Returning lines ${effectiveStartLine + 1}-${effectiveEndLine + 1}, length: ${partialContent.length} characters`);
                 return partialContent;
             }
             
@@ -238,15 +238,19 @@ export function registerFileTools(
             path: z.string().describe('The path to the file to read'),
             encoding: z.string().optional().default('utf-8').describe('Optional encoding to convert the file content to a string'),
             maxCharacters: z.number().optional().default(DEFAULT_MAX_CHARACTERS).describe('Maximum character count (default: 100,000)'),
-            startLine: z.number().optional().default(-1).describe('The start line number (0-based, inclusive). Default: read from beginning, denoted by -1'),
-            endLine: z.number().optional().default(-1).describe('The end line number (0-based, inclusive). Default: read to end, denoted by -1')
+            startLine: z.number().optional().default(-1).describe('The start line number (1-based, inclusive). Default: read from beginning, denoted by -1'),
+            endLine: z.number().optional().default(-1).describe('The end line number (1-based, inclusive). Default: read to end, denoted by -1')
         },
         async ({ path, encoding = 'utf-8', maxCharacters = DEFAULT_MAX_CHARACTERS, startLine = -1, endLine = -1 }): Promise<CallToolResult> => {
             console.log(`[read_file] Tool called with path=${path}, encoding=${encoding || 'none'}, maxCharacters=${maxCharacters}, startLine=${startLine}, endLine=${endLine}`);
             
+            // Convert 1-based input to 0-based for VS Code API
+            const zeroBasedStartLine = startLine > 0 ? startLine - 1 : startLine;
+            const zeroBasedEndLine = endLine > 0 ? endLine - 1 : endLine;
+            
             try {
                 console.log('[read_file] Reading file');
-                const content = await readWorkspaceFile(path, encoding, maxCharacters, startLine, endLine);
+                const content = await readWorkspaceFile(path, encoding, maxCharacters, zeroBasedStartLine, zeroBasedEndLine);
                 
                 let resultContent: string;
                 if (content instanceof Uint8Array) {
