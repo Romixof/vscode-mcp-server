@@ -155,7 +155,12 @@ export function registerEditTools(server: McpServer): void {
     // Add create_file tool
     server.tool(
         'create_file_code',
-        'Use this tool to create new files in the VS Code workspace. This should be the primary tool for creating new files or making large changes when working with the codebase. The tool provides two optional parameters to handle existing files: \'overwrite\' (replace existing files) and \'ignoreIfExists\' (skip creation if file exists). When implementing new features, prefer creating files in appropriate locations based on the project\'s structure and conventions. Always verify the path doesn\'t already exist with list_files first unless you specifically want to overwrite it.',
+        `Use this tool to create new files in the VS Code workspace. 
+        This should be the primary tool for creating new files or making large changes when working with the codebase. 
+        The tool provides two optional parameters to handle existing files: \'overwrite\' (replace existing files) and \'ignoreIfExists\' (skip creation if file exists). 
+        When implementing new features, prefer creating files in appropriate locations based on the project\'s structure and conventions. 
+        Always verify the path doesn\'t already exist with list_files first unless you specifically want to overwrite a file.
+        When multiple significant edits to a file are needed, this tool with overwrite set to true is preferred over using the replace_lines_code tool.`,
         {
             path: z.string().describe('The path to the file to create'),
             content: z.string().describe('The content to write to the file'),
