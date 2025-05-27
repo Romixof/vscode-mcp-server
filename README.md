@@ -136,6 +136,23 @@ The extension creates an MCP server that:
   - Checking function signatures, type definitions, or documentation
   - Quick reference for APIs or library functions
 
+- **get_document_symbols_code**: Gets an outline of all symbols in a file, showing the hierarchical structure
+  - Parameters:
+    - `path`: The path to the file to analyze (relative to workspace)
+    - `maxDepth` (optional): Maximum nesting depth to display
+  
+  This tool provides:
+  - Complete symbol tree for a document (similar to VS Code's Outline view)
+  - Hierarchical structure showing classes, functions, methods, variables, etc.
+  - Position information and symbol kinds for each symbol
+  - Summary statistics by symbol type
+  
+  It's particularly useful for:
+  - Understanding file structure and organization at a glance
+  - Getting an overview of all symbols in a document
+  - Analyzing code architecture and relationships
+  - Finding all symbols of specific types within a file
+
 ### Shell Tools
 - **execute_shell_command_code**: Executes a shell command in the VS Code integrated terminal with shell integration
   - Parameters:

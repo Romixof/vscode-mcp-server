@@ -290,6 +290,109 @@ export async function searchWorkspaceSymbols(query: string, maxResults: number =
 }
 
 /**
+ * Get all document symbols from a file in hierarchical format
+ * @param uri The URI of the document
+ * @param maxDepth Maximum nesting depth to display (optional)
+ * @returns Formatted symbol information with hierarchy
+ */
+export async function getDocumentSymbols(
+    uri: vscode.Uri, 
+    maxDepth?: number
+): Promise<{
+    symbols: Array<{
+        name: string;
+        detail?: string;
+        kind: string;
+        range: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+        };
+        selectionRange: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+        };
+        depth: number;
+        children?: any[];
+    }>;
+    total: number;
+    totalByKind: Record<string, number>;
+}> {
+    logger.info(`[getDocumentSymbols] Getting symbols for ${uri.toString()}, maxDepth: ${maxDepth}`);
+    
+    try {
+        // Execute the document symbol provider
+        const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+            'vscode.executeDocumentSymbolProvider',
+            uri
+        ) || [];
+        
+        logger.info(`[getDocumentSymbols] Found ${symbols.length} top-level symbols`);
+        
+        const flatSymbols: any[] = [];
+        const kindCounts: Record<string, number> = {};
+        
+        // Recursive function to process symbols and their children
+        function processSymbols(symbols: vscode.DocumentSymbol[], depth: number = 0) {
+            for (const symbol of symbols) {
+                // Skip if max depth exceeded
+                if (maxDepth !== undefined && depth > maxDepth) {
+                    continue;
+                }
+                
+                const kindString = symbolKindToString(symbol.kind);
+                kindCounts[kindString] = (kindCounts[kindString] || 0) + 1;
+                
+                const processedSymbol = {
+                    name: symbol.name,
+                    detail: symbol.detail || undefined,
+                    kind: kindString,
+                    range: {
+                        start: {
+                            line: symbol.range.start.line + 1,
+                            character: symbol.range.start.character
+                        },
+                        end: {
+                            line: symbol.range.end.line + 1,
+                            character: symbol.range.end.character
+                        }
+                    },
+                    selectionRange: {
+                        start: {
+                            line: symbol.selectionRange.start.line + 1,
+                            character: symbol.selectionRange.start.character
+                        },
+                        end: {
+                            line: symbol.selectionRange.end.line + 1,
+                            character: symbol.selectionRange.end.character
+                        }
+                    },
+                    depth,
+                    children: symbol.children && symbol.children.length > 0 ? symbol.children.length : undefined
+                };
+                
+                flatSymbols.push(processedSymbol);
+                
+                // Recursively process children
+                if (symbol.children && symbol.children.length > 0) {
+                    processSymbols(symbol.children, depth + 1);
+                }
+            }
+        }
+        
+        processSymbols(symbols);
+        
+        return {
+            symbols: flatSymbols,
+            total: flatSymbols.length,
+            totalByKind: kindCounts
+        };
+    } catch (error) {
+        logger.error(`[getDocumentSymbols] Error: ${error instanceof Error ? error.message : String(error)}`);
+        throw error;
+    }
+}
+
+/**
  * Registers MCP symbol-related tools with the server
  * @param server MCP server instance
  */
@@ -464,6 +567,98 @@ export function registerSymbolTools(server: McpServer): void {
                 return callResult;
             } catch (error) {
                 logger.error(`[get_symbol_definition_code] Error in tool: ${error instanceof Error ? error.message : String(error)}`);
+                throw error;
+            }
+        }
+    );
+
+    // Add get_document_symbols_code tool
+    server.tool(
+        'get_document_symbols_code',
+        `Get an outline of all symbols in a file, showing the hierarchical structure.
+        Use this tool to get a complete high-level overview of a document.
+
+        Key features:
+        - Returns the complete symbol tree for a document (similar to VS Code's Outline view)
+        - Shows hierarchical structure with classes, functions, methods, variables, etc.
+        - Includes position information and symbol kinds
+        - Supports depth filtering for large files
+        
+        Use cases:
+        - Understanding file structure and organization
+        - Getting an overview of all symbols in a document
+        - Analyzing code architecture and relationships
+        - Finding all symbols of specific types`,
+        {
+            path: z.string().describe('The path to the file to analyze (relative to workspace)'),
+            maxDepth: z.number().optional().describe('Maximum nesting depth to display (optional)')
+        },
+        async ({ path, maxDepth }): Promise<CallToolResult> => {
+            logger.info(`[get_document_symbols_code] Tool called with path="${path}", maxDepth=${maxDepth}`);
+            
+            try {
+                if (!vscode.workspace.workspaceFolders) {
+                    throw new Error('No workspace folder open');
+                }
+                
+                const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                const fullPath = require('path').resolve(workspaceRoot, path);
+                const uri = vscode.Uri.file(fullPath);
+                
+                // Check if file exists
+                try {
+                    await vscode.workspace.fs.stat(uri);
+                } catch (error) {
+                    throw new Error(`File not found: ${path}`);
+                }
+                
+                logger.info('[get_document_symbols_code] Getting document symbols');
+                const result = await getDocumentSymbols(uri, maxDepth);
+                
+                let resultText: string;
+                
+                if (result.symbols.length === 0) {
+                    resultText = `No symbols found in file: ${path}`;
+                } else {
+                    resultText = `Document symbols for ${path} (${result.total} total symbols):\n\n`;
+                    
+                    // Add summary by kind
+                    const kindSummary = Object.entries(result.totalByKind)
+                        .map(([kind, count]) => `${count} ${kind}${count !== 1 ? 's' : ''}`)
+                        .join(', ');
+                    resultText += `Summary: ${kindSummary}\n\n`;
+                    
+                    // Add hierarchical symbol listing
+                    for (const symbol of result.symbols) {
+                        const indent = '  '.repeat(symbol.depth);
+                        resultText += `${indent}${symbol.name} (${symbol.kind})`;
+                        
+                        if (symbol.detail) {
+                            resultText += ` - ${symbol.detail}`;
+                        }
+                        
+                        resultText += `\n${indent}  Range: ${symbol.range.start.line}:${symbol.range.start.character}-${symbol.range.end.line}:${symbol.range.end.character}`;
+                        
+                        if (symbol.children !== undefined) {
+                            resultText += ` | Children: ${symbol.children}`;
+                        }
+                        
+                        resultText += '\n\n';
+                    }
+                }
+                
+                const callResult: CallToolResult = {
+                    content: [
+                        {
+                            type: 'text',
+                            text: resultText
+                        }
+                    ]
+                };
+                logger.info('[get_document_symbols_code] Successfully completed');
+                return callResult;
+            } catch (error) {
+                logger.error(`[get_document_symbols_code] Error in tool: ${error instanceof Error ? error.message : String(error)}`);
                 throw error;
             }
         }
