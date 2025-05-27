@@ -577,6 +577,7 @@ export function registerSymbolTools(server: McpServer): void {
         'get_document_symbols_code',
         `Get an outline of all symbols in a file, showing the hierarchical structure.
         Use this tool to get a complete high-level overview of a document.
+        As line numbers are returned, this tool is useful for understanding the starting and ending positions of symbols in the file.
 
         Key features:
         - Returns the complete symbol tree for a document (similar to VS Code's Outline view)
