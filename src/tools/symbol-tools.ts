@@ -400,21 +400,12 @@ export function registerSymbolTools(server: McpServer): void {
     // Add search_symbols_code tool
     server.tool(
         'search_symbols_code',
-        `Search for symbols across the VS Code workspace.
+        `Searches for symbols (functions, classes, variables) across workspace using fuzzy matching.
 
-        Key features:
-        - Finds symbols (functions, classes, variables, etc.) based on name matching
-        - Returns location information for each symbol
-        - Includes symbol kind and container information
+        WHEN TO USE: Finding function/class definitions, exploring project structure, locating specific elements.
         
-        Use cases:
-        - Finding definitions of symbols across the codebase
-        - Exploring project structure and organization
-        - Locating specific elements by name
-        
-        Notes:
-        You may use partial search terms as the workspace symbol provider is designed for fuzzy matching.
-        For example, searching for 'createW' might match 'createWorkspaceFile'.`,
+        Search: Supports partial terms (e.g., 'createW' matches 'createWorkspaceFile'). Returns location and container info.
+        Limit results to avoid overwhelming output - increase maxResults only if needed.`,
         {
             query: z.string().describe('The search query for symbol names'),
             maxResults: z.number().optional().default(10).describe('Maximum number of results to return (default: 10)')
@@ -468,17 +459,12 @@ export function registerSymbolTools(server: McpServer): void {
     // Add get_symbol_definition_code tool with updated parameters
     server.tool(
         'get_symbol_definition_code',
-        `Get definition information for a symbol in a file using hover data.
+        `Gets definition information for a symbol using hover data (type, docs, source).
 
-        Key features:
-        - Provides definition information for a symbol by name and line
-        - Returns hover information which typically includes type, documentation, and source
-        - Works with any language supported by VS Code
-
-        Use cases:
-        - Understanding what a symbol represents without navigating away
-        - Checking function signatures, type definitions, or documentation
-        - Quick reference for APIs or library functions`,
+        WHEN TO USE: Understanding what a symbol represents, checking function signatures, quick API reference.
+        USE search_symbols_code instead for: finding symbols by name across the project.
+        
+        Requires exact symbol name and line number. If symbol not found on line, returns clear message.`,
         {
             path: z.string().describe('The path to the file containing the symbol'),
             line: z.number().describe('The line number of the symbol (1-based)'),
@@ -575,21 +561,12 @@ export function registerSymbolTools(server: McpServer): void {
     // Add get_document_symbols_code tool
     server.tool(
         'get_document_symbols_code',
-        `Get an outline of all symbols in a file, showing the hierarchical structure.
-        Use this tool to get a complete high-level overview of a document.
-        As line numbers are returned, this tool is useful for understanding the starting and ending positions of symbols in the file.
+        `Gets complete symbol outline for a file showing hierarchical structure and line numbers.
 
-        Key features:
-        - Returns the complete symbol tree for a document (similar to VS Code's Outline view)
-        - Shows hierarchical structure with classes, functions, methods, variables, etc.
-        - Includes position information and symbol kinds
-        - Supports depth filtering for large files
+        WHEN TO USE: Understanding file structure, getting overview of all symbols, finding symbol positions. This tool should be be preferred over reading the file using read_file_code when only an overview of the file is needed.
+        USE search_symbols_code instead for: finding specific symbols by name across the project.
         
-        Use cases:
-        - Understanding file structure and organization
-        - Getting an overview of all symbols in a document
-        - Analyzing code architecture and relationships
-        - Finding all symbols of specific types`,
+        Shows classes, functions, methods, variables with line ranges. Use maxDepth for large files to avoid deep nesting.`,
         {
             path: z.string().describe('The path to the file to analyze (relative to workspace)'),
             maxDepth: z.number().optional().describe('Maximum nesting depth to display (optional)')

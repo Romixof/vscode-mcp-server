@@ -163,16 +163,13 @@ export function registerDiagnosticsTools(server: McpServer): void {
     // Add get_diagnostics tool
     server.tool(
         'get_diagnostics_code',
-        `Analyzes code for warnings and errors in the VS Code workspace.
+        `CRITICAL: Run this after EVERY series of code changes to check for errors before completing tasks.
 
-        Features:
-        - Supports single file or workspace-wide analysis
-        - Returns detailed diagnostics with error messages and locations
-        - Provides severity levels (errors, warnings, info, hints)
-        - Uses linters integrated with VS Code
+        Analyzes code for warnings and errors using VS Code's integrated linters.
 
-        IMPORTANT: Ensure that you run this tool to check for issues
-        before considering any task complete!`,
+        WHEN TO USE: After edits, before task completion, debugging build issues.
+        Scope: Single file (faster) or entire workspace (comprehensive).
+        Severities: 0=Error, 1=Warning, 2=Info, 3=Hint. Defaults to errors and warnings only.`,
         {
             path: z.string().optional().default('').describe('Optional file path to check. If not provided, checks the entire workspace. The file path must be a file, not a directory.'),
             severities: z.array(z.number()).optional().default([0, 1]).describe('Array of severity levels to include (0=Error, 1=Warning, 2=Information, 3=Hint)'),

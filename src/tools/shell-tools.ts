@@ -96,9 +96,13 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
     // Add execute_shell_command tool
     server.tool(
         'execute_shell_command_code',
-        `Executes a shell command in the VS Code integrated terminal with shell integration. Returns both the command output and exit code. This is useful for running CLI commands, build operations, git commands, or any other shell operations.
-        Note: This tool requires shell integration to be available in the terminal.
-        If you get unexpected results, remember to check the working directory.`,
+        `Executes shell commands in VS Code integrated terminal.
+
+        WHEN TO USE: Running CLI commands, builds, git operations, npm/pip installs.
+        
+        Working directory: Use cwd to run commands in specific directories. Defaults to workspace root. If you get unexpected results, ensure the cwd is correct.
+
+        Timeout: Commands must complete within specified time (default 10s) or the tool will return a timeout error, but the command may still be running in the terminal.`,
         {
             command: z.string().describe('The shell command to execute'),
             cwd: z.string().optional().default('.').describe('Optional working directory for the command'),

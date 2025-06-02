@@ -155,12 +155,13 @@ export function registerEditTools(server: McpServer): void {
     // Add create_file tool
     server.tool(
         'create_file_code',
-        `Use this tool to create new files in the VS Code workspace. 
-        This should be the primary tool for creating new files or making large changes when working with the codebase. 
-        The tool provides two optional parameters to handle existing files: \'overwrite\' (replace existing files) and \'ignoreIfExists\' (skip creation if file exists). 
-        When implementing new features, prefer creating files in appropriate locations based on the project\'s structure and conventions. 
-        Always verify the path doesn\'t already exist with list_files first unless you specifically want to overwrite a file.
-        When multiple significant edits to a file are needed, this tool with overwrite set to true is preferred over using the replace_lines_code tool.`,
+        `Creates new files or completely rewrites existing files.
+
+        WHEN TO USE: New files, large modifications (>10 lines), complete file rewrites.
+        USE replace_lines_code instead for: small edits ≤10 lines where you have exact original content.
+
+        File handling: Use overwrite=true to replace existing files, ignoreIfExists=true to skip if file exists.
+        Always check with list_files_code first unless you specifically want to overwrite.`,
         {
             path: z.string().describe('The path to the file to create'),
             content: z.string().describe('The content to write to the file'),
@@ -194,20 +195,15 @@ export function registerEditTools(server: McpServer): void {
     // Add replace_lines_code tool
     server.tool(
         'replace_lines_code',
-        `Use this tool to selectively replace specific lines of code in a file. The tool implements several safety features:
-        
-            1. Line number validation - Ensures start and end lines are within valid range
-            2. Content verification - Requires original code to match exactly before making changes
-            3. Atomic operations - Changes are applied as a single edit operation
-        
-        Best practices:
-            - Verify line numbers match your intended target using read_file if you are unsure.
-            - If this tool fails, use a targeted call to read_file_code to check the specific lines you want to modify.
-            - Use for targeted changes when modifying specific sections of large files
-            - When making an edit, replace the minimum number of lines necessary to achieve the desired change.
-            - Consider using create_file_code instead with overwrite for complete or file rewrites, or for large operations where the matching the original code is challenging.
-            - This tool should be preferred for small changes to existing files, or for inserts where very little original code needs to be matched.
-            `,
+        `Replaces specific lines in existing files with exact content validation.
+
+        WHEN TO USE: Modifications ≤10 lines where you have exact original text, or inserts of any size.
+        USE create_file_code instead for: new files, large modifications (>10 lines, hard to match exact content), or when original text is uncertain.
+
+        CRITICAL: originalCode parameter must match current file content exactly or tool fails.
+        If tool fails: run read_file_code on target lines to get current content, then retry.
+
+        Parameters use 1-based line numbers. Always verify line numbers with read_file_code if unsure.`,
         {
             path: z.string().describe('The path to the file to modify'),
             startLine: z.number().describe('The start line number (1-based, inclusive)'),
