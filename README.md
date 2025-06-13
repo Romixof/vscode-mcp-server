@@ -68,6 +68,16 @@ IMPORTANT: Only run code modification tools after presenting a plan and receivin
 Do not add tests unless specifically requested. If you believe testing is important, explain why and let the user decide.
 ```
 
+For context efficiency when exploring codebases, consider adding this to your CLAUDE.md:
+```
+## VS Code Symbol Tools for Context Efficiency
+Use VS Code symbol tools to reduce context consumption:
+- `get_document_symbols_code` for file structure overview instead of reading entire files
+- `search_symbols_code` to find symbols by name across the project
+- `get_symbol_definition_code` for type info and docs without full file context
+- Workflow: get outline → search symbols → get definitions → read implementation only when needed
+```
+
 
 
 This extension serves as a Model Context Protocol (MCP) server, exposing VS Code's filesystem and editing capabilities to MCP clients.
