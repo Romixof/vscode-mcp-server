@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { MCPServer } from './server';
+import { MCPServer, ToolConfiguration } from './server';
 import { listWorkspaceFiles } from './tools/file-tools';
 import { logger } from './utils/logger';
 
@@ -14,6 +14,23 @@ let serverEnabled: boolean = false;
 
 // Terminal name constant
 const TERMINAL_NAME = 'MCP Shell Commands';
+
+/**
+ * Gets the tool configuration from VS Code settings
+ * @returns ToolConfiguration object with all tool enablement settings
+ */
+function getToolConfiguration(): ToolConfiguration {
+    const config = vscode.workspace.getConfiguration('vscode-mcp-server');
+    const enabledTools = config.get<any>('enabledTools') || {};
+    
+    return {
+        file: enabledTools.file ?? true,
+        edit: enabledTools.edit ?? true,
+        shell: enabledTools.shell ?? true,
+        diagnostics: enabledTools.diagnostics ?? true,
+        symbol: enabledTools.symbol ?? true
+    };
+}
 
 /**
  * Gets or creates the shared terminal for the extension
@@ -77,7 +94,8 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
         if (!mcpServer) {
             logger.info(`[toggleServerState] Creating MCP server instance`);
             const terminal = getExtensionTerminal(context);
-            mcpServer = new MCPServer(port, terminal);
+            const toolConfig = getToolConfiguration();
+            mcpServer = new MCPServer(port, terminal, toolConfig);
             mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
                 try {
                     return await listWorkspaceFiles(path, recursive);
@@ -156,8 +174,9 @@ export async function activate(context: vscode.ExtensionContext) {
             // Create the shared terminal
             const terminal = getExtensionTerminal(context);
 
-            // Initialize MCP server with the configured port and terminal
-            mcpServer = new MCPServer(port, terminal);
+            // Initialize MCP server with the configured port, terminal, and tool configuration
+            const toolConfig = getToolConfiguration();
+            mcpServer = new MCPServer(port, terminal, toolConfig);
 
             // Set up file listing callback
             mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
@@ -198,11 +217,44 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         );
 
+        // Listen for configuration changes to restart server if needed
+        const configChangeListener = vscode.workspace.onDidChangeConfiguration(async (event) => {
+            if (event.affectsConfiguration('vscode-mcp-server.enabledTools')) {
+                logger.info('[configChangeListener] Tool configuration changed - restarting server if enabled');
+                if (serverEnabled && mcpServer) {
+                    // Stop current server
+                    await mcpServer.stop();
+                    mcpServer = undefined;
+                    
+                    // Start new server with updated configuration
+                    const config = vscode.workspace.getConfiguration('vscode-mcp-server');
+                    const port = config.get<number>('port') || 3000;
+                    const terminal = getExtensionTerminal(context);
+                    const toolConfig = getToolConfiguration();
+                    
+                    mcpServer = new MCPServer(port, terminal, toolConfig);
+                    mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
+                        try {
+                            return await listWorkspaceFiles(path, recursive);
+                        } catch (error) {
+                            logger.error(`[configChangeListener] Error listing files: ${error instanceof Error ? error.message : String(error)}`);
+                            throw error;
+                        }
+                    });
+                    mcpServer.setupTools();
+                    await mcpServer.start();
+                    
+                    vscode.window.showInformationMessage('MCP Server restarted with updated tool configuration');
+                }
+            }
+        });
+
         // Add all disposables to the context subscriptions
         context.subscriptions.push(
             statusBarItem,
             toggleServerCommand,
             showServerInfoCommand,
+            configChangeListener,
             { dispose: async () => mcpServer && await mcpServer.stop() }
         );
     } catch (error) {
@@ -223,7 +275,9 @@ export async function deactivate() {
         sharedTerminal = undefined;
     }
 
-    if (!mcpServer) return;
+    if (!mcpServer) {
+        return;
+    }
     
     try {
         logger.info('Stopping MCP Server during extension deactivation');

@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "vscode-mcp-server",
   "description": "VS Code as a MCP server",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "repository": "https://github.com/juehang/vscode-mcp-server",
   "publisher": "JuehangQin",
   "license": "MIT",
@@ -32,6 +32,39 @@
           "type": "boolean",
           "default": false,
           "description": "Whether the MCP server should be enabled by default on VS Code startup"
+        },
+        "vscode-mcp-server.enabledTools": {
+          "type": "object",
+          "default": {
+            "file": true,
+            "edit": true,
+            "shell": true,
+            "diagnostics": true,
+            "symbol": true
+          },
+          "properties": {
+            "file": {
+              "type": "boolean",
+              "description": "Enable file operations tools (read, write, list files)"
+            },
+            "edit": {
+              "type": "boolean", 
+              "description": "Enable file editing tools (create, edit, delete files)"
+            },
+            "shell": {
+              "type": "boolean",
+              "description": "Enable shell command execution tools"
+            },
+            "diagnostics": {
+              "type": "boolean",
+              "description": "Enable VS Code diagnostics tools"
+            },
+            "symbol": {
+              "type": "boolean",
+              "description": "Enable code symbol and structure analysis tools"
+            }
+          },
+          "description": "Configure which MCP tools are enabled"
         }
       }
     },

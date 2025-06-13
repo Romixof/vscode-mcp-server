@@ -11,6 +11,14 @@ import { registerDiagnosticsTools } from './tools/diagnostics-tools';
 import { registerSymbolTools } from './tools/symbol-tools';
 import { logger } from './utils/logger';
 
+export interface ToolConfiguration {
+    file: boolean;
+    edit: boolean;
+    shell: boolean;
+    diagnostics: boolean;
+    symbol: boolean;
+}
+
 export class MCPServer {
     private server: McpServer;
     private transport: StreamableHTTPServerTransport;
@@ -19,14 +27,22 @@ export class MCPServer {
     private port: number;
     private fileListingCallback?: FileListingCallback;
     private terminal?: vscode.Terminal;
+    private toolConfig: ToolConfiguration;
 
     public setFileListingCallback(callback: FileListingCallback) {
         this.fileListingCallback = callback;
     }
 
-    constructor(port: number = 3000, terminal?: vscode.Terminal) {
+    constructor(port: number = 3000, terminal?: vscode.Terminal, toolConfig?: ToolConfiguration) {
         this.port = port;
         this.terminal = terminal;
+        this.toolConfig = toolConfig || {
+            file: true,
+            edit: true,
+            shell: true,
+            diagnostics: true,
+            symbol: true
+        };
         this.app = express();
         this.app.use(express.json());
 
@@ -54,27 +70,49 @@ export class MCPServer {
     }
     
     public setupTools(): void {
-        // Register tools from the tools module
+        // Register tools from the tools module based on configuration
         if (this.fileListingCallback) {
-            // Register file tools
-            registerFileTools(this.server, this.fileListingCallback);
-            logger.info('MCP file tools registered successfully');
+            logger.info(`Setting up MCP tools with configuration: ${JSON.stringify(this.toolConfig)}`);
             
-            // Register edit tools
-            registerEditTools(this.server);
-            logger.info('MCP edit tools registered successfully');
+            // Register file tools if enabled
+            if (this.toolConfig.file) {
+                registerFileTools(this.server, this.fileListingCallback);
+                logger.info('MCP file tools registered successfully');
+            } else {
+                logger.info('MCP file tools disabled by configuration');
+            }
             
-            // Register shell tools
-            registerShellTools(this.server, this.terminal);
-            logger.info('MCP shell tools registered successfully');
+            // Register edit tools if enabled
+            if (this.toolConfig.edit) {
+                registerEditTools(this.server);
+                logger.info('MCP edit tools registered successfully');
+            } else {
+                logger.info('MCP edit tools disabled by configuration');
+            }
             
-            // Register diagnostics tools
-            registerDiagnosticsTools(this.server);
-            logger.info('MCP diagnostics tools registered successfully');
+            // Register shell tools if enabled
+            if (this.toolConfig.shell) {
+                registerShellTools(this.server, this.terminal);
+                logger.info('MCP shell tools registered successfully');
+            } else {
+                logger.info('MCP shell tools disabled by configuration');
+            }
             
-            // Register symbol tools
-            registerSymbolTools(this.server);
-            logger.info('MCP symbol tools registered successfully');
+            // Register diagnostics tools if enabled
+            if (this.toolConfig.diagnostics) {
+                registerDiagnosticsTools(this.server);
+                logger.info('MCP diagnostics tools registered successfully');
+            } else {
+                logger.info('MCP diagnostics tools disabled by configuration');
+            }
+            
+            // Register symbol tools if enabled
+            if (this.toolConfig.symbol) {
+                registerSymbolTools(this.server);
+                logger.info('MCP symbol tools registered successfully');
+            } else {
+                logger.info('MCP symbol tools disabled by configuration');
+            }
         } else {
             logger.warn('File listing callback not set during tools setup');
         }
