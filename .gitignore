@@ -5,3 +5,4 @@ node_modules
 *.vsix
 .serena
 plans
+CLAUDE.md
