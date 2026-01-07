@@ -289,7 +289,7 @@ export function registerFileTools(
                 const success = await vscode.workspace.applyEdit(edit);
 
                 if (!success) {
-                    throw new Error('Failed to apply file move operation');
+                    throw new Error('Failed to apply file move operation; check if target and source are valid');
                 }
 
                 console.log('[move_file] File move completed successfully');
@@ -350,7 +350,7 @@ export function registerFileTools(
                 const success = await vscode.workspace.applyEdit(edit);
 
                 if (!success) {
-                    throw new Error('Failed to apply file rename operation');
+                    throw new Error('Failed to apply file rename operation; check if target and source are valid');
                 }
 
                 console.log('[rename_file] File rename completed successfully');
