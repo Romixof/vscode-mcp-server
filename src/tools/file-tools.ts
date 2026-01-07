@@ -401,23 +401,23 @@ export function registerFileTools(
                 console.log(`[copy_file] Copying from ${sourceUri.fsPath} to ${targetUri.fsPath}`);
 
                 // Check if target already exists
+                let targetExists = false;
                 try {
                     await vscode.workspace.fs.stat(targetUri);
-                    // Target exists
-                    if (!overwrite) {
-                        throw new Error(`Target file ${targetPath} already exists. Use overwrite=true to overwrite.`);
-                    }
+                    targetExists = true;
                 } catch (error) {
                     // Only ignore FileNotFound errors - rethrow others (permissions, network, etc.)
                     if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
                         // Target doesn't exist, which is fine - continue with copy
-                    } else if (error instanceof Error && error.message.includes('already exists')) {
-                        // This is our own error from above, rethrow it
-                        throw error;
+                        targetExists = false;
                     } else {
                         // Rethrow unexpected errors (permissions, network issues, etc.)
                         throw error;
                     }
+                }
+
+                if (targetExists && !overwrite) {
+                    throw new Error(`Target file ${targetPath} already exists. Use overwrite=true to overwrite.`);
                 }
 
                 // Read the source file
