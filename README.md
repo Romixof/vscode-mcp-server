@@ -90,7 +90,7 @@ The VS Code MCP Server extension implements an MCP-compliant server that allows 
 - **Read file contents** with encoding support and size limits
 - **Move files and directories** with proper refactoring support for imports
 - **Rename files and directories** with automatic reference updates
-- **Copy files and directories** to new locations
+- **Copy files** to new locations (files only, not directories)
 - **Search for symbols** across your workspace
 - **Get symbol definitions** and hover information by line and symbol name
 - **Create new files** using VS Code's WorkspaceEdit API
