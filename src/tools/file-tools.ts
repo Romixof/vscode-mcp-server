@@ -378,7 +378,7 @@ export function registerFileTools(
 
         WHEN TO USE: Creating backups, duplicating files for testing, creating template files.
         
-        LIMITATION: Only works for files, not directories. Use move_file_code or rename_file_code for directory operations.`,
+        LIMITATION: Only works for files, not directories.`,
         {
             sourcePath: z.string().describe('The path of the file to copy'),
             targetPath: z.string().describe('The path where the copy should be created'),
