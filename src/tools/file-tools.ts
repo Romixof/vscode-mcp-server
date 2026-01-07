@@ -374,13 +374,13 @@ export function registerFileTools(
     // Add copy_file tool
     server.tool(
         'copy_file_code',
-        `Copies a file or directory to a new location using VS Code's WorkspaceEdit API.
+        `Copies a file to a new location.
 
         WHEN TO USE: Creating backups, duplicating files for testing, creating template files.
-
-        This operation creates a copy of the file without affecting the original.`,
+        
+        LIMITATION: Only works for files, not directories. Use move_file_code or rename_file_code for directory operations.`,
         {
-            sourcePath: z.string().describe('The path of the file or directory to copy'),
+            sourcePath: z.string().describe('The path of the file to copy'),
             targetPath: z.string().describe('The path where the copy should be created'),
             overwrite: z.boolean().optional().default(false).describe('Whether to overwrite if target already exists')
         },
@@ -408,7 +408,16 @@ export function registerFileTools(
                         throw new Error(`Target file ${targetPath} already exists. Use overwrite=true to overwrite.`);
                     }
                 } catch (error) {
-                    // Target doesn't exist, which is fine
+                    // Only ignore FileNotFound errors - rethrow others (permissions, network, etc.)
+                    if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
+                        // Target doesn't exist, which is fine - continue with copy
+                    } else if (error instanceof Error && error.message.includes('already exists')) {
+                        // This is our own error from above, rethrow it
+                        throw error;
+                    } else {
+                        // Rethrow unexpected errors (permissions, network issues, etc.)
+                        throw error;
+                    }
                 }
 
                 // Read the source file
