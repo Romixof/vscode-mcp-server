@@ -136,7 +136,7 @@ The extension creates an MCP server that:
     - `newName`: The new name for the file or directory
     - `overwrite` (optional): Whether to overwrite if a file with the new name already exists (default: false)
 
-- **copy_file_code**: Copies a file to a new location (files only, not directories)
+- **copy_file_code**: Copies a file to a new location using VS Code's file system API
   - Parameters:
     - `sourcePath`: The path of the file to copy
     - `targetPath`: The path where the copy should be created
