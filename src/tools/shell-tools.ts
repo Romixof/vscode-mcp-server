@@ -72,7 +72,7 @@ export function buildFullCommand(terminal: vscode.Terminal, command: string, cwd
  * @param timeout Maximum time to wait in milliseconds
  * @returns Promise that resolves to true if shell integration became available
  */
-export async function waitForShellIntegration(terminal: vscode.Terminal, timeout = 1000): Promise<boolean> {
+export async function waitForShellIntegration(terminal: vscode.Terminal, timeout = 5000): Promise<boolean> {
     if (terminal.shellIntegration) {
         return true;
     }
@@ -106,17 +106,26 @@ function queueOnTerminal<T>(terminal: vscode.Terminal, task: () => Promise<T>): 
 
 async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, timeout: number): Promise<{ output: string; exitCode: number }> {
     return new Promise((resolve, reject) => {
+        let timedOut = false;
         const timer = setTimeout(() => {
-            reject(new Error(`Command timed out after ${timeout}ms — it may still be running in the terminal`));
+            timedOut = true;
+            reject(new Error(`Command timed out after ${timeout}ms — it may still be running in the terminal; kill it there or pass a larger timeout`));
         }, timeout);
 
         void (async () => {
+            let outputStream: AsyncIterable<unknown> | undefined;
             try {
                 const execution = terminal.shellIntegration!.executeCommand(fullCommand);
                 let output = '';
-                const outputStream = (execution as any).read();
-                for await (const data of outputStream) {
+                outputStream = (execution as any).read();
+                for await (const data of outputStream!) {
+                    if (timedOut) {
+                        break;
+                    }
                     output += data;
+                }
+                if (timedOut) {
+                    return; // timer already rejected the caller
                 }
 
                 clearTimeout(timer);
@@ -142,7 +151,16 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
                 resolve({ output: cleaned, exitCode });
             } catch (error) {
                 clearTimeout(timer);
-                reject(new Error(`Failed to read command output: ${error instanceof Error ? error.message : String(error)}`));
+                if (!timedOut) {
+                    reject(new Error(`Failed to read command output: ${error instanceof Error ? error.message : String(error)}`));
+                }
+            } finally {
+                // best-effort: end a stream still open after a timeout so the
+                // reader loop doesn't keep accumulating output forever
+                try {
+                    await (outputStream as any)?.return?.();
+                } catch {
+                }
             }
         })();
     });

@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
   "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -53,7 +53,9 @@
             "database": true,
             "productivity": true,
             "security": true,
-            "performance": true
+            "performance": true,
+            "refactoring": true,
+            "frontend": true
           },
           "properties": {
             "file": {
@@ -107,6 +109,14 @@
             "performance": {
               "type": "boolean",
               "description": "Enable performance tools (bundle analysis, server report, command profiling)"
+            },
+            "refactoring": {
+              "type": "boolean",
+              "description": "Enable refactoring tools (rename symbol, extract function, duplicate finder, suggestions)"
+            },
+            "frontend": {
+              "type": "boolean",
+              "description": "Enable frontend tools (accessibility audit, CSS analysis, element inspection, unused CSS)"
             }
           },
           "description": "Configure which MCP tools are enabled"
