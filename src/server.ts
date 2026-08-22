@@ -9,6 +9,11 @@ import { registerEditTools } from './tools/edit-tools';
 import { registerShellTools } from './tools/shell-tools';
 import { registerDiagnosticsTools } from './tools/diagnostics-tools';
 import { registerSymbolTools } from './tools/symbol-tools';
+import { registerMemoryTools } from './tools/memory-tools';
+import { registerTestTools } from './tools/test-tools';
+import { registerGitTools } from './tools/git-tools';
+import { registerDocumentationTools } from './tools/documentation-tools';
+import { registerDatabaseTools } from './tools/database-tools';
 import { logger } from './utils/logger';
 
 export interface ToolConfiguration {
@@ -17,6 +22,11 @@ export interface ToolConfiguration {
     shell: boolean;
     diagnostics: boolean;
     symbol: boolean;
+    memory: boolean;
+    test: boolean;
+    git: boolean;
+    documentation: boolean;
+    database: boolean;
 }
 
 export class MCPServer {
@@ -29,6 +39,7 @@ export class MCPServer {
     private fileListingCallback?: FileListingCallback;
     private terminal?: vscode.Terminal;
     private toolConfig: ToolConfiguration;
+    private mcpQueue: Promise<unknown> = Promise.resolve();
 
     public setFileListingCallback(callback: FileListingCallback) {
         this.fileListingCallback = callback;
@@ -43,7 +54,12 @@ export class MCPServer {
             edit: true,
             shell: true,
             diagnostics: true,
-            symbol: true
+            symbol: true,
+            memory: true,
+            test: true,
+            git: true,
+            documentation: true,
+            database: true
         };
         this.app = express();
         this.app.use(express.json());
@@ -51,7 +67,7 @@ export class MCPServer {
         // Initialize MCP Server
         this.server = new McpServer({
             name: "vscode-mcp-server",
-            version: "1.0.0",
+            version: "0.7.0",
         }, {
             capabilities: {
                 logging: {},
@@ -115,17 +131,63 @@ export class MCPServer {
             } else {
                 logger.info('MCP symbol tools disabled by configuration');
             }
+
+            // Register memory tools if enabled
+            if (this.toolConfig.memory) {
+                registerMemoryTools(this.server);
+                logger.info('MCP memory tools registered successfully');
+            } else {
+                logger.info('MCP memory tools disabled by configuration');
+            }
+
+            // Register test tools if enabled
+            if (this.toolConfig.test) {
+                registerTestTools(this.server);
+                logger.info('MCP test tools registered successfully');
+            } else {
+                logger.info('MCP test tools disabled by configuration');
+            }
+
+            // Register git tools if enabled
+            if (this.toolConfig.git) {
+                registerGitTools(this.server);
+                logger.info('MCP git tools registered successfully');
+            } else {
+                logger.info('MCP git tools disabled by configuration');
+            }
+
+            // Register documentation tools if enabled
+            if (this.toolConfig.documentation) {
+                registerDocumentationTools(this.server);
+                logger.info('MCP documentation tools registered successfully');
+            } else {
+                logger.info('MCP documentation tools disabled by configuration');
+            }
+
+            // Register database tools if enabled
+            if (this.toolConfig.database) {
+                registerDatabaseTools(this.server, this.terminal);
+                logger.info('MCP database tools registered successfully');
+            } else {
+                logger.info('MCP database tools disabled by configuration');
+            }
         } else {
             logger.warn('File listing callback not set during tools setup');
         }
     }
 
     private setupRoutes(): void {
+        // The shared stateless transport handles one request at a time; requests
+        // arriving concurrently are queued so an overlapping retry can't corrupt it
+        this.mcpQueue = Promise.resolve();
+
         // Handle POST requests for client-to-server communication
         this.app.post('/mcp', async (req, res) => {
             logger.info(`Request received: ${req.method} ${req.url}`);
+            const task = this.mcpQueue.then(() => this.transport.handleRequest(req, res, req.body));
+            this.mcpQueue = task.catch(() => undefined);
             try {
-                await this.transport.handleRequest(req, res, req.body);
+                await task;
             } catch (error) {
                 logger.error(`Error handling MCP request: ${error instanceof Error ? error.message : String(error)}`);
                 if (!res.headersSent) {
@@ -161,29 +223,18 @@ export class MCPServer {
             }
         });
 
-        // Handle unsupported methods
-        this.app.get('/mcp', async (req, res) => {
+        // Unsupported methods get a bare 405 per the MCP spec — a JSON-RPC error
+        // body here is what clients surface as "-32000 Connection closed"
+        this.app.get('/mcp', (_req, res) => {
             logger.info('Received GET MCP request');
-            res.writeHead(405).end(JSON.stringify({
-                jsonrpc: "2.0",
-                error: {
-                    code: -32000,
-                    message: "Method not allowed."
-                },
-                id: null
-            }));
+            res.setHeader('Allow', 'POST');
+            res.status(405).end();
         });
 
-        this.app.delete('/mcp', async (req, res) => {
+        this.app.delete('/mcp', (_req, res) => {
             logger.info('Received DELETE MCP request');
-            res.writeHead(405).end(JSON.stringify({
-                jsonrpc: "2.0",
-                error: {
-                    code: -32000,
-                    message: "Method not allowed."
-                },
-                id: null
-            }));
+            res.setHeader('Allow', 'POST');
+            res.status(405).end();
         });
 
         // Handle OPTIONS requests for CORS

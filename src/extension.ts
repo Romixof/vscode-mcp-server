@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import { MCPServer, ToolConfiguration } from './server';
 import { listWorkspaceFiles } from './tools/file-tools';
 import { logger } from './utils/logger';
@@ -28,8 +29,33 @@ function getToolConfiguration(): ToolConfiguration {
         edit: enabledTools.edit ?? true,
         shell: enabledTools.shell ?? true,
         diagnostics: enabledTools.diagnostics ?? true,
-        symbol: enabledTools.symbol ?? true
+        symbol: enabledTools.symbol ?? true,
+        memory: enabledTools.memory ?? true,
+        test: enabledTools.test ?? true,
+        git: enabledTools.git ?? true,
+        documentation: enabledTools.documentation ?? true,
+        database: enabledTools.database ?? true
     };
+}
+
+// Common Git Bash install locations probed on Windows so the MCP terminal gets
+// a POSIX shell (PowerShell 5.1 rejects the `&&` chains and heredocs tools emit)
+const GIT_BASH_CANDIDATES = process.platform === 'win32' ? [
+    `${process.env.ProgramFiles || 'C:\\Program Files'}\\Git\\bin\\bash.exe`,
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    `${process.env.LocalAppData || ''}\\Programs\\Git\\bin\\bash.exe`
+].filter(p => p.length > 0 && !p.startsWith('\\')) : [];
+
+function findGitBash(): string | undefined {
+    for (const candidate of GIT_BASH_CANDIDATES) {
+        try {
+            if (fs.existsSync(candidate)) {
+                return candidate;
+            }
+        } catch {
+        }
+    }
+    return undefined;
 }
 
 /**
@@ -40,16 +66,23 @@ function getToolConfiguration(): ToolConfiguration {
 export function getExtensionTerminal(context: vscode.ExtensionContext): vscode.Terminal {
     // Check if a terminal with our name already exists
     const existingTerminal = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
-    
+
     if (existingTerminal && existingTerminal.exitStatus === undefined) {
         // Reuse the existing terminal if it's still open
         logger.info('[getExtensionTerminal] Reusing existing terminal for shell commands');
         return existingTerminal;
     }
-    
-    // Create a new terminal if it doesn't exist or if it has exited
-    sharedTerminal = vscode.window.createTerminal(TERMINAL_NAME);
-    logger.info('[getExtensionTerminal] Created new terminal for shell commands');
+
+    // On Windows prefer Git Bash explicitly; the default profile is usually
+    // PowerShell 5.1 which cannot run the POSIX command lines the tools emit
+    const bashPath = findGitBash();
+    if (bashPath) {
+        sharedTerminal = vscode.window.createTerminal({ name: TERMINAL_NAME, shellPath: bashPath });
+        logger.info(`[getExtensionTerminal] Created new terminal using Git Bash (${bashPath})`);
+    } else {
+        sharedTerminal = vscode.window.createTerminal(TERMINAL_NAME);
+        logger.info('[getExtensionTerminal] Created new terminal with default profile');
+    }
     context.subscriptions.push(sharedTerminal);
 
     return sharedTerminal;
