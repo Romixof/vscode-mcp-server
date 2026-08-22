@@ -97,6 +97,11 @@ The VS Code MCP Server extension implements an MCP-compliant server that allows 
 - **Make line replacements** in files
 - **Check for diagnostics** (errors and warnings) in your workspace
 - **Execute shell commands** in the integrated terminal with shell integration
+- **Persist memory** across sessions (global and per-project)
+- **Run tests, coverage, formatting, and linting** with automatic framework detection
+- **Automate git workflows**: commit, branch, blame, conflict listing, stash
+- **Generate documentation**: docstrings, project context, dependency lists, TODO reports
+- **Query databases, test API endpoints, inspect environment variables and ports**
 - **Toggle the server** on and off via a status bar item
 
 This extension enables AI assistants and other tools to interact with your VS Code workspace through the standardized MCP protocol.
@@ -227,6 +232,44 @@ The extension creates an MCP server that:
   - Performing any shell operations that require terminal access
   - Getting command output for analysis and further processing
 
+### Memory Tools
+Persistent markdown-based memory that survives across sessions. Global memory lives at `~/Mammouth/MEMORY.md`, project memory at `{workspaceName}_MEMORY.md` in the workspace root.
+
+- **memory_load_code**: Loads both global and project memory
+- **memory_save_code**: Saves a dated entry under a section header (`scope`: `global` or `project`)
+- **memory_search_code**: Searches memory for a keyword across one or both scopes
+- **memory_clear_code**: Removes a specific entry or an entire section
+
+### Test Tools
+All commands auto-detect the framework from `package.json`, `requirements.txt`, or `pyproject.toml`.
+
+- **run_tests_code**: Runs the test suite (vitest, jest, pytest, mocha, playwright, cypress) with optional pattern filtering
+- **get_test_coverage_code**: Generates coverage reports (`text`, `json`, `lcov`, `html`) via vitest/jest/pytest
+- **format_document_code**: Formats a file with prettier, black, ruff, rustfmt, or gofmt; supports check-only mode
+- **lint_and_fix_code**: Runs eslint, ruff, flake8, or pylint with optional auto-fix
+- **get_git_diff_code**: Shows staged or unstaged diffs for a file or the whole repository
+
+### Git Tools
+- **commit_changes_code**: Stages and commits changes with an auto-generated conventional commit message (supports amend, custom messages, `--no-verify`)
+- **create_branch_code**: Creates, switches to, or lists branches (names are slugified)
+- **get_blame_code**: Line-by-line authorship for a file or line range (`text` or `json`)
+- **list_conflicts_code**: Lists files with merge conflicts and shows the conflict markers
+- **stash_changes_code**: Push/pop/list/drop/apply/show stashes
+
+### Documentation Tools
+- **get_package_dependencies_code**: Lists dependencies across npm, pip/poetry/pipenv, cargo, go modules, composer, and bundler
+- **get_file_history_code**: Git commit history for a file with stats, filters (author/date/message), and optional diffs (`json`, `text`, `csv`)
+- **generate_docstring_code**: Generates JSDoc, Python docstrings, PHPDoc, GoDoc, or Rustdoc for a function/class and inserts it into the file
+- **get_project_context_code**: Project summary: stack, structure tree, languages, frameworks, entry points, scripts, and test setup
+- **find_todo_code**: Finds TODO/FIXME/HACK/BUG comments with severity classification, grouping by file or tag
+
+### Database / Productivity Tools
+- **run_sql_query_code**: Executes SQL queries against a configured database
+- **test_api_endpoint_code**: Sends requests to HTTP endpoints and reports status/response details
+- **check_env_vars_code**: Verifies required environment variables against `.env` files
+- **get_open_ports_code**: Lists processes listening on local ports
+- **restart_dev_server_code**: Restarts the development server
+
 ## Caveats/TODO
 
 Currently, only one workspace is supported. The extension also only works locally, to avoid exposing your VS Code instance to any network you may be connected to.
@@ -236,7 +279,7 @@ Currently, only one workspace is supported. The extension also only works locall
 * `vscode-mcp-server.port`: The port number for the MCP server (default: 3000)
 * `vscode-mcp-server.host`: Host address for the MCP server (default: 127.0.0.1)
 * `vscode-mcp-server.defaultEnabled`: Whether the MCP server should be enabled by default on VS Code startup
-* `vscode-mcp-server.enabledTools`: Configure which tool categories are enabled (file, edit, shell, diagnostics, symbol)
+* `vscode-mcp-server.enabledTools`: Configure which tool categories are enabled (file, edit, shell, diagnostics, symbol, memory, test, git, documentation, database). All categories are enabled by default. Changing this setting restarts the server automatically.
 
 **Selective Tool Configuration**: Useful for coding agents that already have certain capabilities. For example, with Claude Code you might disable file/edit tools and only enable symbol tools to add VS Code-specific symbol searching without tool duplication.
 

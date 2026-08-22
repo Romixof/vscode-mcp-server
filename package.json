@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "vscode-mcp-server",
   "description": "VS Code as a MCP server",
-  "version": "0.4.0",
+  "version": "0.7.0",
   "repository": "https://github.com/juehang/vscode-mcp-server",
   "publisher": "JuehangQin",
   "license": "MIT",
@@ -45,7 +45,12 @@
             "edit": true,
             "shell": true,
             "diagnostics": true,
-            "symbol": true
+            "symbol": true,
+            "memory": true,
+            "test": true,
+            "git": true,
+            "documentation": true,
+            "database": true
           },
           "properties": {
             "file": {
@@ -67,6 +72,26 @@
             "symbol": {
               "type": "boolean",
               "description": "Enable code symbol and structure analysis tools"
+            },
+            "memory": {
+              "type": "boolean",
+              "description": "Enable persistent memory tools (load, save, search, clear)"
+            },
+            "test": {
+              "type": "boolean",
+              "description": "Enable testing tools (run tests, coverage, format, lint, diff)"
+            },
+            "git": {
+              "type": "boolean",
+              "description": "Enable git workflow tools (commit, branch, blame, conflicts, stash)"
+            },
+            "documentation": {
+              "type": "boolean",
+              "description": "Enable documentation tools (dependencies, history, docstrings, project context, TODOs)"
+            },
+            "database": {
+              "type": "boolean",
+              "description": "Enable developer productivity tools (SQL queries, API tests, env vars, ports, dev server)"
             }
           },
           "description": "Configure which MCP tools are enabled"
