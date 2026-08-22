@@ -7,3 +7,4 @@ node_modules
 .serena
 plans
 CLAUDE.md
+*.test
