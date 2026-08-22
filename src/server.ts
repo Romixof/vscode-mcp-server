@@ -15,6 +15,8 @@ import { registerGitTools } from './tools/git-tools';
 import { registerDocumentationTools } from './tools/documentation-tools';
 import { registerDatabaseTools } from './tools/database-tools';
 import { registerProductivityTools } from './tools/productivity-tools';
+import { registerSecurityTools } from './tools/security-tools';
+import { registerPerformanceTools } from './tools/performance-tools';
 import { logger } from './utils/logger';
 
 export interface ToolConfiguration {
@@ -29,6 +31,8 @@ export interface ToolConfiguration {
     documentation: boolean;
     database: boolean;
     productivity: boolean;
+    security: boolean;
+    performance: boolean;
 }
 
 export class MCPServer {
@@ -62,7 +66,9 @@ export class MCPServer {
             git: true,
             documentation: true,
             database: true,
-            productivity: true
+            productivity: true,
+            security: true,
+            performance: true
         };
         this.app = express();
         this.app.use(express.json());
@@ -70,7 +76,7 @@ export class MCPServer {
         // Initialize MCP Server
         this.server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.8.0",
+            version: "0.9.0",
         }, {
             capabilities: {
                 logging: {},
@@ -181,6 +187,22 @@ export class MCPServer {
                 logger.info('MCP productivity tools registered successfully');
             } else {
                 logger.info('MCP productivity tools disabled by configuration');
+            }
+
+            // Register security tools if enabled
+            if (this.toolConfig.security) {
+                registerSecurityTools(this.server, this.terminal);
+                logger.info('MCP security tools registered successfully');
+            } else {
+                logger.info('MCP security tools disabled by configuration');
+            }
+
+            // Register performance tools if enabled
+            if (this.toolConfig.performance) {
+                registerPerformanceTools(this.server, this.terminal);
+                logger.info('MCP performance tools registered successfully');
+            } else {
+                logger.info('MCP performance tools disabled by configuration');
             }
         } else {
             logger.warn('File listing callback not set during tools setup');
