@@ -4,6 +4,14 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.8.0]
+
+### Added
+
+- AI productivity tools (4): `find_dead_code_code` (exported symbols never referenced elsewhere), `snapshot_workspace_code` (SHA-256 snapshots with before/after compare), `regex_tester_code` (pattern testing with groups and replace preview), `convert_encoding_code` (utf-8 / utf-8-bom / utf-16le / latin1 detect and convert).
+- New `vscode-mcp-server.enabledTools.productivity` setting, enabled by default.
+- Branding: new extension logo, publisher and repository now point at Romixo's GitHub, display name "VSCodium MCP Server".
+
 ## [0.7.0] - 2026-08-22
 
 ### Added
