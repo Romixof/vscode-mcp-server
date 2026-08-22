@@ -1,37 +1,38 @@
 # VSCodium MCP Server
 
-A Visual Studio Code extension (available on the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Romixo.vscode-mcp-server)) that allows Claude and other MCP clients to code directly in VS Code! Inspired by [Serena](https://github.com/oraios/serena), but using VS Code's built-in capabilities. Perfect for extending existing coding agents like Claude Code with VS Code-specific capabilities (symbol search, document outlines) without duplicating tools they already have. Note that this extension uses the streamable HTTP API, not the SSE API.
+Turn VS Code into a local MCP server: 54 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
 
-This project started as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin — his 0.4.0 codebase, git history included. It has since grown from his original 12 tools to 54 across 15 independently toggleable groups. Thanks Juehang!
-
-This extension can allow for execution of shell commands. This means that there is a potential security risk, so use with caution, and ensure that you trust the MCP client that you are using and that the port is not exposed to anything. Authentication would help, but as the MCP authentication spec is still in flux, this has not been implemented for now.
-
-PRs are welcome!
+This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 42 came later. Credit for the core idea and the first implementation belongs to him.
 
 ## Demo
 
-A short presentation video ships with the extension: [`media/demo.mp4`](media/demo.mp4).
+https://github.com/user-attachments/assets/f60da97b-a5a9-45cb-8379-3bf91c9bbad0
 
-## Installation
+## Quick start
 
-Install from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Romixo.vscode-mcp-server), from a `.vsix` file (VS Code → Extensions → `⋯` → *Install from VSIX*), or clone this repository and run `npm install` and `npm run compile` to build it.
+1. Install the extension from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Romixo.vscode-mcp-server), from a `.vsix` (Extensions view → `⋯` → *Install from VSIX*), or build it yourself with `npm install && npm run compile`.
+2. Click the status bar item to start the server.
+3. Point your MCP client at `http://localhost:3000/mcp`.
 
-## Claude Desktop Configuration
+### Claude Desktop
 
-Claude Desktop can be configured to use this extension as an MCP server. To do this, your `claude_desktop_config.json` file should look like this:
-```
+```json
 {
   "mcpServers": {
     "vscode-mcp-server": {
         "command": "npx",
         "args": ["mcp-remote@next", "http://localhost:3000/mcp"]
     }
-
   }
 }
 ```
 
-I also like to use this extension in a Claude project, as it allows me to specify additional instructions for Claude. I find the following prompt to work well:
+Clients that speak streamable HTTP directly can skip `mcp-remote` and use the URL as-is.
+
+### A prompt that works well
+
+Drop this into your agent's instructions (project instructions in Claude, `CLAUDE.md` elsewhere):
+
 ```
 You are working on an existing codebase, which you can access using your tools. These code tools interact with a VS Code workspace.
 
@@ -53,215 +54,147 @@ EDITING BEST PRACTICES:
 - Large changes: create_file_code with overwrite=true is more reliable
 - After any changes: get_diagnostics_code to check for errors
 
-PLANNING REQUIREMENTS:
-Before making code modifications, present a comprehensive plan including:
-- Confidence level (1-10) and reasoning
-- Specific tools you'll use and why
-- Files you'll modify and approach (small edits vs complete rewrites)
-- How you'll verify the changes work (diagnostics, testing, etc.)
-
-ERROR HANDLING:
-- Let errors happen naturally - don't add unnecessary try/catch blocks
-- For tool failures: follow the specific recovery guidance in each tool's description
-- If uncertain about file content: use read_file_code to verify before making changes
-
 APPROVAL PROCESS:
-IMPORTANT: Only run code modification tools after presenting a plan and receiving explicit approval. Each change requires separate approval.
-
-Do not add tests unless specifically requested. If you believe testing is important, explain why and let the user decide.
+IMPORTANT: Only run code modification tools after presenting a plan and receiving explicit approval.
 ```
 
-For context efficiency when exploring codebases, consider adding this to your CLAUDE.md:
+For context efficiency, agents that already read whole files benefit most from the symbol tools:
+
 ```
-## VS Code Symbol Tools for Context Efficiency
 Use VS Code symbol tools to reduce context consumption:
-- `get_document_symbols_code` for file structure overview instead of reading entire files
-- `search_symbols_code` to find symbols by name across the project
-- `get_symbol_definition_code` for type info and docs without full file context
-- Workflow: get outline → search symbols → get definitions → read implementation only when needed
+- get_document_symbols_code for file structure instead of reading entire files
+- search_symbols_code to find functions/classes by name across the project
+- get_symbol_definition_code for type info without pulling the whole file
+Workflow: outline → search → definition → read only what you need
 ```
 
+## What the tools do
 
+Every group maps to a key in the `vscode-mcp-server.enabledTools` setting and can be turned off individually. Useful when your coding agent already has some of these abilities: disable file/edit and keep only symbol tools, for example.
 
-This extension serves as a Model Context Protocol (MCP) server, exposing VS Code's filesystem and editing capabilities to MCP clients.
+| Group | Tools | Covers |
+|---|---|---|
+| File | 5 | list, read (paged, truncated gracefully), move, rename, copy |
+| Edit | 2 | create files, replace line ranges with validation |
+| Diagnostics | 1 | errors/warnings from the Problems panel |
+| Symbol | 3 | fuzzy search, hover definitions, document outlines |
+| Shell | 1 | terminal execution with real exit codes and timeouts |
+| Memory | 4 | persistent global and per-project notes |
+| Test | 5 | run tests, coverage, formatting, linting, diffs |
+| Git | 5 | commits, branches, blame, conflicts, stashes |
+| Documentation | 5 | dependencies, file history, docstrings, project context, TODOs |
+| Database | 5 | SQL, HTTP endpoints, env vars, ports, dev servers |
+| Productivity | 4 | dead code, snapshots, regex testing, encodings |
+| Security | 3 | secret scanning, risky constructs, dependency audit |
+| Performance | 3 | bundle sizes, server report, command profiling |
+| Refactoring | 4 | rename symbol, extract function, duplicates, suggestions |
+| Frontend | 4 | accessibility, CSS quality, element inspection, unused CSS |
 
-## Features
+## Tool reference
 
-The extension implements an MCP-compliant server that lets AI models and other MCP clients:
+Optional parameters are listed with their defaults.
 
-- **List files and directories** in your VS Code workspace
-- **Read file contents** with encoding support, line ranges and graceful truncation of oversized files
-- **Move, rename and copy files** through VS Code's WorkspaceEdit API
-- **Search for symbols** across the workspace and get definitions and hover info
-- **Create new files** and replace specific lines with exact-content validation
-- **Check diagnostics** (errors and warnings) before committing anything
-- **Execute shell commands** in the integrated terminal, with real exit codes, timeouts and per-terminal serialization
-- **Persist memory** across sessions, global and per-project
-- **Run tests, coverage, formatting and linting** with automatic framework detection
-- **Automate git**: commits, branches, blame, conflict listing, stashes, file history, diffs
-- **Generate documentation**: docstrings, project context, dependency lists, TODO reports
-- **Query databases, test API endpoints, inspect environment variables and ports**
-- **Find dead code, snapshot workspaces, test regexes and convert encodings**
-- **Scan for secrets, risky constructs and vulnerable dependencies**
-- **Measure bundle sizes, server memory and command timing**
-- **Refactor**: rename symbols, extract functions, find duplicate blocks, flag refactor candidates
-- **Audit frontend code**: accessibility issues, CSS quality, element inspection, unused CSS
-- **Toggle the server** on and off via a status bar item
+### File tools
+- **list_files_code**: lists files and directories. Params: `path`, `recursive` (default false; never recursive on the root, the output is huge).
+- **read_file_code**: reads file contents. Params: `path`, `encoding` (default utf-8, or base64), `maxCharacters` (default 100000; 0 disables the limit), `startLine`/`endLine` (1-based, inclusive). Text above `maxCharacters` comes back truncated with a note giving the full size, so page through with `startLine`/`endLine` instead of retrying blind.
+- **move_file_code**: moves a file or directory through WorkspaceEdit. Params: `sourcePath`, `targetPath`, `overwrite` (default false).
+- **rename_file_code**: renames a file or directory. Params: `filePath`, `newName`, `overwrite` (default false).
+- **copy_file_code**: copies a file. Params: `sourcePath`, `targetPath`, `overwrite` (default false).
 
-## How It Works
+### Edit tools
+- **create_file_code**: creates a file or rewrites an existing one completely. Params: `path`, `content`, `overwrite` (default false), `ignoreIfExists` (default false).
+- **replace_lines_code**: replaces a line range, validating against the original text. Params: `path`, `startLine`, `endLine`, `content`, `originalCode`.
 
-The extension creates an MCP server that:
+### Diagnostics
+- **get_diagnostics_code**: lists errors and warnings. Params: `path` (optional; whole workspace if omitted), `severities` (default [0, 1]), `format` ('text' or 'json'), `includeSource` (default true). Run it after every round of changes.
 
-1. Runs locally on a configurable port (when enabled)
-2. Handles MCP protocol requests via HTTP. Each request gets its own stateless session, so one slow or hung tool call never blocks other requests
-3. Exposes VS Code's functionality as MCP tools
-4. Provides a status bar indicator showing server status, which can be clicked to toggle the server on/off
+### Symbols
+- **search_symbols_code**: fuzzy search across the workspace. Params: `query`, `maxResults` (default 10).
+- **get_symbol_definition_code**: hover data for a symbol: type, docs, source. Params: `path`, `line`, `symbol`.
+- **get_document_symbols_code**: hierarchical outline of a file. Params: `path`, `maxDepth`.
 
-## Supported MCP Tools
+### Shell
+- **execute_shell_command_code**: runs a command in the integrated terminal through shell integration and captures real output plus exit code. Commands on the same terminal run one after another, never interleaved. Params: `command`, `cwd`, `timeout` ms (default 10000). When a command times out it may still be running in that terminal; kill it there or retry with a larger timeout.
 
-Every group below maps to a key of the `vscode-mcp-server.enabledTools` setting and can be disabled individually. Optional parameters show their default.
+### Memory
+Notes live in markdown: global at `~/Mammouth/MEMORY.md`, per-project at `{workspaceName}_MEMORY.md` in the workspace root.
 
-### File Tools (`enabledTools.file`)
-- **list_files_code**: Lists files and directories in your workspace
-  - Parameters: `path`, `recursive` (default false; never recursive on the root, the output is huge)
+- **memory_load_code**: loads both scopes.
+- **memory_save_code**: appends a dated entry under a section header. Params: `section`, `entry`, `scope` (global/project), `sectionLevel`.
+- **memory_search_code**: keyword search. Params: `query`, `scope`.
+- **memory_clear_code**: removes an entry or a whole section. Params: `section`, `entry`, `scope`.
 
-- **read_file_code**: Reads file contents
-  - Parameters: `path`, `encoding` (default utf-8, or base64), `maxCharacters` (default 100000; 0 disables the limit), `startLine`/`endLine` (1-based, inclusive)
-  - Text above `maxCharacters` comes back truncated with a note giving the full size. Page through with `startLine`/`endLine` instead
+### Testing
+Frameworks auto-detect from `package.json`, `requirements.txt` or `pyproject.toml`.
 
-- **move_file_code**: Moves a file or directory using VS Code's WorkspaceEdit API
-  - Parameters: `sourcePath`, `targetPath`, `overwrite` (default false)
+- **run_tests_code**: runs vitest/jest/pytest/mocha/playwright/cypress. Params: `pattern`, `framework`, `args`, `cwd`.
+- **get_test_coverage_code**: coverage via vitest/jest/pytest. Params: `path`, `format` ('text'|'json'|'lcov'|'html'), `framework`.
+- **format_document_code**: prettier/black/ruff/rustfmt/gofmt. Params: `path`, `formatter`, `checkOnly`.
+- **lint_and_fix_code**: eslint/ruff/flake8/pylint, optionally fixing. Params: `path`, `linter`, `fix`.
+- **get_git_diff_code**: staged/unstaged diffs. Params: `path`, `staged`, `noColor`.
 
-- **rename_file_code**: Renames a file or directory using VS Code's WorkspaceEdit API
-  - Parameters: `filePath`, `newName`, `overwrite` (default false)
+### Git
+- **commit_changes_code**: stages and commits with an auto-generated conventional message. Params: `message`, `addAll`, `amend`, `noVerify`.
+- **create_branch_code**: creates, switches or lists branches (names are slugified). Params: `name`, `from`, `checkout`, `listOnly`.
+- **get_blame_code**: line-by-line authorship. Params: `path`, `startLine`, `endLine`, `format`.
+- **list_conflicts_code**: files with merge conflict markers.
+- **stash_changes_code**: push/pop/list/drop/apply/show. Params: `action`, `message`, `index`, `includeUntracked`.
 
-- **copy_file_code**: Copies a file to a new location
-  - Parameters: `sourcePath`, `targetPath`, `overwrite` (default false)
+### Documentation
+- **get_package_dependencies_code**: npm, pip/poetry/pipenv, cargo, go, composer, bundler. Params: `ecosystem`, `includeOutdated`.
+- **get_file_history_code**: git history with filters and optional diffs. Params: `path`, `maxCommits`, `since`, `until`, `author`, `grep`, `includeStats`, `includeDiff`, `format`.
+- **generate_docstring_code**: JSDoc/docstring/PHPDoc/GoDoc/Rustdoc, inserted into the file. Params: `path`, `symbol`, `line`, `style`, `includeTypes`, `includeExamples`, `async`, `overwrite`.
+- **get_project_context_code**: stack, structure tree, languages, frameworks, entry points, scripts, test setup. Params: `depth`, `includeDeps`, `includeScripts`, `includeConfigFiles`, `includeReadme`, `maxFileSize`.
+- **find_todo_code**: TODO/FIXME/HACK/XXX/NOTE/BUG/OPTIMIZE/REVIEW comments with severity classification. Params: `customPatterns`, `path`, `include`, `exclude`, `caseSensitive`, `contextLines`, `format`, `groupBy`.
 
-### Edit Tools (`enabledTools.edit`)
-- **create_file_code**: Creates a new file or completely rewrites an existing one
-  - Parameters: `path`, `content`, `overwrite` (default false), `ignoreIfExists` (default false)
+### Developer productivity / databases
+- **run_sql_query_code**: SQL against local PostgreSQL/MySQL/SQLite. Params: `query`, `database`, `connectionString`, `databaseName`, `filePath`, `format`, `timeout`.
+- **test_api_endpoint_code**: sends requests and reports status/response details. Params: `url`, `method`, `headers`, `body`, `timeout`, `followRedirects`, `validateStatus`.
+- **check_env_vars_code**: missing, unused or duplicate variables in `.env`. Params: `checkCodeUsage`, `envFiles`, `ignorePatterns`.
+- **get_open_ports_code**: processes listening locally. Params: `port`, `protocol`, `state`.
+- **restart_dev_server_code**: restarts Vite, Next.js, Webpack, Nodemon and friends. Params: `script`, `command`, `cwd`, `port`, `killTimeout`, `startupTimeout`.
 
-- **replace_lines_code**: Replaces specific lines in a file with exact-content validation
-  - Parameters: `path`, `startLine`, `endLine` (1-based, inclusive), `content`, `originalCode`
+### AI productivity
+- **find_dead_code_code**: exported symbols nothing references. Params: `path`, `include`, `exclude`, `maxResults`.
+- **snapshot_workspace_code**: SHA-256 snapshots of every file with before/after compare. Params: `action` (save/compare/list), `name`, `baseline`.
+- **regex_tester_code**: matches with positions, captured groups and a replace preview. Params: `pattern`, `flags`, `text`, `filePath`, `replace`.
+- **convert_encoding_code**: detects and converts utf-8, utf-8-bom, utf-16le, latin1. Params: `path`, `action`, `from`, `to`.
 
-### Diagnostics Tools (`enabledTools.diagnostics`)
-- **get_diagnostics_code**: Lists errors and warnings from VS Code's Problems panel
-  - Parameters: `path` (optional; whole workspace if omitted), `severities` (default [0, 1] = Error + Warning), `format` ('text' or 'json'), `includeSource` (default true)
-  - Run it after every series of code changes
+### Security
+- **find_secrets_code**: hardcoded AWS keys, GitHub/Slack tokens, Google API keys, Stripe live keys, private key blocks, JWTs and generic credential assignments. Values come back masked and obvious placeholders are ignored. Params: `path`, `exclude`, `maxResults`.
+- **security_scan_code**: risky constructs rated by severity: eval/new Function, innerHTML sinks, exec calls with interpolated input, disabled TLS verification, unsafe yaml/pickle/subprocess, SQL string concatenation. Params: `path`, `severity` floor, `maxResults`.
+- **check_dependencies_vulnerabilities_code**: npm audit results per package with patched versions.
 
-### Symbol Tools (`enabledTools.symbol`)
-- **search_symbols_code**: Fuzzy-searches symbols (functions, classes, variables) across the workspace
-  - Parameters: `query`, `maxResults` (default 10)
+### Performance
+- **analyze_bundle_code**: build output sizes with the largest files and their share. Params: `dir`, `top`.
+- **get_performance_report_code**: server uptime and memory, workspace weight, heaviest npm packages.
+- **profile_command_code**: wall-clock timing of a command over repeated runs, alongside its output. Params: `command`, `runs`.
 
-- **get_symbol_definition_code**: Gets hover data for a symbol: type, docs, source
-  - Parameters: `path`, `line` (1-based), `symbol`
+### Refactoring
+- **rename_symbol_code**: word-boundary rename across every code file (JS/TS family, Python, PHP), so `calc` never touches `calcTotal`; dry-run previews first. Params: `oldName`, `newName`, `dryRun`, `exclude`.
+- **extract_function_code**: pulls a line range into a new function and replaces it with a call. Params: `path`, `startLine`, `endLine`, `functionName`, `params`.
+- **find_duplicate_code_code**: normalised sliding-window duplicate blocks with every location. Params: `path`, `minLines` (default 5), `exclude`.
+- **suggest_refactoring_code**: flags functions worth another look with body length, parameter count, approximate complexity and nesting depth. Static analysis, nothing executes. Params: `path`, `maxLines`, `maxParams`, `maxComplexity`.
 
-- **get_document_symbols_code**: Gets the complete hierarchical outline of a file, like the Outline view
-  - Parameters: `path`, `maxDepth`
+### Frontend
+- **audit_accessibility_code**: missing alt text, unlabeled inputs, positive tabindex, clickable div/span, empty links, missing lang. Params: `path`, `exclude`.
+- **analyze_css_code**: duplicate selectors, properties repeated inside one rule, empty rule blocks, heavy `!important` use. Params: `path`.
+- **inspect_element_code**: markup usages plus every CSS rule styling a selector (.class, #id or tag). Params: `selector`, `path`.
+- **find_unused_css_code**: stylesheet classes and ids nothing references anywhere; quoted strings count as usage, so dynamically composed names rarely false-positive. Params: `path`.
 
-### Shell Tools (`enabledTools.shell`)
-- **execute_shell_command_code**: Executes a shell command in the integrated terminal through shell integration, capturing real output and exit code. Commands are serialized per terminal
-  - Parameters: `command`, `cwd` (default workspace root), `timeout` in ms (default 10000)
-  - On timeout the command may still be running in the terminal; kill it there or retry with a larger timeout
+## Configuration
 
-### Memory Tools (`enabledTools.memory`)
-Persistent markdown memory: global at `~/Mammouth/MEMORY.md`, per-project at `{workspaceName}_MEMORY.md` in the workspace root.
+* `vscode-mcp-server.port`: server port (default 3000)
+* `vscode-mcp-server.host`: bind address (default 127.0.0.1)
+* `vscode-mcp-server.defaultEnabled`: start the server automatically on launch
+* `vscode-mcp-server.enabledTools`: which of the 15 groups above are active, all on by default. Changing it restarts the server.
 
-- **memory_load_code**: Loads both scopes
-- **memory_save_code**: Appends a dated entry under a section header. Params: `section`, `entry`, `scope` (global/project), `sectionLevel`
-- **memory_search_code**: Keyword search across scopes. Params: `query`, `scope`
-- **memory_clear_code**: Removes an entry or an entire section. Params: `section`, `entry`, `scope`
+Each request gets its own stateless MCP session, so one slow or hung call never blocks the others.
 
-### Test Tools (`enabledTools.test`)
-Frameworks are auto-detected from `package.json`, `requirements.txt` or `pyproject.toml`.
+## Caveats
 
-- **run_tests_code**: Runs vitest/jest/pytest/mocha/playwright/cypress. Params: `pattern`, `framework`, `args`, `cwd`
-- **get_test_coverage_code**: Coverage reports via vitest/jest/pytest. Params: `path`, `format` ('text'|'json'|'lcov'|'html'), `framework`
-- **format_document_code**: Formats with prettier/black/ruff/rustfmt/gofmt. Params: `path`, `formatter`, `checkOnly`
-- **lint_and_fix_code**: Runs eslint/ruff/flake8/pylint with optional auto-fix. Params: `path`, `linter`, `fix`
-- **get_git_diff_code**: Staged/unstaged diffs for a file or the repository. Params: `path`, `staged`, `noColor`
+One workspace at a time, local connections only. Shell execution means a misbehaving client can run commands on your machine: keep the port closed to your network and only connect clients you trust. No authentication yet; the MCP auth spec is still moving.
 
-### Git Tools (`enabledTools.git`)
-- **commit_changes_code**: Stages and commits with an auto-generated conventional message. Params: `message` (optional), `addAll`, `amend`, `noVerify`
-- **create_branch_code**: Creates, switches to, or lists branches (names are slugified). Params: `name`, `from`, `checkout`, `listOnly`
-- **get_blame_code**: Line-by-line authorship. Params: `path`, `startLine`, `endLine`, `format` ('text' or 'json')
-- **list_conflicts_code**: Lists files with merge conflict markers
-- **stash_changes_code**: Push/pop/list/drop/apply/show stashes. Params: `action`, `message`, `index`, `includeUntracked`
+## Credits and license
 
-### Documentation Tools (`enabledTools.documentation`)
-- **get_package_dependencies_code**: Dependencies across npm, pip/poetry/pipenv, cargo, go modules, composer and bundler. Params: `ecosystem`, `includeOutdated`
-- **get_file_history_code**: Git history for a file with filters and optional diffs. Params: `path`, `maxCommits`, `since`, `until`, `author`, `grep`, `includeStats`, `includeDiff`, `format` ('json'|'text'|'csv')
-- **generate_docstring_code**: Generates JSDoc/docstring/PHPDoc/GoDoc/Rustdoc and inserts it into the file. Params: `path`, `symbol`, `line`, `style`, `includeTypes`, `includeExamples`, `async`, `overwrite`
-- **get_project_context_code**: Project summary: stack, structure tree, languages, frameworks, entry points, scripts, test setup. Params: `depth`, `includeDeps`, `includeScripts`, `includeConfigFiles`, `includeReadme`, `maxFileSize`
-- **find_todo_code**: Finds TODO/FIXME/HACK/XXX/NOTE/BUG/OPTIMIZE/REVIEW comments with severity classification. Params: `customPatterns`, `path`, `include`, `exclude`, `caseSensitive`, `contextLines`, `format`, `groupBy` ('file' or 'tag')
-
-### Developer Productivity / Database Tools (`enabledTools.database`)
-- **run_sql_query_code**: SQL against local PostgreSQL/MySQL/SQLite. Params: `query`, `database`, `connectionString`, `databaseName`, `filePath`, `format`, `timeout`
-- **test_api_endpoint_code**: Sends HTTP requests and reports status/response details. Params: `url`, `method`, `headers`, `body`, `timeout`, `followRedirects`, `validateStatus`
-- **check_env_vars_code**: Checks `.env` files for missing, unused or duplicate variables. Params: `checkCodeUsage`, `envFiles`, `ignorePatterns`
-- **get_open_ports_code**: Lists processes listening on local ports. Params: `port`, `protocol`, `state`
-- **restart_dev_server_code**: Restarts common dev servers (Vite, Next.js, Webpack, Nodemon…). Params: `script`, `command`, `cwd`, `port`, `killTimeout`, `startupTimeout`
-
-### AI Productivity Tools (`enabledTools.productivity`)
-- **find_dead_code_code**: Exported symbols never referenced elsewhere. Params: `path`, `include`, `exclude`, `maxResults`
-- **snapshot_workspace_code**: Point-in-time SHA-256 snapshots of every file, with before/after compare. Params: `action` (save/compare/list), `name`, `baseline`
-- **regex_tester_code**: Tests a pattern against text or a file: positions, captured groups, replace preview. Params: `pattern`, `flags`, `text`, `filePath`, `replace`
-- **convert_encoding_code**: Detects/converts utf-8, utf-8-bom, utf-16le, latin1. Params: `path`, `action`, `from`, `to`
-
-### Security Tools (`enabledTools.security`)
-- **find_secrets_code**: Hardcoded credentials: AWS keys, GitHub/Slack tokens, Google API keys, Stripe live keys, private key blocks, JWTs, generic assignments. Values are masked in the output and obvious placeholders ignored. Params: `path`, `exclude`, `maxResults`
-- **security_scan_code**: Risky constructs with severity levels: eval/new Function, innerHTML sinks, shell-injection exec, disabled TLS verification, unsafe yaml/pickle/subprocess, SQL string concatenation. Params: `path`, `severity` floor, `maxResults`
-- **check_dependencies_vulnerabilities_code**: npm audit with per-package advisories and patched versions
-
-### Performance Tools (`enabledTools.performance`)
-- **analyze_bundle_code**: Build output sizes, largest files with their share. Params: `dir`, `top`
-- **get_performance_report_code**: Server uptime/memory, workspace weight, heaviest npm packages
-- **profile_command_code**: Times a shell command over repeated runs (mean/best/worst) alongside its output. Params: `command`, `runs`
-
-### Refactoring Tools (`enabledTools.refactoring`)
-- **rename_symbol_code**: Word-boundary rename across every code file (JS/TS family, Python, PHP). Params: `oldName`, `newName`, `dryRun`, `exclude`
-- **extract_function_code**: Extracts a line range into a new function and replaces it with a call. Params: `path`, `startLine`, `endLine`, `functionName`, `params`
-- **find_duplicate_code_code**: Normalised sliding-window duplicate blocks with all locations. Params: `path`, `minLines` (default 5), `exclude`
-- **suggest_refactoring_code**: Flags long, over-parameterised, complex or deeply nested functions with concrete numbers. Static analysis, nothing is executed. Params: `path`, `maxLines`, `maxParams`, `maxComplexity`
-
-### Frontend Tools (`enabledTools.frontend`)
-- **audit_accessibility_code**: Missing alt/labels, positive tabindex, clickable div/span, empty links, missing lang. Params: `path`, `exclude`
-- **analyze_css_code**: Duplicate selectors, properties repeated inside one rule, empty rules, heavy `!important` use. Params: `path`
-- **inspect_element_code**: Markup usages plus CSS rules for a selector (.class, #id or tag). Params: `selector`, `path`
-- **find_unused_css_code**: Classes/ids defined in stylesheets but never referenced in markup or scripts. Quoted strings count as usage, so dynamically composed names rarely false-positive. Params: `path`
-
-## Caveats/TODO
-
-Currently, only one workspace is supported. The extension also only works locally, to avoid exposing your VS Code instance to any network you may be connected to.
-
-## Extension Settings
-
-* `vscode-mcp-server.port`: The port number for the MCP server (default: 3000)
-* `vscode-mcp-server.host`: Host address for the MCP server (default: 127.0.0.1)
-* `vscode-mcp-server.defaultEnabled`: Whether the MCP server should be enabled by default on VS Code startup
-* `vscode-mcp-server.enabledTools`: Configure which tool categories are enabled (file, edit, shell, diagnostics, symbol, memory, test, git, documentation, database, productivity, security, performance, refactoring, frontend). All categories are enabled by default. Changing this setting restarts the server automatically.
-
-**Selective Tool Configuration**: Useful for coding agents that already have certain capabilities. For example, with Claude Code you might disable file/edit tools and only enable symbol tools to add VS Code-specific symbol searching without tool duplication.
-
-## Using with MCP Clients
-
-To connect MCP clients to this server, configure them to use:
-```
-http://localhost:3000/mcp
-```
-
-Or if you've configured a custom host:
-```
-http://[your-host]:3000/mcp
-```
-
-Remember that you need to enable the server first by clicking on the status bar item!
-
-## Contributing
-
-Contributions are welcome! Feel free to submit issues or pull requests.
-
-## License
-
-[MIT](LICENSE)
+Original extension by [Juehang Qin](https://github.com/juehang/vscode-mcp-server); this fork extends his work under the same [MIT license](LICENSE). Demo video by LTTPoseidon.
