@@ -14,6 +14,7 @@ import { registerTestTools } from './tools/test-tools';
 import { registerGitTools } from './tools/git-tools';
 import { registerDocumentationTools } from './tools/documentation-tools';
 import { registerDatabaseTools } from './tools/database-tools';
+import { registerProductivityTools } from './tools/productivity-tools';
 import { logger } from './utils/logger';
 
 export interface ToolConfiguration {
@@ -27,6 +28,7 @@ export interface ToolConfiguration {
     git: boolean;
     documentation: boolean;
     database: boolean;
+    productivity: boolean;
 }
 
 export class MCPServer {
@@ -59,7 +61,8 @@ export class MCPServer {
             test: true,
             git: true,
             documentation: true,
-            database: true
+            database: true,
+            productivity: true
         };
         this.app = express();
         this.app.use(express.json());
@@ -67,7 +70,7 @@ export class MCPServer {
         // Initialize MCP Server
         this.server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.7.0",
+            version: "0.8.0",
         }, {
             capabilities: {
                 logging: {},
@@ -170,6 +173,14 @@ export class MCPServer {
                 logger.info('MCP database tools registered successfully');
             } else {
                 logger.info('MCP database tools disabled by configuration');
+            }
+
+            // Register productivity tools if enabled
+            if (this.toolConfig.productivity) {
+                registerProductivityTools(this.server);
+                logger.info('MCP productivity tools registered successfully');
+            } else {
+                logger.info('MCP productivity tools disabled by configuration');
             }
         } else {
             logger.warn('File listing callback not set during tools setup');

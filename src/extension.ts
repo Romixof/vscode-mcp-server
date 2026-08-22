@@ -34,7 +34,8 @@ function getToolConfiguration(): ToolConfiguration {
         test: enabledTools.test ?? true,
         git: enabledTools.git ?? true,
         documentation: enabledTools.documentation ?? true,
-        database: enabledTools.database ?? true
+        database: enabledTools.database ?? true,
+        productivity: enabledTools.productivity ?? true
     };
 }
 
