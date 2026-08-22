@@ -1,3 +1,6 @@
+
+
+
 # VSCodium MCP Server
 
 A Visual Studio Code extension (available on the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Romixo.vscode-mcp-server)) that allows Claude and other MCP clients to code directly in VS Code! Inspired by [Serena](https://github.com/oraios/serena), but using VS Code's built-in capabilities. Perfect for extending existing coding agents like Claude Code with VS Code-specific capabilities (symbol search, document outlines) without duplicating tools they already have. Note that this extension uses the streamable HTTP API, not the SSE API.
@@ -9,6 +12,8 @@ This extension can allow for execution of shell commands. This means that there 
 PRs are welcome!
 
 ## Demo
+
+https://github.com/user-attachments/assets/f60da97b-a5a9-45cb-8379-3bf91c9bbad0
 
 A short presentation video is included in the extension: [`media/demo.mp4`](media/demo.mp4).
 
