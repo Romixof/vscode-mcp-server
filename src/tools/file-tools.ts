@@ -64,10 +64,10 @@ export async function listWorkspaceFiles(workspacePath: string, recursive: boole
 }
 
 /**
- * Reads a file from the VS Code workspace with character limit check
+ * Reads a file from the VS Code workspace, truncating oversized text instead of failing
  * @param workspacePath The path within the workspace to the file
  * @param encoding Encoding to convert the file content to a string. Use 'base64' for base64-encoded string
- * @param maxCharacters Maximum character count (default: 100,000)
+ * @param maxCharacters Maximum character count before truncation (default: 100,000). 0 or less disables the limit
  * @param startLine The start line number (0-based, inclusive). Use -1 to read from the beginning.
  * @param endLine The end line number (0-based, inclusive). Use -1 to read to the end.
  * @returns File content as string (either text-encoded or base64)
@@ -98,52 +98,55 @@ export async function readWorkspaceFile(
         console.log(`[readWorkspaceFile] File read successfully, size: ${fileContent.byteLength} bytes`);
         
         if (encoding === 'base64') {
-            // Special case for base64 encoding
-            if (fileContent.byteLength > maxCharacters) {
-                throw new Error(`File content exceeds the maximum character limit (approx. ${fileContent.byteLength} bytes vs ${maxCharacters} allowed)`);
+            // Special case for base64 encoding: a cut would break decodability,
+            // so oversized payloads are still refused outright
+            if (maxCharacters > 0 && fileContent.byteLength > maxCharacters) {
+                throw new Error(`File is ${fileContent.byteLength} bytes, over the ${maxCharacters} limit — base64 cannot be truncated; raise maxCharacters or pass 0 for no limit`);
             }
-            
+
             // For base64, we cannot extract lines meaningfully, so we ignore startLine and endLine
             if (startLine >= 0 || endLine >= 0) {
                 console.warn(`[readWorkspaceFile] Line numbers specified for base64 encoding, ignoring`);
             }
-            
+
             return Buffer.from(fileContent).toString('base64');
         } else {
             // Regular text encoding (utf-8, latin1, etc.)
             const textDecoder = new TextDecoder(encoding);
-            const textContent = textDecoder.decode(fileContent);
-            
-            // Check if the character count exceeds the limit
-            if (textContent.length > maxCharacters) {
-                throw new Error(`File content exceeds the maximum character limit (${textContent.length} vs ${maxCharacters} allowed)`);
-            }
-            
-            // If line numbers are specified and valid, extract just those lines
+            let textContent = textDecoder.decode(fileContent);
+
+            // Extract the requested lines first so a narrow range stays readable
+            // even when the whole file is huge
             if (startLine >= 0 || endLine >= 0) {
                 // Split the content into lines
                 const lines = textContent.split('\n');
-                
+
                 // Set effective start and end lines
                 const effectiveStartLine = startLine >= 0 ? startLine : 0;
                 const effectiveEndLine = endLine >= 0 ? Math.min(endLine, lines.length - 1) : lines.length - 1;
-                
+
                 // Validate line numbers
                 if (effectiveStartLine >= lines.length) {
                     throw new Error(`Start line ${effectiveStartLine + 1} is out of range (1-${lines.length})`);
                 }
-                
+
                 // Make sure endLine is not less than startLine
                 if (effectiveEndLine < effectiveStartLine) {
                     throw new Error(`End line ${effectiveEndLine + 1} is less than start line ${effectiveStartLine + 1}`);
                 }
-                
+
                 // Extract the requested lines and join them back together
-                const partialContent = lines.slice(effectiveStartLine, effectiveEndLine + 1).join('\n');
-                console.log(`[readWorkspaceFile] Returning lines ${effectiveStartLine + 1}-${effectiveEndLine + 1}, length: ${partialContent.length} characters`);
-                return partialContent;
+                textContent = lines.slice(effectiveStartLine, effectiveEndLine + 1).join('\n');
+                console.log(`[readWorkspaceFile] Returning lines ${effectiveStartLine + 1}-${effectiveEndLine + 1}, length: ${textContent.length} characters`);
             }
-            
+
+            // Oversized content comes back truncated with a note instead of an error,
+            // so callers can still work with large files without guessing sizes
+            if (maxCharacters > 0 && textContent.length > maxCharacters) {
+                const note = `\n\n[File truncated: showing characters 1-${maxCharacters} of ${textContent.length}. Raise maxCharacters (0 = no limit) or use startLine/endLine to read specific sections.]`;
+                return textContent.slice(0, maxCharacters) + note;
+            }
+
             return textContent;
         }
     } catch (error) {
@@ -210,16 +213,16 @@ export function registerFileTools(
         'read_file_code',
         `Retrieves file contents with size limits and partial reading support.
 
-        WHEN TO USE: Reading code, config files, analyzing implementations. Files >100k chars will fail.
-        
+        WHEN TO USE: Reading code, config files, analyzing implementations.
+
         Encoding: Text encodings (utf-8, latin1, etc.) for text files, 'base64' for base64-encoded string.
         Line numbers: Use startLine/endLine (1-based) for large files to read specific sections only.
-        
-        If file too large: Use startLine/endLine to read relevant sections only.`,
+
+        Files larger than maxCharacters are returned truncated, with a note at the end giving the full size — page through with startLine/endLine instead of retrying with a bigger limit.`,
         {
             path: z.string().describe('The path to the file to read'),
             encoding: z.string().optional().default('utf-8').describe('Encoding to convert the file content to a string. Use "base64" for base64-encoded string'),
-            maxCharacters: z.number().optional().default(DEFAULT_MAX_CHARACTERS).describe('Maximum character count (default: 100,000)'),
+            maxCharacters: z.number().optional().default(DEFAULT_MAX_CHARACTERS).describe('Maximum character count before truncation (default: 100,000). 0 disables the limit'),
             startLine: z.number().optional().default(-1).describe('The start line number (1-based, inclusive). Default: read from beginning, denoted by -1'),
             endLine: z.number().optional().default(-1).describe('The end line number (1-based, inclusive). Default: read to end, denoted by -1')
         },

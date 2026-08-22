@@ -37,7 +37,9 @@ function getToolConfiguration(): ToolConfiguration {
         database: enabledTools.database ?? true,
         productivity: enabledTools.productivity ?? true,
         security: enabledTools.security ?? true,
-        performance: enabledTools.performance ?? true
+        performance: enabledTools.performance ?? true,
+        refactoring: enabledTools.refactoring ?? true,
+        frontend: enabledTools.frontend ?? true
     };
 }
 
