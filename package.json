@@ -4,8 +4,8 @@
   "displayName": "vscode-mcp-server",
   "description": "VS Code as a MCP server",
   "version": "0.7.0",
-  "repository": "https://github.com/juehang/vscode-mcp-server",
-  "publisher": "JuehangQin",
+  "repository": "https://github.com/Romixof/vscode-mcp-server",
+  "publisher": "Romixo",
   "license": "MIT",
   "engines": {
     "vscode": "^1.99.0"

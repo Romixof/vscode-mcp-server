@@ -1,6 +1,6 @@
 # VSCodium MCP Server
 
-A Visual Studio Code extension (available on the [Marketplace](https://marketplace.visualstudio.com/items?itemName=JuehangQin.vscode-mcp-server)) that allows Claude and other MCP clients to code directly in VS Code! Inspired by [Serena](https://github.com/oraios/serena), but using VS Code's built-in capabilities. Perfect for extending existing coding agents like Claude Code with VS Code-specific capabilities (symbol search, document outlines) without duplicating tools they already have. Note that this extension uses the streamable HTTP API, not the SSE API.
+A Visual Studio Code extension (available on the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Romixo.vscode-mcp-server)) that allows Claude and other MCP clients to code directly in VS Code! Inspired by [Serena](https://github.com/oraios/serena), but using VS Code's built-in capabilities. Perfect for extending existing coding agents like Claude Code with VS Code-specific capabilities (symbol search, document outlines) without duplicating tools they already have. Note that this extension uses the streamable HTTP API, not the SSE API.
 
 This extension can allow for execution of shell commands. This means that there is a potential security risk, so use with caution, and ensure that you trust the MCP client that you are using and that the port is not exposed to anything. Authentication would help, but as the MCP authentication spec is still in flux, this has not been implemented for now.
 
@@ -11,7 +11,7 @@ https://github.com/user-attachments/assets/20b87dfb-fc39-4710-a910-b9481dde1e90
 
 ## Installation
 
-1. Install the extension from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=JuehangQin.vscode-mcp-server) or clone this repository and run `npm install` and `npm run compile` to build it.
+1. Install the extension from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Romixo.vscode-mcp-server) or clone this repository and run `npm install` and `npm run compile` to build it.
 
 ## Claude Desktop Configuration
 
