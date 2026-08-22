@@ -107,9 +107,13 @@ function queueOnTerminal<T>(terminal: vscode.Terminal, task: () => Promise<T>): 
 async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, timeout: number): Promise<{ output: string; exitCode: number }> {
     return new Promise((resolve, reject) => {
         let timedOut = false;
+        // The deadline races every read: even a fully silent command gets cut
+        // off at the limit instead of hanging the caller
+        let hitDeadline: () => void = () => {};
+        const deadline = new Promise<null>(res => { hitDeadline = () => res(null); });
         const timer = setTimeout(() => {
             timedOut = true;
-            reject(new Error(`Command timed out after ${timeout}ms — it may still be running in the terminal; kill it there or pass a larger timeout`));
+            hitDeadline();
         }, timeout);
 
         void (async () => {
@@ -118,14 +122,13 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
                 const execution = terminal.shellIntegration!.executeCommand(fullCommand);
                 let output = '';
                 outputStream = (execution as any).read();
-                for await (const data of outputStream!) {
-                    if (timedOut) {
+                const reader = (outputStream as AsyncIterableIterator<unknown>)[Symbol.asyncIterator]();
+                for (;;) {
+                    const chunk = await Promise.race([reader.next(), deadline]);
+                    if (chunk === null || chunk.done) {
                         break;
                     }
-                    output += data;
-                }
-                if (timedOut) {
-                    return; // timer already rejected the caller
+                    output += chunk.value;
                 }
 
                 clearTimeout(timer);
@@ -142,21 +145,32 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
                         break;
                     }
                 }
-                const cleaned = lines
+                let cleaned = lines
                     .filter(line => !line.includes(fullCommand))
                     .join('\n')
                     .replace(/\n{3,}/g, '\n\n')
                     .trim();
+
+                if (timedOut) {
+                    // 124 is what GNU timeout reports; the process itself keeps
+                    // running in the terminal and can finish there later
+                    cleaned += `\n\n[Timed out after ${timeout}ms — showing the output captured so far. The process may still be running in the terminal; retry with a larger timeout if you need the rest.]`;
+                    resolve({ output: cleaned, exitCode: 124 });
+                    return;
+                }
 
                 resolve({ output: cleaned, exitCode });
             } catch (error) {
                 clearTimeout(timer);
                 if (!timedOut) {
                     reject(new Error(`Failed to read command output: ${error instanceof Error ? error.message : String(error)}`));
+                } else {
+                    // stream died during a timeout: still better than nothing
+                    resolve({ output: '', exitCode: 124 });
                 }
             } finally {
                 // best-effort: end a stream still open after a timeout so the
-                // reader loop doesn't keep accumulating output forever
+                // reader doesn't keep accumulating output forever
                 try {
                     await (outputStream as any)?.return?.();
                 } catch {
@@ -208,7 +222,7 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
 
         Working directory: Use cwd to run commands in specific directories. Defaults to workspace root. If you get unexpected results, ensure the cwd is correct.
 
-        Timeout: Commands must complete within specified time (default 10s) or the tool will return a timeout error, but the command may still be running in the terminal.`,
+        Timeout: A command that exceeds its time limit (default 10s) returns the output captured so far with exit code 124 and a note; the process keeps running in the terminal. Slow scans or installs need a larger timeout passed explicitly.`,
         {
             command: z.string().describe('The shell command to execute'),
             cwd: z.string().optional().default('.').describe('Optional working directory for the command'),
