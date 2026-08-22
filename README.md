@@ -114,7 +114,7 @@ Optional parameters are listed with their defaults.
 - **get_document_symbols_code**: hierarchical outline of a file. Params: `path`, `maxDepth`.
 
 ### Shell
-- **execute_shell_command_code**: runs a command in the integrated terminal through shell integration and captures real output plus exit code. Commands on the same terminal run one after another, never interleaved. Params: `command`, `cwd`, `timeout` ms (default 10000). When a command times out it may still be running in that terminal; kill it there or retry with a larger timeout.
+- **execute_shell_command_code**: runs a command in the integrated terminal through shell integration and captures real output plus exit code. Commands on the same terminal run one after another, never interleaved. Params: `command`, `cwd`, `timeout` ms (default 10000). A command past its limit returns the output captured so far with exit code 124; the process keeps running in the terminal, so slow scans need a larger timeout passed explicitly.
 
 ### Memory
 Notes live in markdown: global at `~/Mammouth/MEMORY.md`, per-project at `{workspaceName}_MEMORY.md` in the workspace root.
