@@ -11,30 +11,153 @@ export type ShellKind = 'bash' | 'powershell';
 // strip the terminal echo/prompt noise from the captured output
 const EXIT_MARKER = '__MCP_EXIT';
 
+// Signals that name a shell family explicitly, checked in order
+function matchShellKind(text: string): ShellKind | undefined {
+    if (/powershell|pwsh|\bcmd\b/i.test(text)) {
+        return 'powershell';
+    }
+    // Word boundaries: "MCP Shell Commands" must not read as sh
+    if (/\b(?:bash|zsh|sh|wsl|fish|dash|ksh)\b|git\s*bash/i.test(text)) {
+        return 'bash';
+    }
+    return undefined;
+}
+
+function explicitShellKind(terminal: vscode.Terminal): ShellKind | undefined {
+    const options: any = (terminal as any).creationOptions || {};
+    let shellPath = options.shellPath;
+    if (shellPath && typeof shellPath !== 'string') {
+        shellPath = shellPath.path;
+    }
+    if (shellPath) {
+        const fromPath = matchShellKind(String(shellPath));
+        if (fromPath) {
+            return fromPath;
+        }
+    }
+    if (terminal.name) {
+        return matchShellKind(terminal.name);
+    }
+    return undefined;
+}
+
+/**
+ * VS Code's own idea of the default shell, most reliable signal first, each
+ * entry judged on its own so a foreign platform's synced setting can never
+ * outvote the local one. A Windows box whose default profile is Git Bash must
+ * not be read as PowerShell.
+ */
+function shellHints(): string[] {
+    const hints: string[] = [];
+    const envShell = (vscode.env as { shell?: string }).shell;
+    if (envShell) {
+        hints.push(envShell);
+    }
+    try {
+        const config = vscode.workspace.getConfiguration('terminal');
+        // The setting exists per platform under its own name; the platform id
+        // itself is not part of the key (win32 -> ...windows)
+        const profileKey =
+            process.platform === 'win32' ? 'integrated.defaultProfile.windows' :
+            process.platform === 'darwin' ? 'integrated.defaultProfile.osx' :
+            'integrated.defaultProfile.linux';
+        const profile = config.get<string>(profileKey);
+        if (profile) {
+            hints.push(profile);
+        }
+    } catch {
+        // settings unreadable; fall through on what we have
+    }
+    return hints;
+}
+
 /**
  * Detects which family of shell the terminal is running so the cd prefix and
  * exit-code capture use valid syntax (PowerShell 5.1 rejects `&&` chains)
  * @param terminal The terminal to inspect
  */
 export function detectShellKind(terminal: vscode.Terminal): ShellKind {
-    const options: any = (terminal as any).creationOptions || {};
-    let shellPath = options.shellPath;
-    if (shellPath && typeof shellPath !== 'string') {
-        shellPath = shellPath.path;
+    // A settled probe verdict wins: it reflects what actually answered
+    const verified = verifiedShellKinds.get(terminal);
+    if (verified) {
+        return verified;
     }
-    if (!shellPath && terminal.name) {
-        shellPath = terminal.name;
+    const explicit = explicitShellKind(terminal);
+    if (explicit) {
+        return explicit;
     }
-    const asString = String(shellPath || '');
-    if (/powershell|pwsh|\bcmd\b/i.test(asString)) {
-        return 'powershell';
-    }
-    // Word boundaries: "MCP Shell Commands" must not read as sh and push POSIX
-    // syntax into a PowerShell terminal
-    if (/\b(?:bash|zsh|sh|wsl|fish|dash|ksh)\b|git\s*bash/i.test(asString)) {
-        return 'bash';
+    for (const hint of shellHints()) {
+        const fromHint = matchShellKind(hint);
+        if (fromHint) {
+            return fromHint;
+        }
     }
     return process.platform === 'win32' ? 'powershell' : 'bash';
+}
+
+// Probe result per terminal; POSIX shells answer it, PowerShell cannot parse it,
+// so whatever comes back settles the family question once and for all
+const verifiedShellKinds = new WeakMap<vscode.Terminal, ShellKind>();
+
+function probeCommand(): string {
+    return 'printf \'__MCP_SHELL:%s\\n\' "${BASH_VERSION:-none}"';
+}
+
+/**
+ * Settled shell kind for callers that build dialect-specific fragments
+ * themselves instead of passing a plain command. Verification goes through the
+ * same per-terminal queue as executions, so the probe can never interleave
+ * with a command that is already running.
+ * @param terminal The terminal to inspect
+ */
+export async function resolveShellKind(terminal: vscode.Terminal): Promise<ShellKind> {
+    if (!terminal.shellIntegration) {
+        const available = await waitForShellIntegration(terminal);
+        if (!available || !terminal.shellIntegration) {
+            // Nothing to probe against: the static guess is all we have
+            return detectShellKind(terminal);
+        }
+    }
+    return queueOnTerminal(terminal, () => verifyShellKind(terminal));
+}
+
+async function verifyShellKind(terminal: vscode.Terminal): Promise<ShellKind> {
+    const cached = verifiedShellKinds.get(terminal);
+    if (cached) {
+        return cached;
+    }
+    let kind = detectShellKind(terminal);
+    // Explicit signals (shell path, telling terminal name) are trusted as-is,
+    // and so is a guessed PowerShell family: probing one would type a visible
+    // CommandNotFound error into the user's session for no information. Only
+    // terminals guessed POSIX are worth a round-trip.
+    if (!explicitShellKind(terminal) && kind === 'bash') {
+        try {
+            const { output, exitCode } = await executeAndWait(terminal, probeCommand(), 2000);
+            // Only a genuine answer settles anything: 'none' or a version
+            // number. The echoed command carries the literal '%s' placeholder
+            // and can survive output cleaning when its row wraps, so a bare
+            // '__MCP_SHELL:' substring proves nothing. A deadline cut (exit
+            // 124) proves nothing either — a busy tty looks identical to a
+            // foreign shell — and both stay uncached so the next call retries
+            // with fresh evidence instead of pinning a wrong verdict forever.
+            if (/__MCP_SHELL:(none|\d)/.test(output)) {
+                kind = 'bash';
+                verifiedShellKinds.set(terminal, kind);
+            } else if (exitCode !== 124 && process.platform === 'win32') {
+                // A finished round-trip with no POSIX answer: every POSIX shell
+                // runs printf, so on Windows this session hosts cmd/PowerShell
+                kind = 'powershell';
+                verifiedShellKinds.set(terminal, kind);
+            }
+            // Off Windows, silence usually means a third-family shell (fish,
+            // csh) choked on the brace expansion; the static guess already
+            // covered it
+        } catch {
+            // unreadable stream: same as no answer, retried on a later call
+        }
+    }
+    return kind;
 }
 
 function toBashPath(p: string): string {
@@ -58,7 +181,10 @@ function toPowerShellQuoted(p: string): string {
  * @param cwd Optional working directory
  */
 export function buildFullCommand(terminal: vscode.Terminal, command: string, cwd?: string): string {
-    const kind = detectShellKind(terminal);
+    return buildFullCommandFor(detectShellKind(terminal), command, cwd);
+}
+
+function buildFullCommandFor(kind: ShellKind, command: string, cwd?: string): string {
     const wantsCd = !!cwd && cwd !== '.' && cwd !== './';
     if (kind === 'bash') {
         const body = wantsCd ? `cd ${toPosixQuoted(cwd!)} && ${command}` : command;
@@ -159,6 +285,7 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
                 // Last match per line wins: a printed marker-shaped string must
                 // not shadow the real reading
                 let exitCode = 0;
+                let markerFound = false;
                 const lines = output.split('\n');
                 const markerRegex = new RegExp(`${EXIT_MARKER}:(\\d+)`, 'g');
                 for (let i = lines.length - 1; i >= 0; i--) {
@@ -170,6 +297,7 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
                     markerRegex.lastIndex = 0;
                     if (markerMatch) {
                         exitCode = parseInt(markerMatch[1], 10);
+                        markerFound = true;
                         lines.splice(i, 1);
                         break;
                     }
@@ -197,6 +325,13 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
                     // 124 is what GNU timeout reports; the process itself keeps
                     // running in the terminal and can finish there later
                     cleaned += `\n\n[Timed out after ${timeout}ms — showing the output captured so far. The process may still be running in the terminal; retry with a larger timeout if you need the rest.]`;
+                    // Parse errors in the capture mean the syntax never ran: a
+                    // wrong shell guess sprays them within milliseconds instead
+                    // of ever reaching the marker. A quiet long-running process
+                    // times out too, so bare absence of the marker proves nothing.
+                    if (!markerFound && /command not found|syntax error|unexpected token|is not recognized|ParserError/i.test(output)) {
+                        cleaned += `\n\n[No exit marker came back and the output above looks like shell parse errors — this terminal is probably running a different shell than expected.]`;
+                    }
                     resolve({ output: cleaned, exitCode: 124 });
                     return;
                 }
@@ -243,10 +378,15 @@ export async function executeShellCommand(
         }
     }
 
-    const fullCommand = buildFullCommand(terminal, command, cwd);
     terminal.show();
 
-    return queueOnTerminal(terminal, () => executeAndWait(terminal, fullCommand, timeout));
+    // Verification runs inside the queue so the probe can never interleave
+    // with a real command; buildFullCommand then reads the settled kind
+    return queueOnTerminal(terminal, async () => {
+        await verifyShellKind(terminal);
+        const fullCommand = buildFullCommand(terminal, command, cwd);
+        return executeAndWait(terminal, fullCommand, timeout);
+    });
 }
 
 /**
