@@ -10,7 +10,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Refactoring tools (4): `rename_symbol_code` (word-boundary rename across the workspace with dry-run), `extract_function_code` (line range into a new function plus call site), `find_duplicate_code_code` (normalised sliding-window duplicate blocks with all locations), `suggest_refactoring_code` (body length, parameter count, complexity estimate and nesting per function).
 - Frontend tools (4): `audit_accessibility_code` (missing alt/labels, positive tabindex, clickable div/span, empty links, html lang), `analyze_css_code` (duplicate selectors, repeated properties, empty rules, !important overuse), `inspect_element_code` (markup usages plus CSS rules for a selector), `find_unused_css_code` (selectors never referenced in markup or scripts).
-- New `vscode-mcp-server.enabledTools.refactoring` and `enabledTools.frontend` settings, enabled by default.
+- Workflow tools (4): `run_task_code` (lists/runs package.json, composer.json and Makefile tasks through their own runner), `build_project_code` (detects the build command, overridable, timed), `list_snippets_code` (workspace snippets with JSONC files tolerated), `run_alias_code` (shared shortcuts from `.mcp-aliases.json` at the workspace root).
+- New `vscode-mcp-server.enabledTools.refactoring`, `enabledTools.frontend` and `enabledTools.workflow` settings, enabled by default.
 
 ### Fixed
 
