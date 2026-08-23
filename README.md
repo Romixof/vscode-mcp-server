@@ -89,6 +89,10 @@ Every tool that takes a path or a working directory also accepts an optional `wo
 
 Paths round-trip in both directions: results are displayed as `FolderName/relative/path` when several folders are open, and that same form is accepted as input — as are absolute paths — so an output of one tool can be fed to the next without re-deriving which root it lives in.
 
+### Several VS Code windows, one server
+
+Windows do not fight over the port: the first one to start serves `http://localhost:3000/mcp` exactly as before, and every other VS Code window joins it automatically. There is still one client URL to configure, no matter how many windows are open — each joined window registers its open folders with the hosting window, which forwards every tool call to whichever window owns the target folder. Folder names, deduped labels (`proj-beta-2` when two windows open same-named folders) and the 1-based indexes all span the whole cluster; `list_workspace_folders_code` shows the global numbering and names the window behind each folder, and whole-workspace diagnostics or symbol searches fan out to every window at once. The status bar reads `MCP Server: 3000 (joined)` on a window sharing another's server. Close the hosting window and the remaining ones elect a new host within seconds — the client URL never changes.
+
 | Group | Tools | Covers |
 |---|---|---|
 | File | 6 | list, read (paged, truncated gracefully), move, rename, copy, open-folder inventory |
@@ -226,7 +230,7 @@ Each request gets its own stateless MCP session, so one slow or hung call never 
 
 ## Caveats
 
-Multiple workspace folders are supported; tools pick one through the `workspace` parameter described above. Local connections only. Every VS Code window serves its own server instance, and two windows pointed at the same port collide — give each window its own `vscode-mcp-server.port`. Shell execution means a misbehaving client can run commands on your machine: keep the port closed to your network and only connect clients you trust. No authentication yet; the MCP auth spec is still moving. Inside a devcontainer, WSL or SSH remote the server listens within that environment, so forward the port or connect from a client inside the same remote.
+Multiple workspace folders are supported; tools pick one through the `workspace` parameter described above. Local connections only. Every VS Code window shares the one server automatically — extra windows join the first one, so there is nothing to configure per window (a foreign program squatting on the port still reports an explicit already-in-use error, and windows on different extension versions refuse to mix). Shell execution means a misbehaving client can run commands on your machine: keep the port closed to your network and only connect clients you trust. No authentication yet; the MCP auth spec is still moving. Inside a devcontainer, WSL or SSH remote the server listens within that environment, so forward the port or connect from a client inside the same remote.
 
 ## Credits and license
 
