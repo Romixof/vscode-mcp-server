@@ -14,6 +14,15 @@ function getWorkspaceRoot(): string {
 	return folder.uri.fsPath;
 }
 
+// Discovery and execution must agree on the directory: '' / '.' mean the
+// workspace root, anything else resolves against it
+function resolveWorkingDir(root: string, cwd: string): string {
+	if (!cwd || cwd === '.' || cwd === './') {
+		return root;
+	}
+	return path.resolve(root, cwd);
+}
+
 function readJsonFile(filePath: string): any {
 	try {
 		return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -120,18 +129,33 @@ interface SnippetInfo {
 	bodyPreview: string;
 }
 
-function loadSnippets(root: string, prefixFilter: string): SnippetInfo[] {
-	const snippetsDir = path.join(root, '.vscode', 'snippets');
-	if (!fs.existsSync(snippetsDir)) {
-		return [];
-	}
-
-	const snippets: SnippetInfo[] = [];
-	for (const fileName of fs.readdirSync(snippetsDir)) {
-		if (!fileName.endsWith('.json') && !fileName.endsWith('.code-snippets')) {
+function listSnippetFiles(root: string): Array<{ file: string; name: string }> {
+	const vscodeDir = path.join(root, '.vscode');
+	const snippetsDir = path.join(vscodeDir, 'snippets');
+	const found: Array<{ file: string; name: string }> = [];
+	// VS Code's own "Configure Snippets" drops workspace files straight into
+	// .vscode/*.code-snippets; teams also keep a snippets/ subfolder
+	for (const [dir, extensions] of [
+		[snippetsDir, ['.json', '.code-snippets']],
+		[vscodeDir, ['.code-snippets']]
+	] as const) {
+		if (!fs.existsSync(dir)) {
 			continue;
 		}
-		const filePath = path.join(snippetsDir, fileName);
+		for (const fileName of fs.readdirSync(dir)) {
+			if (extensions.some(ext => fileName.endsWith(ext))) {
+				found.push({ file: path.join(dir, fileName), name: fileName });
+			}
+		}
+	}
+	return found;
+}
+
+function loadSnippets(root: string, prefixFilter: string): SnippetInfo[] {
+	const snippetFiles = listSnippetFiles(root);
+
+	const snippets: SnippetInfo[] = [];
+	for (const { file: filePath, name: fileName } of snippetFiles) {
 		let parsed: any;
 		try {
 			parsed = readJsoncFile(filePath);
@@ -197,16 +221,17 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 
         WHEN TO USE: Executing the project's own scripts without remembering the underlying command.
 
-        Call without a task to list everything available, then pass the task name. Extra CLI arguments go in args.`,
+        Call without a task to list everything available, then pass the task name. Extra CLI arguments go in args.
+        When the same name exists in several sources, qualify it with its source prefix (npm:, composer:, make:), e.g. "make:build".`,
 		{
-			task: z.string().optional().default('').describe('Task name to run. Omit or leave empty to list available tasks'),
+			task: z.string().optional().default('').describe('Task name to run, e.g. "build" or "make:build" when ambiguous. Omit or leave empty to list available tasks'),
 			args: z.string().optional().default('').describe('Extra command-line arguments appended to the task command'),
-			cwd: z.string().optional().default('.').describe('Working directory (defaults to workspace root)'),
+			cwd: z.string().optional().default('.').describe('Working directory whose package.json/composer.json/Makefile is used (defaults to workspace root)'),
 			timeout: z.number().optional().default(120000).describe('Timeout in milliseconds (default: 120000)')
 		},
 		async ({ task = '', args = '', cwd = '.', timeout = 120000 }): Promise<CallToolResult> => {
-			const root = getWorkspaceRoot();
-			const tasks = discoverTasks(root);
+			const dir = resolveWorkingDir(getWorkspaceRoot(), cwd);
+			const tasks = discoverTasks(dir);
 
 			if (!task.trim()) {
 				if (tasks.length === 0) {
@@ -229,13 +254,27 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 			if (!/^[A-Za-z0-9_./:@-]+$/.test(task)) {
 				throw new Error(`Invalid task name "${task}"`);
 			}
-			const match = tasks.filter(t => t.name === task);
-			if (match.length === 0) {
-				throw new Error(`Task "${task}" not found. Available: ${tasks.map(t => t.name).join(', ') || 'none'}`);
+			const notFound = () => new Error(`Task "${task}" not found. Available: ${tasks.map(t => t.name).join(', ') || 'none'}`);
+			let chosen: TaskInfo | undefined;
+			const plain = tasks.filter(t => t.name === task);
+			if (plain.length > 1) {
+				const sources = [...new Set(plain.map(t => t.source))];
+				throw new Error(`Task "${task}" exists in several sources (${sources.join(', ')}). Qualify it with a prefix: ${plain.map(t => `${t.source}:${t.name}`).join(', ')}`);
+			} else if (plain.length === 1) {
+				chosen = plain[0];
+			} else {
+				// npm script names often contain ':' themselves (test:unit), so the
+				// source-qualified form is only tried once the plain name missed
+				const prefixed = task.match(/^(npm|composer|make):(.+)$/);
+				if (prefixed) {
+					chosen = tasks.find(t => t.source === prefixed[1] && t.name === prefixed[2]);
+				}
 			}
-			const chosen = match[0];
+			if (!chosen) {
+				throw notFound();
+			}
 			const fullCommand = args.trim() ? `${chosen.command} ${args.trim()}` : chosen.command;
-			const { output, exitCode } = await runInTerminal(terminal, fullCommand, cwd, timeout);
+			const { output, exitCode } = await runInTerminal(terminal, fullCommand, dir, timeout);
 			return {
 				content: [{
 					type: 'text',
@@ -254,14 +293,14 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
         Detection order: package.json "build" script, "compile" script, Makefile, tsconfig.json. Pass an explicit command to override detection.`,
 		{
 			command: z.string().optional().default('').describe('Explicit build command. Omit to auto-detect'),
-			cwd: z.string().optional().default('.').describe('Working directory (defaults to workspace root)'),
+			cwd: z.string().optional().default('.').describe('Working directory whose package.json/Makefile/tsconfig.json is used (defaults to workspace root)'),
 			timeout: z.number().optional().default(300000).describe('Timeout in milliseconds (default: 300000)')
 		},
 		async ({ command = '', cwd = '.', timeout = 300000 }): Promise<CallToolResult> => {
-			const root = getWorkspaceRoot();
+			const dir = resolveWorkingDir(getWorkspaceRoot(), cwd);
 			const build = command.trim()
 				? { command: command.trim(), origin: 'explicit command' }
-				: detectBuildCommand(root);
+				: detectBuildCommand(dir);
 
 			if (!build) {
 				return {
@@ -273,7 +312,7 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 			}
 
 			const startedAt = Date.now();
-			const { output, exitCode } = await runInTerminal(terminal, build.command, cwd, timeout);
+			const { output, exitCode } = await runInTerminal(terminal, build.command, dir, timeout);
 			const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
 			return {
 				content: [{
@@ -286,7 +325,7 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 
 	server.tool(
 		'list_snippets_code',
-		`Lists the VS Code snippets defined in the workspace (.vscode/snippets).
+		`Lists the VS Code snippets defined in the workspace: .vscode/snippets/*.json, *.code-snippets, plus the .vscode/*.code-snippets files VS Code itself creates.
 
         WHEN TO USE: Discovering existing snippet prefixes before creating new ones, or reviewing what shortcuts the team shares.`,
 		{
@@ -298,7 +337,7 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 
 			if (snippets.length === 0) {
 				return {
-					content: [{ type: 'text', text: `No snippets found${prefixFilter ? ` with prefix containing "${prefixFilter}"` : ''}. Snippet files live in .vscode/snippets/*.json or *.code-snippets.` }]
+					content: [{ type: 'text', text: `No snippets found${prefixFilter ? ` with prefix containing "${prefixFilter}"` : ''}. Snippet files live in .vscode/snippets/*.json, .vscode/snippets/*.code-snippets or .vscode/*.code-snippets.` }]
 				};
 			}
 

@@ -187,9 +187,9 @@ Frameworks auto-detect from `package.json`, `requirements.txt` or `pyproject.tom
 
 Project tasks, builds, editor snippets and shared shell shortcuts, discovered from files the project already has. Nothing to configure.
 
-- **run_task_code**: lists or runs tasks from package.json scripts, composer.json scripts and Makefile targets, each through its own runner (`npm run`, `composer run-script`, `make`). Params: `task`, `args`, `cwd`, `timeout` ms (default 120000). Call it without `task` to list what exists.
+- **run_task_code**: lists or runs tasks from package.json scripts, composer.json scripts and Makefile targets, each through its own runner (`npm run`, `composer run-script`, `make`). When one name exists in several sources, qualify it (`make:build`). Params: `task`, `args`, `cwd` (tasks are discovered where you point), `timeout` ms (default 120000). Call it without `task` to list what exists.
 - **build_project_code**: detects the build command (package.json build script, Makefile, tsconfig.json) and runs it with a duration and exit code report. Params: `command` to override detection, `cwd`, `timeout` ms (default 300000).
-- **list_snippets_code**: lists snippets under .vscode/snippets with a body preview; comment lines in the JSON files are tolerated. Params: `prefixFilter`.
+- **list_snippets_code**: lists snippets with a body preview, from `.vscode/snippets/*.json`, `.vscode/snippets/*.code-snippets` and the `.vscode/*.code-snippets` files VS Code itself creates; comment lines are tolerated. Params: `prefixFilter`.
 - **run_alias_code**: runs shortcuts from `.mcp-aliases.json` at the workspace root, so a whole team shares one set of commands; values are plain command strings or `{ command, description }`. Params: `name`, `args`, `cwd`, `timeout`.
 
 ## Configuration
