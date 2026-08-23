@@ -237,23 +237,6 @@ export class MCPServer {
         });
     }
 
-    private setupEventHandlers(): void {
-        // Log HTTP server events
-        if (this.httpServer) {
-            this.httpServer.on('error', (error: Error) => {
-                logger.error(`[Server] HTTP Server Error: ${error.message}`);
-            });
-
-            this.httpServer.on('listening', () => {
-                logger.info(`[Server] HTTP Server ready`);
-            });
-
-            this.httpServer.on('close', () => {
-                logger.info(`[Server] HTTP Server closed`);
-            });
-        }
-    }
-
     public async start(): Promise<void> {
         try {
             logger.info('[MCPServer.start] Starting MCP server');
@@ -262,18 +245,28 @@ export class MCPServer {
             // Start HTTP server
             logger.info('[MCPServer.start] Starting HTTP server');
             const httpServerStartTime = Date.now();
-            
-            return new Promise((resolve) => {
+
+            return new Promise((resolve, reject) => {
                 // Bind to localhost only for security
                 this.httpServer = this.app.listen(this.port, this.host, () => {
                     const httpStartTime = Date.now() - httpServerStartTime;
                     logger.info(`[MCPServer.start] HTTP Server started (took ${httpStartTime}ms)`);
                     logger.info(`MCP Server listening on ${this.host}:${this.port}`);
-                    
+
                     const totalTime = Date.now() - startTime;
                     logger.info(`[MCPServer.start] Server startup complete (total: ${totalTime}ms)`);
-                    
+
                     resolve();
+                });
+                // A taken port surfaces as an 'error' event, not an exception:
+                // without this listener the startup promise never settles and
+                // the window sits half-started with no explanation
+                this.httpServer.once('error', (error: Error & { code?: string }) => {
+                    const detail = error.code === 'EADDRINUSE'
+                        ? `port ${this.port} is already in use — another VS Code window may already be serving MCP there; give this window its own vscode-mcp-server.port`
+                        : error.message;
+                    logger.error(`[MCPServer.start] HTTP Server failed to listen: ${detail}`);
+                    reject(new Error(detail));
                 });
             });
         } catch (error) {
