@@ -55,7 +55,8 @@
             "security": true,
             "performance": true,
             "refactoring": true,
-            "frontend": true
+            "frontend": true,
+            "workflow": true
           },
           "properties": {
             "file": {
@@ -117,6 +118,10 @@
             "frontend": {
               "type": "boolean",
               "description": "Enable frontend tools (accessibility audit, CSS analysis, element inspection, unused CSS)"
+            },
+            "workflow": {
+              "type": "boolean",
+              "description": "Enable workflow tools (task runner, build detection, snippets, shell aliases)"
             }
           },
           "description": "Configure which MCP tools are enabled"

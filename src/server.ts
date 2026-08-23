@@ -19,6 +19,7 @@ import { registerSecurityTools } from './tools/security-tools';
 import { registerPerformanceTools } from './tools/performance-tools';
 import { registerRefactorTools } from './tools/refactor-tools';
 import { registerFrontendTools } from './tools/frontend-tools';
+import { registerWorkflowTools } from './tools/workflow-tools';
 import { logger } from './utils/logger';
 
 export interface ToolConfiguration {
@@ -37,6 +38,7 @@ export interface ToolConfiguration {
     performance: boolean;
     refactoring: boolean;
     frontend: boolean;
+    workflow: boolean;
 }
 
 export class MCPServer {
@@ -71,7 +73,8 @@ export class MCPServer {
             security: true,
             performance: true,
             refactoring: true,
-            frontend: true
+            frontend: true,
+            workflow: true
         };
         this.app = express();
         this.app.use(express.json());
@@ -133,7 +136,8 @@ export class MCPServer {
             ['security', c.security, () => registerSecurityTools(server, terminal)],
             ['performance', c.performance, () => registerPerformanceTools(server, terminal)],
             ['refactoring', c.refactoring, () => registerRefactorTools(server)],
-            ['frontend', c.frontend, () => registerFrontendTools(server)]
+            ['frontend', c.frontend, () => registerFrontendTools(server)],
+            ['workflow', c.workflow, () => registerWorkflowTools(server, terminal)]
         ];
 
         for (const [, enabled, register] of groups) {
