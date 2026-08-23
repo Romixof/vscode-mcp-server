@@ -2,33 +2,25 @@ import * as vscode from 'vscode';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import * as path from 'path';
+import { resolveInputPath, workspaceDisplayPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
 /**
- * Get diagnostics for the entire workspace or a specific file
- * @param filePath Optional file path to check
+ * Get diagnostics for a specific file or every open file
+ * @param filePath Optional file path to check (relative to the selected workspace)
  * @returns Array of [Uri, Diagnostic[]] tuples
  */
-function getDiagnostics(filePath?: string): [vscode.Uri, vscode.Diagnostic[]][] {
+function getDiagnostics(filePath?: string, workspace?: string): [vscode.Uri, vscode.Diagnostic[]][] {
     console.log(`[getDiagnostics] Starting with filePath: ${filePath || 'all files'}`);
-    
+
     // If filePath is provided, get diagnostics for that file only
     if (filePath) {
-        if (!vscode.workspace.workspaceFolders) {
-            throw new Error('No workspace folder is open');
-        }
-
-        const workspaceFolder = vscode.workspace.workspaceFolders[0];
-        const workspaceUri = workspaceFolder.uri;
-        
-        // Create URI for the target file
-        const fileUri = vscode.Uri.joinPath(workspaceUri, filePath);
+        const fileUri = resolveInputPath(filePath, workspace);
         console.log(`[getDiagnostics] Getting diagnostics for file: ${fileUri.fsPath}`);
-        
+
         const diagnostics = vscode.languages.getDiagnostics(fileUri);
         return diagnostics.length > 0 ? [[fileUri, diagnostics]] : [];
     }
-    
+
     // Otherwise, get diagnostics for all files
     console.log('[getDiagnostics] Getting diagnostics for all files');
     return vscode.languages.getDiagnostics();
@@ -52,24 +44,6 @@ function getSeverityName(severity: vscode.DiagnosticSeverity): string {
         default:
             return 'Unknown';
     }
-}
-
-/**
- * Convert workspace URI to relative path
- * @param uri The Uri to convert
- * @returns Path relative to workspace root
- */
-function uriToWorkspacePath(uri: vscode.Uri): string {
-    if (!vscode.workspace.workspaceFolders) {
-        return uri.fsPath;
-    }
-
-    const workspaceFolder = vscode.workspace.workspaceFolders[0];
-    const workspaceRoot = workspaceFolder.uri.fsPath;
-    
-    // Convert to relative path
-    const relativePath = path.relative(workspaceRoot, uri.fsPath);
-    return relativePath;
 }
 
 /**
@@ -101,7 +75,7 @@ function formatDiagnostics(
     let totalIssues = 0;
     
     for (const [uri, fileDiagnostics] of diagnostics) {
-        const filePath = uriToWorkspacePath(uri);
+        const filePath = workspaceDisplayPath(uri);
         
         for (const diagnostic of fileDiagnostics) {
             // Skip diagnostics with severity not in the specified list
@@ -174,14 +148,15 @@ export function registerDiagnosticsTools(server: McpServer): void {
             path: z.string().optional().default('').describe('Optional file path to check. If not provided, checks the entire workspace. The file path must be a file, not a directory.'),
             severities: z.array(z.number()).optional().default([0, 1]).describe('Array of severity levels to include (0=Error, 1=Warning, 2=Information, 3=Hint)'),
             format: z.enum(['text', 'json']).optional().default('text').describe('Output format'),
-            includeSource: z.boolean().optional().default(true).describe('Whether to include the diagnostic source to identify which linter/extension flagged each issue')
+            includeSource: z.boolean().optional().default(true).describe('Whether to include the diagnostic source to identify which linter/extension flagged each issue'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ path, severities = [0, 1], format = 'text', includeSource = true }): Promise<CallToolResult> => {
+        async ({ path, severities = [0, 1], format = 'text', includeSource = true, workspace }): Promise<CallToolResult> => {
             console.log(`[get_diagnostics] Tool called with path=${path || 'all'}, severities=${severities.join(',')}, format=${format}`);
-            
+
             try {
                 console.log('[get_diagnostics] Getting diagnostics');
-                const diagnostics = getDiagnostics(path);
+                const diagnostics = getDiagnostics(path, workspace);
                 
                 console.log(`[get_diagnostics] Found diagnostics for ${diagnostics.length} files`);
                 const formattedResult = formatDiagnostics(diagnostics, severities, format, includeSource);

@@ -5,14 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { executeShellCommand } from './shell-tools.js';
-
-function getWorkspaceRoot(): string {
-	const folder = vscode.workspace.workspaceFolders?.[0];
-	if (!folder) {
-		throw new Error('No workspace folder is open');
-	}
-	return folder.uri.fsPath;
-}
+import { getWorkspaceRoot, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace.js';
 
 // Discovery and execution must agree on the directory: '' / '.' mean the
 // workspace root, anything else resolves against it
@@ -227,10 +220,11 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 			task: z.string().optional().default('').describe('Task name to run, e.g. "build" or "make:build" when ambiguous. Omit or leave empty to list available tasks'),
 			args: z.string().optional().default('').describe('Extra command-line arguments appended to the task command'),
 			cwd: z.string().optional().default('.').describe('Working directory whose package.json/composer.json/Makefile is used (defaults to workspace root)'),
-			timeout: z.number().optional().default(120000).describe('Timeout in milliseconds (default: 120000)')
+			timeout: z.number().optional().default(120000).describe('Timeout in milliseconds (default: 120000)'),
+			workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 		},
-		async ({ task = '', args = '', cwd = '.', timeout = 120000 }): Promise<CallToolResult> => {
-			const dir = resolveWorkingDir(getWorkspaceRoot(), cwd);
+		async ({ task = '', args = '', cwd = '.', timeout = 120000, workspace }): Promise<CallToolResult> => {
+			const dir = resolveWorkingDir(getWorkspaceRoot(workspace), cwd);
 			const tasks = discoverTasks(dir);
 
 			if (!task.trim()) {
@@ -294,10 +288,11 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 		{
 			command: z.string().optional().default('').describe('Explicit build command. Omit to auto-detect'),
 			cwd: z.string().optional().default('.').describe('Working directory whose package.json/Makefile/tsconfig.json is used (defaults to workspace root)'),
-			timeout: z.number().optional().default(300000).describe('Timeout in milliseconds (default: 300000)')
+			timeout: z.number().optional().default(300000).describe('Timeout in milliseconds (default: 300000)'),
+			workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 		},
-		async ({ command = '', cwd = '.', timeout = 300000 }): Promise<CallToolResult> => {
-			const dir = resolveWorkingDir(getWorkspaceRoot(), cwd);
+		async ({ command = '', cwd = '.', timeout = 300000, workspace }): Promise<CallToolResult> => {
+			const dir = resolveWorkingDir(getWorkspaceRoot(workspace), cwd);
 			const build = command.trim()
 				? { command: command.trim(), origin: 'explicit command' }
 				: detectBuildCommand(dir);
@@ -329,10 +324,11 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 
         WHEN TO USE: Discovering existing snippet prefixes before creating new ones, or reviewing what shortcuts the team shares.`,
 		{
-			prefixFilter: z.string().optional().default('').describe('Only show snippets whose prefix contains this text (case-insensitive)')
+			prefixFilter: z.string().optional().default('').describe('Only show snippets whose prefix contains this text (case-insensitive)'),
+			workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 		},
-		async ({ prefixFilter = '' }): Promise<CallToolResult> => {
-			const root = getWorkspaceRoot();
+		async ({ prefixFilter = '', workspace }): Promise<CallToolResult> => {
+			const root = getWorkspaceRoot(workspace);
 			const snippets = loadSnippets(root, prefixFilter.trim());
 
 			if (snippets.length === 0) {
@@ -363,10 +359,11 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 			name: z.string().optional().default('').describe('Alias name to run. Omit or leave empty to list available aliases'),
 			args: z.string().optional().default('').describe('Extra arguments appended to the alias command'),
 			cwd: z.string().optional().default('.').describe('Working directory (defaults to workspace root)'),
-			timeout: z.number().optional().default(120000).describe('Timeout in milliseconds (default: 120000)')
+			timeout: z.number().optional().default(120000).describe('Timeout in milliseconds (default: 120000)'),
+			workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 		},
-		async ({ name = '', args = '', cwd = '.', timeout = 120000 }): Promise<CallToolResult> => {
-			const root = getWorkspaceRoot();
+		async ({ name = '', args = '', cwd = '.', timeout = 120000, workspace }): Promise<CallToolResult> => {
+			const root = getWorkspaceRoot(workspace);
 			const aliases = loadAliases(root);
 
 			if (!name.trim()) {
@@ -387,7 +384,7 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 				throw new Error(`Alias "${name}" not found. Available: ${[...aliases.keys()].join(', ') || 'none'}`);
 			}
 			const fullCommand = args.trim() ? `${alias.command} ${args.trim()}` : alias.command;
-			const { output, exitCode } = await runInTerminal(terminal, fullCommand, cwd, timeout);
+			const { output, exitCode } = await runInTerminal(terminal, fullCommand, resolveWorkingDir(root, cwd), timeout);
 			return {
 				content: [{
 					type: 'text',

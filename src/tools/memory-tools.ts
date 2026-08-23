@@ -3,18 +3,20 @@ import * as path from 'path';
 import * as os from 'os';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
+import { resolveWorkspaceFolder, listWorkspaceFolders, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
 const MAMMOUTH_DIR = path.join(os.homedir(), 'Mammouth');
 const GLOBAL_MEMORY_FILE = path.join(MAMMOUTH_DIR, 'MEMORY.md');
 
-function getProjectMemoryPath(): string | undefined {
-	if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+function getProjectMemoryPath(ref?: string): string | undefined {
+	// undefined (rather than a thrown error) means no folder is open and lets each
+	// tool print its own guidance; a bad ref still fails loudly with "Unknown workspace"
+	if (listWorkspaceFolders().length === 0) {
 		return undefined;
 	}
-	const workspaceFolder = vscode.workspace.workspaceFolders[0];
-	const workspaceName = workspaceFolder.name;
-	const sanitizedName = workspaceName.replace(/[^a-zA-Z0-9_-]/g, '_');
-	return path.join(workspaceFolder.uri.fsPath, `${sanitizedName}_MEMORY.md`);
+	const folder = resolveWorkspaceFolder(ref);
+	const sanitizedName = folder.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+	return path.join(folder.uri.fsPath, `${sanitizedName}_MEMORY.md`);
 }
 
 async function ensureDirectoryExists(dirPath: string): Promise<void> {
@@ -158,9 +160,9 @@ function searchMemoryContent(content: string, query: string): Array<{ section: s
 	return results;
 }
 
-async function loadAllMemory(): Promise<{ global: string | null; project: string | null; projectPath: string | undefined }> {
+async function loadAllMemory(workspace?: string): Promise<{ global: string | null; project: string | null; projectPath: string | undefined }> {
 	const globalMemory = await readMemoryFile(GLOBAL_MEMORY_FILE);
-	const projectPath = getProjectMemoryPath();
+	const projectPath = getProjectMemoryPath(workspace);
 	const projectMemory = projectPath ? await readMemoryFile(projectPath) : null;
 	return { global: globalMemory, project: projectMemory, projectPath };
 }
@@ -170,8 +172,10 @@ export function registerMemoryTools(server: McpServer): void {
 
 WHEN TO USE: First thing to do at the start of any session. Loads user identity, preferences, workflow rules, and project-specific context.
 
-Returns merged content with clear separation between global and project memory.`, {}, async () => {
-		const { global, project, projectPath } = await loadAllMemory();
+Returns merged content with clear separation between global and project memory.`, {
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ workspace }) => {
+		const { global, project, projectPath } = await loadAllMemory(workspace);
 		let result = '# 🧠 Memory Loaded\n\n';
 		if (global) {
 			result += '## 📍 Global Memory (~/Mammouth/MEMORY.md)\n\n';
@@ -203,9 +207,10 @@ Scope "project" → {workspaceName}_MEMORY.md in workspace root (project rules, 
 		section: z.string().describe('Section header (e.g., "Préférences utilisateur", "Contexte projet", "Règles personnelles")'),
 		entry: z.string().describe('The fact/rule/preference to remember'),
 		scope: z.enum(['global', 'project']).optional().default('project').describe('Which memory to save to: "global" for ~/Mammouth/MEMORY.md, "project" for workspace memory'),
-		sectionLevel: z.number().min(1).max(6).optional().default(2).describe('Markdown header level for the section (default: 2 for ##)')
-	}, async ({ section, entry, scope = 'project', sectionLevel = 2 }) => {
-		const targetPath = scope === 'global' ? GLOBAL_MEMORY_FILE : getProjectMemoryPath();
+		sectionLevel: z.number().min(1).max(6).optional().default(2).describe('Markdown header level for the section (default: 2 for ##)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ section, entry, scope = 'project', sectionLevel = 2, workspace }) => {
+		const targetPath = scope === 'global' ? GLOBAL_MEMORY_FILE : getProjectMemoryPath(workspace);
 		if (!targetPath) {
 			throw new Error('No workspace open — cannot save to project memory. Use scope="global" or open a workspace.');
 		}
@@ -226,9 +231,10 @@ Scope "project" → {workspaceName}_MEMORY.md in workspace root (project rules, 
 
 WHEN TO USE: Find previously saved preferences, decisions, or snippets without reading entire memory files.`, {
 		query: z.string().describe('Search term to find in memory entries'),
-		scope: z.enum(['global', 'project', 'both']).optional().default('both').describe('Which memory to search: "global", "project", or "both"')
-	}, async ({ query, scope = 'both' }) => {
-		const { global, project, projectPath } = await loadAllMemory();
+		scope: z.enum(['global', 'project', 'both']).optional().default('both').describe('Which memory to search: "global", "project", or "both"'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ query, scope = 'both', workspace }) => {
+		const { global, project, projectPath } = await loadAllMemory(workspace);
 		const results: Array<{ source: string; section: string; line: string; lineNumber: number }> = [];
 		if ((scope === 'global' || scope === 'both') && global) {
 			const globalResults = searchMemoryContent(global, query);
@@ -260,9 +266,10 @@ WHEN TO USE: Memory becomes toxic if it accumulates stale/incorrect data. Clean 
 Provide entry to remove a specific bullet. Omit entry to remove the entire section.`, {
 		section: z.string().describe('Section header to clear from'),
 		entry: z.string().optional().describe('Specific entry text to remove (omit to delete entire section)'),
-		scope: z.enum(['global', 'project']).optional().default('project').describe('Which memory to clear from')
-	}, async ({ section, entry, scope = 'project' }) => {
-		const targetPath = scope === 'global' ? GLOBAL_MEMORY_FILE : getProjectMemoryPath();
+		scope: z.enum(['global', 'project']).optional().default('project').describe('Which memory to clear from'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ section, entry, scope = 'project', workspace }) => {
+		const targetPath = scope === 'global' ? GLOBAL_MEMORY_FILE : getProjectMemoryPath(workspace);
 		if (!targetPath) {
 			throw new Error('No workspace open — cannot clear project memory. Use scope="global" or open a workspace.');
 		}
