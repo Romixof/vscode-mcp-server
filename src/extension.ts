@@ -153,9 +153,22 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
             
             logger.info(`[toggleServerState] Starting server at ${new Date().toISOString()}`);
             const startTime = Date.now();
-            
-            await mcpServer.start();
-            
+
+            try {
+                await mcpServer.start();
+            } catch (error) {
+                // Nothing is listening; flip the toggle back so the status bar
+                // does not advertise a dead server
+                mcpServer = undefined;
+                serverEnabled = false;
+                void context.globalState.update('mcpServerEnabled', false);
+                updateStatusBar(port);
+                const message = error instanceof Error ? error.message : String(error);
+                logger.error(`[toggleServerState] Failed to start server: ${message}`);
+                vscode.window.showErrorMessage(`MCP Server failed to start: ${message}`);
+                return;
+            }
+
             const duration = Date.now() - startTime;
             logger.info(`[toggleServerState] Server started successfully at ${new Date().toISOString()} (took ${duration}ms)`);
             
@@ -240,8 +253,19 @@ export async function activate(context: vscode.ExtensionContext) {
             // Call setupTools after setting the callback
             mcpServer.setupTools();
 
-            await mcpServer.start();
-            logger.info('MCP Server started successfully');
+            try {
+                await mcpServer.start();
+                logger.info('MCP Server started successfully');
+            } catch (error) {
+                // Auto-start on a taken port must not wedge activation: report
+                // it, drop the instance, show the server as off. The saved
+                // enabled state stays, so the next window load retries alone
+                mcpServer = undefined;
+                serverEnabled = false;
+                const message = error instanceof Error ? error.message : String(error);
+                logger.error(`[activate] MCP Server failed to start: ${message}`);
+                vscode.window.showErrorMessage(`MCP Server failed to start: ${message}`);
+            }
         } else {
             logger.info('MCP Server is disabled by default');
         }
@@ -292,8 +316,19 @@ export async function activate(context: vscode.ExtensionContext) {
                         }
                     });
                     mcpServer.setupTools();
-                    await mcpServer.start();
-                    
+                    try {
+                        await mcpServer.start();
+                    } catch (error) {
+                        mcpServer = undefined;
+                        serverEnabled = false;
+                        void context.globalState.update('mcpServerEnabled', false);
+                        updateStatusBar(port);
+                        const message = error instanceof Error ? error.message : String(error);
+                        logger.error(`[configChangeListener] Failed to restart server: ${message}`);
+                        vscode.window.showErrorMessage(`MCP Server failed to restart: ${message}`);
+                        return;
+                    }
+
                     vscode.window.showInformationMessage('MCP Server restarted with updated tool configuration');
                 }
             }
