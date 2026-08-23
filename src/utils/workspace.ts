@@ -9,11 +9,51 @@ function norm(s: string): string {
 	return s.normalize('NFC').toLowerCase();
 }
 
+// --- Multi-window cluster display -----------------------------------------
+// When several VS Code windows share one MCP server, paths shown to clients
+// must stay attributable and round-trippable across ALL windows, even where a
+// window has a single folder (the usual case). A module-level switch flips the
+// "several folders" display rules on cluster-wide; overrides rename folders
+// whose plain name another window already claimed.
+
+let clusterDisplayActive = false;
+let clusterLabelOverrides = new Map<string, string>();
+
+/**
+ * Enables or disables cluster-wide display prefixes. Overrides map a local
+ * folder name to the cluster-unique label assigned at registration.
+ */
+export function setClusterDisplay(active: boolean, overrides?: Record<string, string>): void {
+	clusterDisplayActive = active;
+	clusterLabelOverrides = new Map();
+	if (overrides) {
+		for (const [local, label] of Object.entries(overrides)) {
+			if (local !== label) {
+				clusterLabelOverrides.set(norm(local), label);
+			}
+		}
+	}
+}
+
+export function isInCluster(): boolean {
+	return clusterDisplayActive;
+}
+
+/** The label this folder carries across the cluster (differs from the name only after a collision). */
+export function displayLabelFor(folder: vscode.WorkspaceFolder): string {
+	return clusterLabelOverrides.get(norm(folder.name)) ?? folder.name;
+}
+
 /**
  * Lists every root folder currently open in the window.
  */
 export function listWorkspaceFolders(): readonly vscode.WorkspaceFolder[] {
 	return vscode.workspace.workspaceFolders ?? [];
+}
+
+/** True when displayed paths should carry the owning folder as a prefix. */
+export function prefixDisplay(): boolean {
+	return listWorkspaceFolders().length > 1 || clusterDisplayActive;
 }
 
 /**
@@ -92,10 +132,14 @@ export function resolveInputPath(input: string, ref?: string): vscode.Uri {
 		return vscode.Uri.file(trimmed);
 	}
 	const folders = listWorkspaceFolders();
-	if (folders.length > 1) {
+	if (prefixDisplay()) {
 		const segments = trimmed.split(/[\\/]+/).filter(s => s !== '' && s !== '.');
 		if (segments.length > 0) {
-			const owner = folders.find(f => norm(f.name) === norm(segments[0]));
+			// Both spellings are accepted because displays may carry a
+			// cluster-assigned label while the folder itself kept its name
+			const owner = folders.find(
+				f => norm(f.name) === norm(segments[0]) || norm(displayLabelFor(f)) === norm(segments[0])
+			);
 			if (owner) {
 				const rest = segments.slice(1).join('/');
 				return rest ? vscode.Uri.joinPath(owner.uri, rest) : owner.uri;
@@ -120,10 +164,10 @@ export function workspaceDisplayPath(uri: vscode.Uri): string {
 	if (owner) {
 		const relative = path.relative(owner.uri.fsPath, uri.fsPath);
 		if (relative !== '') {
-			return folders.length > 1 ? `${owner.name}/${relative}` : relative;
+			return prefixDisplay() ? `${displayLabelFor(owner)}/${relative}` : relative;
 		}
 	}
-	if (folders.length > 1) {
+	if (prefixDisplay()) {
 		return uri.fsPath;
 	}
 	return path.relative(folders[0].uri.fsPath, uri.fsPath);
@@ -169,9 +213,11 @@ export function resolveRelativeToolPath(
 		relative: relativeNative.replace(/\\/g, '/'),
 		fsPath: uri.fsPath,
 		dir: path.join(root, relativeNative),
+		// gitPath deliberately stays owner-relative with no label segment:
+		// the git-backed tools splice it into command lines run inside root
 		gitPath: relativeNative.replace(/\\/g, '/'),
-		displayPrefix: listWorkspaceFolders().length > 1 ? `${folder.name}/` : '',
-		displayBase: listWorkspaceFolders().length > 1 ? `${folder.name}/` : '',
+		displayPrefix: prefixDisplay() ? `${displayLabelFor(folder)}/` : '',
+		displayBase: prefixDisplay() ? `${displayLabelFor(folder)}/` : '',
 		owned: true
 	};
 }
@@ -180,4 +226,4 @@ export function resolveRelativeToolPath(
  * Shared zod-free description so every tool documents the param identically.
  */
 export const WORKSPACE_PARAM_DESCRIPTION =
-	'Which workspace root to use when multiple folders are open: folder name or 1-based index. Defaults to the first folder. A "Name/relpath" path resolves against Name even when this parameter points elsewhere.';
+	'Which workspace root to use when multiple folders are open: folder name or 1-based index. Defaults to the first folder. A "Name/relpath" path resolves against Name even when this parameter points elsewhere. With several VS Code windows sharing this server, names and indexes span every window — list_workspace_folders_code is authoritative.';
