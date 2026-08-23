@@ -10,7 +10,7 @@ https://github.com/user-attachments/assets/f60da97b-a5a9-45cb-8379-3bf91c9bbad0
 
 ## Quick start
 
-1. Install the extension from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Romixo.vscode-mcp-server), from a `.vsix` (Extensions view → `⋯` → *Install from VSIX*), or build it yourself with `npm install && npm run compile`.
+1. Install the extension from the `.vsix` file (Extensions view → `⋯` → *Install from VSIX*), or build it yourself with `npm install && npm run compile`.
 2. Click the status bar item to start the server.
 3. Point your MCP client at `http://localhost:3000/mcp`.
 
