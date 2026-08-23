@@ -10,7 +10,7 @@ https://github.com/user-attachments/assets/f60da97b-a5a9-45cb-8379-3bf91c9bbad0
 
 ## Quick start
 
-1. Install the extension from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=Romixo.vscode-mcp-server), from a `.vsix` (Extensions view → `⋯` → *Install from VSIX*), or build it yourself with `npm install && npm run compile`.
+1. Install the extension from a `.vsix` (Extensions view → `⋯` → *Install from VSIX*), or build it yourself with `npm install && npm run compile`.
 2. Click the status bar item to start the server.
 3. Point your MCP client at `http://localhost:3000/mcp`.
 
@@ -41,6 +41,7 @@ WORKFLOW ESSENTIALS:
 2. CRITICAL: Run get_diagnostics_code after EVERY set of code changes before completing tasks
 3. For small edits (≤10 lines): use replace_lines_code with exact original content
 4. For large changes, new files, or uncertain content: use create_file_code with overwrite=true
+5. Before committing: run find_secrets_code and security_scan_code, fix what they flag
 
 EXPLORATION STRATEGY:
 - Start: list_files_code with path='.' (never recursive on root)
@@ -51,8 +52,18 @@ EXPLORATION STRATEGY:
 EDITING BEST PRACTICES:
 - Small modifications: replace_lines_code (requires exact original content match)
 - If replace_lines_code fails: read_file_code the target lines, then retry with correct content
+- Renaming a function or class across files: rename_symbol_code, never manual search and replace
 - Large changes: create_file_code with overwrite=true is more reliable
 - After any changes: get_diagnostics_code to check for errors
+
+MULTI-ROOT WORKSPACES:
+- With several folders open, every path tool accepts workspace='<folder name or number>'
+- Results show paths as FolderName/path; feed those strings straight back in, they resolve correctly
+
+BUILDS AND CHECKS:
+- Project tasks: run_task_code without arguments lists what exists, then run them by name
+- Tests and coverage: run_tests_code, get_test_coverage_code; style: format_document_code, lint_and_fix_code
+- Builds: build_project_code detects the command; if a tool misbehaves, get_server_info_code shows versions and per-tool call counts
 
 APPROVAL PROCESS:
 IMPORTANT: Only run code modification tools after presenting a plan and receiving explicit approval.
@@ -96,6 +107,7 @@ Paths round-trip in both directions: results are displayed as `FolderName/relati
 | Refactoring | 4 | rename symbol, extract function, duplicates, suggestions |
 | Frontend | 4 | accessibility, CSS quality, element inspection, unused CSS |
 | Workflow | 4 | npm/composer/Makefile tasks, project build, snippets, shell aliases |
+| Advanced | 2 | server info, installed extensions |
 
 ## Tool reference
 
