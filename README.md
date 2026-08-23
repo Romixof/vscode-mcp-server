@@ -1,8 +1,8 @@
 # VSCodium MCP Server
 
-Turn VS Code into a local MCP server: 54 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
+Turn VS Code into a local MCP server: 58 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
 
-This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 42 came later. Credit for the core idea and the first implementation belongs to him.
+This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 46 came later. Credit for the core idea and the first implementation belongs to him.
 
 ## Demo
 
@@ -89,6 +89,7 @@ Every group maps to a key in the `vscode-mcp-server.enabledTools` setting and ca
 | Performance | 3 | bundle sizes, server report, command profiling |
 | Refactoring | 4 | rename symbol, extract function, duplicates, suggestions |
 | Frontend | 4 | accessibility, CSS quality, element inspection, unused CSS |
+| Workflow | 4 | npm/composer/Makefile tasks, project build, snippets, shell aliases |
 
 ## Tool reference
 
@@ -182,12 +183,21 @@ Frameworks auto-detect from `package.json`, `requirements.txt` or `pyproject.tom
 - **inspect_element_code**: markup usages plus every CSS rule styling a selector (.class, #id or tag). Params: `selector`, `path`.
 - **find_unused_css_code**: stylesheet classes and ids nothing references anywhere; quoted strings count as usage, so dynamically composed names rarely false-positive. Params: `path`.
 
+### Workflow
+
+Project tasks, builds, editor snippets and shared shell shortcuts, discovered from files the project already has. Nothing to configure.
+
+- **run_task_code**: lists or runs tasks from package.json scripts, composer.json scripts and Makefile targets, each through its own runner (`npm run`, `composer run-script`, `make`). Params: `task`, `args`, `cwd`, `timeout` ms (default 120000). Call it without `task` to list what exists.
+- **build_project_code**: detects the build command (package.json build script, Makefile, tsconfig.json) and runs it with a duration and exit code report. Params: `command` to override detection, `cwd`, `timeout` ms (default 300000).
+- **list_snippets_code**: lists snippets under .vscode/snippets with a body preview; comment lines in the JSON files are tolerated. Params: `prefixFilter`.
+- **run_alias_code**: runs shortcuts from `.mcp-aliases.json` at the workspace root, so a whole team shares one set of commands; values are plain command strings or `{ command, description }`. Params: `name`, `args`, `cwd`, `timeout`.
+
 ## Configuration
 
 * `vscode-mcp-server.port`: server port (default 3000)
 * `vscode-mcp-server.host`: bind address (default 127.0.0.1)
 * `vscode-mcp-server.defaultEnabled`: start the server automatically on launch
-* `vscode-mcp-server.enabledTools`: which of the 15 groups above are active, all on by default. Changing it restarts the server.
+* `vscode-mcp-server.enabledTools`: which of the 16 groups above are active, all on by default. Changing it restarts the server.
 
 Each request gets its own stateless MCP session, so one slow or hung call never blocks the others.
 
