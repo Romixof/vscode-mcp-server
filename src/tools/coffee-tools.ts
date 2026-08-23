@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { executeShellCommand, detectShellKind } from './shell-tools';
+import { executeShellCommand, resolveShellKind } from './shell-tools';
 
 // Characters only: nothing that can escape single quotes in bash or PowerShell,
 // so pouring the cup can never turn into command execution
@@ -31,13 +31,13 @@ export function buildPourCommand(kind: 'bash' | 'powershell', lines: string[]): 
  * Pours the cup into a dedicated terminal. Fire-and-forget by design: the
  * reply never waits on it and any failure stays inside the cup terminal.
  */
-function pourInTerminal(): void {
+async function pourInTerminal(): Promise<void> {
 	try {
 		if (!coffeeTerminal) {
 			coffeeTerminal = vscode.window.createTerminal('☕');
 		}
-		const command = buildPourCommand(detectShellKind(coffeeTerminal), CUP);
-		void executeShellCommand(coffeeTerminal, command, undefined, 4000).catch(() => undefined);
+		const command = buildPourCommand(await resolveShellKind(coffeeTerminal), CUP);
+		await executeShellCommand(coffeeTerminal, command, undefined, 4000);
 	} catch {
 		// no usable terminal: the cup still ships in the reply
 	}
@@ -57,7 +57,7 @@ export function registerCoffeeTools(server: McpServer): void {
 			sugar: z.boolean().optional().default(false).describe('Serve it with sugar')
 		},
 		async ({ sugar = false }): Promise<CallToolResult> => {
-			pourInTerminal();
+			void pourInTerminal();
 			const sweetener = sugar ? 'Une touche de sucre. ' : '';
 			return {
 				content: [{

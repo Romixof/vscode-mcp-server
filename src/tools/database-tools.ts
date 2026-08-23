@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { resolveWorkspaceFolder, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { executeShellCommand, detectShellKind } from './shell-tools';
+import { executeShellCommand, resolveShellKind } from './shell-tools';
 
 function getWorkspaceRoot(ref?: string): string {
 	return resolveWorkspaceFolder(ref).uri.fsPath;
@@ -414,7 +414,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                     throw new Error('Terminal not available for database tools');
                 }
                 sharedTerminal.show();
-                const shellKind = detectShellKind(sharedTerminal);
+                const shellKind = await resolveShellKind(sharedTerminal);
 
                 if (port) {
                     // kill syntax depends on the shell actually hosting the command
