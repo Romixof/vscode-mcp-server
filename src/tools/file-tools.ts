@@ -2,13 +2,14 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
+import { resolveInputPath, listWorkspaceFolders, findOwningFolder, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 // Type for file listing results
 export type FileListingResult = Array<{path: string, type: 'file' | 'directory'}>;
 
 // Type for the file listing callback function
-export type FileListingCallback = (path: string, recursive: boolean) => Promise<FileListingResult>;
+export type FileListingCallback = (path: string, recursive: boolean, workspace?: string) => Promise<FileListingResult>;
 
 // Default maximum character count
 const DEFAULT_MAX_CHARACTERS = 100000;
@@ -19,26 +20,31 @@ const DEFAULT_MAX_CHARACTERS = 100000;
  * @param recursive Whether to list files recursively
  * @returns Array of file and directory entries
  */
-export async function listWorkspaceFiles(workspacePath: string, recursive: boolean = false): Promise<FileListingResult> {
+export async function listWorkspaceFiles(workspacePath: string, recursive: boolean = false, workspace?: string): Promise<FileListingResult> {
     console.log(`[listWorkspaceFiles] Starting with path: ${workspacePath}, recursive: ${recursive}`);
     
-    if (!vscode.workspace.workspaceFolders) {
-        throw new Error('No workspace folder is open');
-    }
-
-    const workspaceFolder = vscode.workspace.workspaceFolders[0];
-    const workspaceUri = workspaceFolder.uri;
-    
-    // Create URI for the target directory
-    const targetUri = vscode.Uri.joinPath(workspaceUri, workspacePath);
+    const targetUri = resolveInputPath(workspacePath, workspace);
     console.log(`[listWorkspaceFiles] Target URI: ${targetUri.fsPath}`);
+
+    // Entries carry the owning folder's name so the emitted paths feed
+    // straight back into every path-based tool; a target outside every open
+    // root gets an absolute prefix because nothing shorter would round-trip
+    const owner = findOwningFolder(targetUri);
+    const rootPrefix =
+        owner && listWorkspaceFolders().length > 1
+            ? owner.name
+            : owner
+                ? ''
+                : targetUri.fsPath.replace(/\\/g, '/');
 
     async function processDirectory(dirUri: vscode.Uri, currentPath: string = ''): Promise<FileListingResult> {
         const entries = await vscode.workspace.fs.readDirectory(dirUri);
         const result: FileListingResult = [];
 
         for (const [name, type] of entries) {
-            const entryPath = currentPath ? path.join(currentPath, name) : name;
+            // explicit separator instead of path.join so prefixed listings
+            // stay forward-slash form even on Windows
+            const entryPath = currentPath ? `${currentPath}/${name}` : name;
             const itemType: 'file' | 'directory' = (type & vscode.FileType.Directory) ? 'directory' : 'file';
             
             result.push({ path: entryPath, type: itemType });
@@ -54,13 +60,31 @@ export async function listWorkspaceFiles(workspacePath: string, recursive: boole
     }
 
     try {
-        const result = await processDirectory(targetUri);
+        const result = await processDirectory(targetUri, rootPrefix);
         console.log(`[listWorkspaceFiles] Found ${result.length} entries`);
         return result;
     } catch (error) {
         console.error('[listWorkspaceFiles] Error:', error);
         throw error;
     }
+}
+
+
+/**
+ * Renaming or moving a root itself would relocate the user's project folder;
+ * root-denoting inputs like "." must fail loudly instead.
+ */
+function assertNotWorkspaceRoot(uri: vscode.Uri, action: string): void {
+	const target = path.resolve(uri.fsPath);
+	for (const folder of listWorkspaceFolders()) {
+		const root = path.resolve(folder.uri.fsPath);
+		// resolve() folds away '.', './' and trailing separators; the case
+		// fold covers Windows and macOS volumes where "./alpha" names the
+		// same folder as "./Alpha"
+		if (target === root || target.toLowerCase() === root.toLowerCase()) {
+			throw new Error(`Refusing to ${action} the workspace root "${folder.name}" itself — pass a path inside it.`);
+		}
+	}
 }
 
 /**
@@ -77,19 +101,12 @@ export async function readWorkspaceFile(
     encoding: string = 'utf-8', 
     maxCharacters: number = DEFAULT_MAX_CHARACTERS,
     startLine: number = -1,
-    endLine: number = -1
+    endLine: number = -1,
+    workspace?: string
 ): Promise<string> {
     console.log(`[readWorkspaceFile] Starting with path: ${workspacePath}, encoding: ${encoding}, maxCharacters: ${maxCharacters}, startLine: ${startLine}, endLine: ${endLine}`);
     
-    if (!vscode.workspace.workspaceFolders) {
-        throw new Error('No workspace folder is open');
-    }
-
-    const workspaceFolder = vscode.workspace.workspaceFolders[0];
-    const workspaceUri = workspaceFolder.uri;
-    
-    // Create URI for the target file
-    const fileUri = vscode.Uri.joinPath(workspaceUri, workspacePath);
+    const fileUri = resolveInputPath(workspacePath, workspace);
     console.log(`[readWorkspaceFile] File URI: ${fileUri.fsPath}`);
 
     try {
@@ -164,6 +181,22 @@ export function registerFileTools(
     server: McpServer, 
     fileListingCallback: FileListingCallback
 ): void {
+    server.tool(
+        'list_workspace_folders_code',
+        `Lists every root folder open in the window with its 1-based index and name.
+
+WHEN TO USE: multi-root workspaces. The names and indices returned here are the values accepted by the optional "workspace" parameter of path-based tools.`,
+        {},
+        async (): Promise<CallToolResult> => {
+            const folders = listWorkspaceFolders();
+            if (folders.length === 0) {
+                return { content: [{ type: 'text', text: 'No workspace folder is open.' }] };
+            }
+            const lines = folders.map((f, i) => `${i + 1}. ${f.name} -> ${f.uri.fsPath}`);
+            return { content: [{ type: 'text', text: `Open workspace folders (${folders.length}):\n${lines.join('\n')}` }] };
+        }
+    );
+
     // Add list_files tool
     server.tool(
         'list_files_code',
@@ -176,9 +209,10 @@ export function registerFileTools(
         Returns files and directories at specified path. Start with path='.' to explore root, then dive into specific subdirectories with recursive=true.`,
         {
             path: z.string().describe('The path to list files from'),
-            recursive: z.boolean().optional().default(false).describe('Whether to list files recursively')
+            recursive: z.boolean().optional().default(false).describe('Whether to list files recursively'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ path, recursive = false }): Promise<CallToolResult> => {
+        async ({ path, recursive = false, workspace }): Promise<CallToolResult> => {
             console.log(`[list_files] Tool called with path=${path}, recursive=${recursive}`);
             
             if (!fileListingCallback) {
@@ -188,7 +222,7 @@ export function registerFileTools(
 
             try {
                 console.log('[list_files] Calling file listing callback');
-                const files = await fileListingCallback(path, recursive);
+                const files = await fileListingCallback(path, recursive, workspace);
                 console.log(`[list_files] Callback returned ${files.length} items`);
                 
                 const result: CallToolResult = {
@@ -224,9 +258,10 @@ export function registerFileTools(
             encoding: z.string().optional().default('utf-8').describe('Encoding to convert the file content to a string. Use "base64" for base64-encoded string'),
             maxCharacters: z.number().optional().default(DEFAULT_MAX_CHARACTERS).describe('Maximum character count before truncation (default: 100,000). 0 disables the limit'),
             startLine: z.number().optional().default(-1).describe('The start line number (1-based, inclusive). Default: read from beginning, denoted by -1'),
-            endLine: z.number().optional().default(-1).describe('The end line number (1-based, inclusive). Default: read to end, denoted by -1')
+            endLine: z.number().optional().default(-1).describe('The end line number (1-based, inclusive). Default: read to end, denoted by -1'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ path, encoding = 'utf-8', maxCharacters = DEFAULT_MAX_CHARACTERS, startLine = -1, endLine = -1 }): Promise<CallToolResult> => {
+        async ({ path, encoding = 'utf-8', maxCharacters = DEFAULT_MAX_CHARACTERS, startLine = -1, endLine = -1, workspace }): Promise<CallToolResult> => {
             console.log(`[read_file] Tool called with path=${path}, encoding=${encoding}, maxCharacters=${maxCharacters}, startLine=${startLine}, endLine=${endLine}`);
             
             // Convert 1-based input to 0-based for VS Code API
@@ -235,7 +270,7 @@ export function registerFileTools(
             
             try {
                 console.log('[read_file] Reading file');
-                const content = await readWorkspaceFile(path, encoding, maxCharacters, zeroBasedStartLine, zeroBasedEndLine);
+                const content = await readWorkspaceFile(path, encoding, maxCharacters, zeroBasedStartLine, zeroBasedEndLine, workspace);
                 
                 const result: CallToolResult = {
                     content: [
@@ -267,20 +302,15 @@ export function registerFileTools(
         {
             sourcePath: z.string().describe('The current path of the file or directory to move'),
             targetPath: z.string().describe('The new path where the file or directory should be moved to'),
-            overwrite: z.boolean().optional().default(false).describe('Whether to overwrite if target already exists')
+            overwrite: z.boolean().optional().default(false).describe('Whether to overwrite if target already exists'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ sourcePath, targetPath, overwrite = false }): Promise<CallToolResult> => {
+        async ({ sourcePath, targetPath, overwrite = false, workspace }): Promise<CallToolResult> => {
             console.log(`[move_file] Tool called with sourcePath=${sourcePath}, targetPath=${targetPath}, overwrite=${overwrite}`);
 
-            if (!vscode.workspace.workspaceFolders) {
-                throw new Error('No workspace folder is open');
-            }
-
-            const workspaceFolder = vscode.workspace.workspaceFolders[0];
-            const workspaceUri = workspaceFolder.uri;
-
-            const sourceUri = vscode.Uri.joinPath(workspaceUri, sourcePath);
-            const targetUri = vscode.Uri.joinPath(workspaceUri, targetPath);
+            const sourceUri = resolveInputPath(sourcePath, workspace);
+            const targetUri = resolveInputPath(targetPath, workspace);
+            assertNotWorkspaceRoot(sourceUri, 'move');
 
             try {
                 console.log(`[move_file] Moving from ${sourceUri.fsPath} to ${targetUri.fsPath}`);
@@ -326,22 +356,15 @@ export function registerFileTools(
         {
             filePath: z.string().describe('The current path of the file or directory to rename'),
             newName: z.string().describe('The new name for the file or directory'),
-            overwrite: z.boolean().optional().default(false).describe('Whether to overwrite if a file with the new name already exists')
+            overwrite: z.boolean().optional().default(false).describe('Whether to overwrite if a file with the new name already exists'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ filePath, newName, overwrite = false }): Promise<CallToolResult> => {
+        async ({ filePath, newName, overwrite = false, workspace }): Promise<CallToolResult> => {
             console.log(`[rename_file] Tool called with filePath=${filePath}, newName=${newName}, overwrite=${overwrite}`);
 
-            if (!vscode.workspace.workspaceFolders) {
-                throw new Error('No workspace folder is open');
-            }
-
-            const workspaceFolder = vscode.workspace.workspaceFolders[0];
-            const workspaceUri = workspaceFolder.uri;
-
-            const fileUri = vscode.Uri.joinPath(workspaceUri, filePath);
-            const directoryPath = path.dirname(filePath);
-            const newFilePath = path.join(directoryPath, newName);
-            const newFileUri = vscode.Uri.joinPath(workspaceUri, newFilePath);
+            const fileUri = resolveInputPath(filePath, workspace);
+            assertNotWorkspaceRoot(fileUri, 'rename');
+            const newFileUri = vscode.Uri.file(path.join(path.dirname(fileUri.fsPath), newName));
 
             try {
                 console.log(`[rename_file] Renaming ${fileUri.fsPath} to ${newFileUri.fsPath}`);
@@ -385,20 +408,14 @@ export function registerFileTools(
         {
             sourcePath: z.string().describe('The path of the file to copy'),
             targetPath: z.string().describe('The path where the copy should be created'),
-            overwrite: z.boolean().optional().default(false).describe('Whether to overwrite if target already exists')
+            overwrite: z.boolean().optional().default(false).describe('Whether to overwrite if target already exists'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ sourcePath, targetPath, overwrite = false }): Promise<CallToolResult> => {
+        async ({ sourcePath, targetPath, overwrite = false, workspace }): Promise<CallToolResult> => {
             console.log(`[copy_file] Tool called with sourcePath=${sourcePath}, targetPath=${targetPath}, overwrite=${overwrite}`);
 
-            if (!vscode.workspace.workspaceFolders) {
-                throw new Error('No workspace folder is open');
-            }
-
-            const workspaceFolder = vscode.workspace.workspaceFolders[0];
-            const workspaceUri = workspaceFolder.uri;
-
-            const sourceUri = vscode.Uri.joinPath(workspaceUri, sourcePath);
-            const targetUri = vscode.Uri.joinPath(workspaceUri, targetPath);
+            const sourceUri = resolveInputPath(sourcePath, workspace);
+            const targetUri = resolveInputPath(targetPath, workspace);
 
             try {
                 console.log(`[copy_file] Copying from ${sourceUri.fsPath} to ${targetUri.fsPath}`);

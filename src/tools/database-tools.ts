@@ -1,14 +1,12 @@
 import * as vscode from 'vscode';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
+import { resolveWorkspaceFolder, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { executeShellCommand, detectShellKind } from './shell-tools';
 
-function getWorkspaceRoot(): string {
-    if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-        throw new Error('No workspace folder is open');
-    }
-    return vscode.workspace.workspaceFolders[0].uri.fsPath;
+function getWorkspaceRoot(ref?: string): string {
+	return resolveWorkspaceFolder(ref).uri.fsPath;
 }
 
 let sharedTerminal: vscode.Terminal | undefined;
@@ -17,7 +15,14 @@ async function runShellCommand(command: string, cwd?: string, timeout: number = 
     if (!sharedTerminal) {
         throw new Error('Terminal not available for database tools');
     }
-    const workspaceRoot = cwd || getWorkspaceRoot();
+    let workspaceRoot = cwd;
+    if (!workspaceRoot) {
+        try {
+            workspaceRoot = getWorkspaceRoot();
+        } catch {
+            // no folder open: commands run wherever the terminal already sits
+        }
+    }
     try {
         // executeShellCommand resolves with the real exit code captured via marker
         // (it only rejects on timeout or read failure)
@@ -65,12 +70,13 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
             databaseName: z.string().optional().describe('Database name (for PostgreSQL/MySQL)'),
             filePath: z.string().optional().describe('SQLite file path (required for sqlite)'),
             format: z.enum(['json', 'table', 'csv']).optional().default('json').describe('Output format'),
-            timeout: z.number().optional().default(30000).describe('Query timeout in ms')
+            timeout: z.number().optional().default(30000).describe('Query timeout in ms'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ query, database, connectionString, databaseName, filePath, format = 'json', timeout = 30000 }): Promise<CallToolResult> => {
+        async ({ query, database, connectionString, databaseName, filePath, format = 'json', timeout = 30000, workspace }): Promise<CallToolResult> => {
             try {
                 let cmd = '';
-                const cwd = getWorkspaceRoot();
+                const cwd = getWorkspaceRoot(workspace);
 
                 if (database === 'sqlite' || (!database && filePath)) {
                     if (!filePath) {
@@ -196,16 +202,17 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         {
             checkCodeUsage: z.boolean().optional().default(true).describe('Scan code for process.env.VAR references'),
             envFiles: z.array(z.string()).optional().default(['.env', '.env.local', '.env.example']).describe('Env files to check (relative to workspace)'),
-            ignorePatterns: z.array(z.string()).optional().default(['node_modules', '.git', 'dist', 'build']).describe('Glob patterns to ignore')
+            ignorePatterns: z.array(z.string()).optional().default(['node_modules', '.git', 'dist', 'build']).describe('Glob patterns to ignore'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ checkCodeUsage = true, envFiles = ['.env', '.env.local', '.env.example'], ignorePatterns = ['node_modules', '.git', 'dist', 'build'] }): Promise<CallToolResult> => {
+        async ({ checkCodeUsage = true, envFiles = ['.env', '.env.local', '.env.example'], ignorePatterns = ['node_modules', '.git', 'dist', 'build'], workspace }): Promise<CallToolResult> => {
             try {
-                const workspaceRoot = getWorkspaceRoot();
+                const workspaceRoot = getWorkspaceRoot(workspace);
                 const envData: Record<string, Map<string, string>> = {};
                 const allKeys = new Set<string>();
 
                 for (const envFile of envFiles) {
-                    const fileUri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0].uri, envFile);
+                    const fileUri = vscode.Uri.joinPath(resolveWorkspaceFolder(workspace).uri, envFile);
                     try {
                         const content = Buffer.from(await vscode.workspace.fs.readFile(fileUri)).toString('utf-8');
                         envData[envFile] = parseEnvFile(content);
@@ -220,7 +227,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                 let codeVars = new Set<string>();
                 if (checkCodeUsage) {
                     const exclude = `{${ignorePatterns.map(p => `**/${p}/**`).join(',')}}`;
-                    const files = await vscode.workspace.findFiles('**/*', exclude);
+                    const files = await vscode.workspace.findFiles(new vscode.RelativePattern(resolveWorkspaceFolder(workspace), '**/*'), exclude);
                     
                     for (const file of files.slice(0, 100)) {
                         try {
@@ -299,12 +306,19 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         {
             port: z.number().optional().describe('Specific port to check (optional)'),
             protocol: z.enum(['tcp', 'udp', 'all']).optional().default('all').describe('Protocol filter'),
-            state: z.enum(['listening', 'established', 'all']).optional().default('listening').describe('Connection state filter')
+            state: z.enum(['listening', 'established', 'all']).optional().default('listening').describe('Connection state filter'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ port, protocol = 'all', state = 'listening' }): Promise<CallToolResult> => {
+        async ({ port, protocol = 'all', state = 'listening', workspace }): Promise<CallToolResult> => {
             try {
                 const isWindows = process.platform === 'win32';
                 let cmd = '';
+                let portCwd: string | undefined;
+                try {
+                    portCwd = getWorkspaceRoot(workspace);
+                } catch {
+                    // port listing does not need a workspace; run from the terminal's cwd
+                }
 
                 if (isWindows) {
                     cmd = `netstat -ano`;
@@ -331,7 +345,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                     }
                 }
 
-                const result = await runShellCommand(cmd, undefined, 10000);
+                const result = await runShellCommand(cmd, portCwd, 10000);
 
                 let output = result.output;
                 if (isWindows && port) {
@@ -368,18 +382,19 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
             cwd: z.string().optional().default('.').describe('Working directory'),
             port: z.number().optional().describe('Port the dev server runs on (for verification)'),
             killTimeout: z.number().optional().default(5000).describe('Time to wait for graceful shutdown (ms)'),
-            startupTimeout: z.number().optional().default(30000).describe('Time to wait for server ready (ms)')
+            startupTimeout: z.number().optional().default(30000).describe('Time to wait for server ready (ms)'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ script, command, cwd = '.', port, killTimeout = 5000, startupTimeout = 30000 }): Promise<CallToolResult> => {
+        async ({ script, command, cwd = '.', port, killTimeout = 5000, startupTimeout = 30000, workspace }): Promise<CallToolResult> => {
             try {
-                const workspaceRoot = getWorkspaceRoot();
-                const targetDir = cwd === '.' ? workspaceRoot : vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0].uri, cwd).fsPath;
+                const workspaceRoot = getWorkspaceRoot(workspace);
+                const targetDir = cwd === '.' ? workspaceRoot : vscode.Uri.joinPath(resolveWorkspaceFolder(workspace).uri, cwd).fsPath;
 
                 let runCommand = command;
                 if (!runCommand && script) {
                     runCommand = `npm run ${script}`;
                 } else if (!runCommand) {
-                    const pkgUri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0].uri, 'package.json');
+                    const pkgUri = vscode.Uri.joinPath(resolveWorkspaceFolder(workspace).uri, 'package.json');
                     try {
                         const pkgContent = Buffer.from(await vscode.workspace.fs.readFile(pkgUri)).toString('utf-8');
                         const pkg = JSON.parse(pkgContent);

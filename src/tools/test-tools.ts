@@ -3,20 +3,10 @@ import * as path from 'path';
 import { z } from 'zod';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { executeShellCommand } from './shell-tools';
+import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
-function requireWorkspaceFolder(): vscode.WorkspaceFolder {
-	if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-		throw new Error('No workspace folder is open');
-	}
-	return vscode.workspace.workspaceFolders[0];
-}
-
-async function detectTestFramework(): Promise<{ framework: string; command: string; coverageFlag: string }> {
-	if (!vscode.workspace.workspaceFolders) {
-		throw new Error('No workspace folder is open');
-	}
-	const workspaceFolder = vscode.workspace.workspaceFolders[0];
-	const workspaceUri = workspaceFolder.uri;
+async function detectTestFramework(workspace?: string): Promise<{ framework: string; command: string; coverageFlag: string }> {
+	const workspaceUri = resolveWorkspaceFolder(workspace).uri;
 	const packageJsonUri = vscode.Uri.joinPath(workspaceUri, 'package.json');
 	let packageJson: any = {};
 	try {
@@ -61,13 +51,9 @@ async function detectTestFramework(): Promise<{ framework: string; command: stri
 	return { framework: 'vitest', command: 'npx vitest run', coverageFlag: '--coverage' };
 }
 
-async function detectFormatter(filePath: string): Promise<{ formatter: string; command: string }> {
+async function detectFormatter(filePath: string, workspace?: string): Promise<{ formatter: string; command: string }> {
 	const ext = path.extname(filePath).toLowerCase();
-	if (!vscode.workspace.workspaceFolders) {
-		throw new Error('No workspace folder is open');
-	}
-	const workspaceFolder = vscode.workspace.workspaceFolders[0];
-	const workspaceUri = workspaceFolder.uri;
+	const workspaceUri = resolveWorkspaceFolder(workspace).uri;
 	// language-specific formatters first — prettier can't parse .py/.rs/.go
 	// and would otherwise win whenever any prettier config exists in the repo
 	switch (ext) {
@@ -108,12 +94,8 @@ async function detectFormatter(filePath: string): Promise<{ formatter: string; c
 	return { formatter: 'prettier', command: `npx prettier --write "${filePath}"` };
 }
 
-async function detectLinter(filePath?: string): Promise<{ linter: string; command: string; fixFlag: string }> {
-	if (!vscode.workspace.workspaceFolders) {
-		throw new Error('No workspace folder is open');
-	}
-	const workspaceFolder = vscode.workspace.workspaceFolders[0];
-	const workspaceUri = workspaceFolder.uri;
+async function detectLinter(filePath?: string, workspace?: string): Promise<{ linter: string; command: string; fixFlag: string }> {
+	const workspaceUri = resolveWorkspaceFolder(workspace).uri;
 	// Python targets resolve to a Python linter even when an eslint config
 	// exists elsewhere in the repo (mixed monorepos) — eslint can't parse .py
 	const isPythonTarget = !!filePath && filePath.toLowerCase().endsWith('.py');
@@ -153,21 +135,6 @@ async function detectLinter(filePath?: string): Promise<{ linter: string; comman
 	return { linter: 'eslint', command: `npx eslint`, fixFlag: '--fix' };
 }
 
-async function getGitDiff(filePath?: string): Promise<string> {
-	if (!vscode.workspace.workspaceFolders) {
-		throw new Error('No workspace folder is open');
-	}
-	const workspaceFolder = vscode.workspace.workspaceFolders[0];
-	const cwd = workspaceFolder.uri.fsPath;
-	let command = 'git diff';
-	if (filePath) {
-		command = `git diff "${filePath}"`;
-	}
-	const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('MCP Git Diff');
-	const { output } = await executeShellCommand(terminal, command, cwd, 10000);
-	return output;
-}
-
 export function registerTestTools(server: McpServer): void {
 	server.tool('run_tests_code', `Runs tests using the detected test framework (vitest, jest, pytest, mocha, playwright, cypress).
 
@@ -178,12 +145,13 @@ Returns stdout/stderr with pass/fail summary.`, {
 		pattern: z.string().optional().describe('Optional test file pattern or path to run specific tests'),
 		framework: z.enum(['auto', 'vitest', 'jest', 'pytest', 'mocha', 'playwright', 'cypress']).optional().default('auto').describe('Force specific framework (default: auto-detect)'),
 		args: z.string().optional().describe('Additional arguments to pass to the test command'),
-		cwd: z.string().optional().default('.').describe('Working directory (default: workspace root)')
-	}, async ({ pattern, framework = 'auto', args = '', cwd = '.' }) => {
+		cwd: z.string().optional().default('.').describe('Working directory (default: workspace root)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ pattern, framework = 'auto', args = '', cwd = '.', workspace }) => {
 		try {
 			let detected = { framework: 'vitest', command: 'npx vitest run', coverageFlag: '--coverage' };
 			if (framework === 'auto') {
-				detected = await detectTestFramework();
+				detected = await detectTestFramework(workspace);
 			} else {
 				const commands: Record<string, { command: string; coverageFlag: string }> = {
 					vitest: { command: 'npx vitest run', coverageFlag: '--coverage' },
@@ -205,8 +173,7 @@ Returns stdout/stderr with pass/fail summary.`, {
 				command += ` ${args}`;
 			}
 			const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('MCP Tests');
-			const workspaceFolder = requireWorkspaceFolder();
-			const fullCwd = path.resolve(workspaceFolder.uri.fsPath, cwd);
+			const fullCwd = path.resolve(resolveWorkspaceFolder(workspace).uri.fsPath, cwd);
 			const { output } = await executeShellCommand(terminal, command, fullCwd, 120000);
 			return {
 				content: [{
@@ -228,12 +195,13 @@ Runs tests with coverage flag. Returns summary and detailed report if available.
 Supports: vitest, jest, pytest (with pytest-cov), mocha (with c8/nyc).`, {
 		path: z.string().optional().describe('Optional file or directory path to get coverage for'),
 		format: z.enum(['text', 'json', 'lcov', 'html']).optional().default('text').describe('Output format for coverage report'),
-		framework: z.enum(['auto', 'vitest', 'jest', 'pytest', 'mocha']).optional().default('auto').describe('Force specific framework (default: auto-detect)')
-	}, async ({ path: targetPath, format = 'text', framework = 'auto' }) => {
+		framework: z.enum(['auto', 'vitest', 'jest', 'pytest', 'mocha']).optional().default('auto').describe('Force specific framework (default: auto-detect)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: targetPath, format = 'text', framework = 'auto', workspace }) => {
 		try {
 			let detected = { framework: 'vitest', command: 'npx vitest run', coverageFlag: '--coverage' };
 			if (framework === 'auto') {
-				detected = await detectTestFramework();
+				detected = await detectTestFramework(workspace);
 			} else {
 				const commands: Record<string, { command: string; coverageFlag: string }> = {
 					vitest: { command: 'npx vitest run', coverageFlag: '--coverage' },
@@ -283,8 +251,7 @@ Supports: vitest, jest, pytest (with pytest-cov), mocha (with c8/nyc).`, {
 				}
 			}
 			const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('MCP Coverage');
-			const workspaceFolder = requireWorkspaceFolder();
-			const cwd = workspaceFolder.uri.fsPath;
+			const cwd = resolveWorkspaceFolder(workspace).uri.fsPath;
 			const { output } = await executeShellCommand(terminal, command, cwd, 180000);
 			return {
 				content: [{
@@ -306,13 +273,14 @@ Auto-detects formatter from config files (prettierrc, pyproject.toml, etc.) and 
 Returns formatted content or success confirmation.`, {
 		path: z.string().describe('Path to the file to format'),
 		formatter: z.enum(['auto', 'prettier', 'black', 'ruff', 'rustfmt', 'gofmt']).optional().default('auto').describe('Force specific formatter (default: auto-detect)'),
-		checkOnly: z.boolean().optional().default(false).describe('Only check if formatting is needed, do not write changes')
-	}, async ({ path: filePath, formatter = 'auto', checkOnly = false }) => {
+		checkOnly: z.boolean().optional().default(false).describe('Only check if formatting is needed, do not write changes'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: filePath, formatter = 'auto', checkOnly = false, workspace }) => {
 		try {
-			const workspaceFolder = requireWorkspaceFolder();
-			const workspaceUri = workspaceFolder.uri;
-			// absolute paths resolve against the filesystem, not under the workspace
-			const fileUri = path.isAbsolute(filePath) ? vscode.Uri.file(filePath) : vscode.Uri.joinPath(workspaceUri, filePath);
+			// multi-root rules apply; the resolved absolute path feeds the
+			// formatter CLI so it works whatever folder the terminal sits in
+			const target = resolveRelativeToolPath(filePath, workspace);
+			const fileUri = vscode.Uri.file(target.fsPath);
 			try {
 				await vscode.workspace.fs.stat(fileUri);
 			} catch {
@@ -320,14 +288,14 @@ Returns formatted content or success confirmation.`, {
 			}
 			let detected = { formatter: 'prettier', command: `npx prettier --write "${filePath}"` };
 			if (formatter === 'auto') {
-				detected = await detectFormatter(filePath);
+				detected = await detectFormatter(target.fsPath, workspace);
 			} else {
 				const formatters: Record<string, { command: string }> = {
-					prettier: { command: `npx prettier --write "${filePath}"` },
-					black: { command: `black "${filePath}"` },
-					ruff: { command: `ruff format "${filePath}"` },
-					rustfmt: { command: `rustfmt "${filePath}"` },
-					gofmt: { command: `gofmt -w "${filePath}"` }
+					prettier: { command: `npx prettier --write "${target.fsPath}"` },
+					black: { command: `black "${target.fsPath}"` },
+					ruff: { command: `ruff format "${target.fsPath}"` },
+					rustfmt: { command: `rustfmt "${target.fsPath}"` },
+					gofmt: { command: `gofmt -w "${target.fsPath}"` }
 				};
 				detected = { formatter, ...formatters[formatter] };
 			}
@@ -347,7 +315,7 @@ Returns formatted content or success confirmation.`, {
 			}
 			const originalContent = Buffer.from(await vscode.workspace.fs.readFile(fileUri)).toString('utf-8');
 			const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('MCP Format');
-			const cwd = workspaceFolder.uri.fsPath;
+			const cwd = resolveWorkspaceFolder(workspace).uri.fsPath;
 			const { output } = await executeShellCommand(terminal, command, cwd, 30000);
 			let newContent = originalContent;
 			if (!checkOnly) {
@@ -386,12 +354,13 @@ WHEN TO USE: Fixing linting errors automatically, cleaning up code before commit
 Auto-detects linter from config files. Returns fixed issues summary.`, {
 		path: z.string().optional().describe('Optional file or directory to lint (default: entire workspace)'),
 		linter: z.enum(['auto', 'eslint', 'ruff', 'flake8', 'pylint']).optional().default('auto').describe('Force specific linter (default: auto-detect)'),
-		fix: z.boolean().optional().default(true).describe('Apply auto-fixes (default: true)')
-	}, async ({ path: targetPath, linter = 'auto', fix = true }) => {
+		fix: z.boolean().optional().default(true).describe('Apply auto-fixes (default: true)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: targetPath, linter = 'auto', fix = true, workspace }) => {
 		try {
 			let detected = { linter: 'eslint', command: 'npx eslint', fixFlag: '--fix' };
 			if (linter === 'auto') {
-				detected = await detectLinter(targetPath);
+				detected = await detectLinter(targetPath, workspace);
 			} else {
 				const linters: Record<string, { command: string; fixFlag: string }> = {
 					eslint: { command: 'npx eslint', fixFlag: '--fix' },
@@ -409,8 +378,7 @@ Auto-detects linter from config files. Returns fixed issues summary.`, {
 				command += ` "${targetPath}"`;
 			}
 			const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('MCP Lint');
-			const workspaceFolder = requireWorkspaceFolder();
-			const cwd = workspaceFolder.uri.fsPath;
+			const cwd = resolveWorkspaceFolder(workspace).uri.fsPath;
 			const { output } = await executeShellCommand(terminal, command, cwd, 60000);
 			return {
 				content: [{
@@ -431,20 +399,21 @@ WHEN TO USE: Reviewing changes before commit, seeing what modified, debugging.
 Shows unstaged changes by default. Use staged=true for staged changes.`, {
 		path: z.string().optional().describe('Optional file path to show diff for (default: all changes)'),
 		staged: z.boolean().optional().default(false).describe('Show staged (cached) changes instead of unstaged'),
-		noColor: z.boolean().optional().default(true).describe('Disable ANSI color codes in output')
-	}, async ({ path: filePath, staged = false, noColor = true }) => {
+		noColor: z.boolean().optional().default(true).describe('Disable ANSI color codes in output'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: filePath, staged = false, noColor = true, workspace }) => {
 		try {
-			if (!vscode.workspace.workspaceFolders) {
-				throw new Error('No workspace folder is open');
-			}
-			const workspaceFolder = vscode.workspace.workspaceFolders[0];
-			const cwd = workspaceFolder.uri.fsPath;
+			let cwd = resolveWorkspaceFolder(workspace).uri.fsPath;
 			let command = staged ? 'git diff --cached' : 'git diff';
 			if (noColor) {
 				command = 'git -c color.ui=never ' + command.replace('git ', '');
 			}
 			if (filePath) {
-				command += ` "${filePath}"`;
+				// git wants a path relative to the folder it runs in, or the
+				// untouched absolute path for a target outside every root
+				const target = resolveRelativeToolPath(filePath, workspace);
+				cwd = target.root;
+				command += ` "${target.gitPath}"`;
 			}
 			const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('MCP Git Diff');
 			const { output } = await executeShellCommand(terminal, command, cwd, 10000);

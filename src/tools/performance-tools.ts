@@ -3,15 +3,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
+import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { executeShellCommand } from './shell-tools';
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', '.vscode-mcp', '__pycache__']);
 
-async function getWorkspaceRoot(): Promise<string> {
-	if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-		throw new Error('No workspace folder is open');
-	}
-	return vscode.workspace.workspaceFolders[0].uri.fsPath;
+async function getWorkspaceRoot(ref?: string): Promise<string> {
+	return resolveWorkspaceFolder(ref).uri.fsPath;
 }
 
 function formatBytes(bytes: number): string {
@@ -55,14 +53,13 @@ function collectSizes(rootDir: string, subDir: string): { files: FileSize[]; tot
 	return { files, totalBytes: files.reduce((sum, f) => sum + f.size, 0) };
 }
 
-async function analyzeBundle(bundleDir: string, topCount: number): Promise<string> {
-	const workspaceRoot = await getWorkspaceRoot();
-	const resolved = path.isAbsolute(bundleDir) ? bundleDir : path.join(workspaceRoot, bundleDir);
+async function analyzeBundle(bundleDir: string, topCount: number, workspace?: string): Promise<string> {
+	const target = resolveRelativeToolPath(bundleDir, workspace);
+	const resolved = target.fsPath;
 	if (!fs.existsSync(resolved)) {
 		return `Directory not found: ${bundleDir} — build the project first or pass another directory.`;
 	}
-	const relative = path.relative(workspaceRoot, resolved);
-	const { files, totalBytes } = collectSizes(workspaceRoot, relative);
+	const { files, totalBytes } = collectSizes(target.dir, '');
 	if (files.length === 0) {
 		return `${bundleDir} exists but contains no files.`;
 	}
@@ -70,7 +67,7 @@ async function analyzeBundle(bundleDir: string, topCount: number): Promise<strin
 	let output = `Bundle analysis of ${bundleDir}: ${files.length} file(s), ${formatBytes(totalBytes)} total.\n\n| File | Size | Share |\n|---|---|---|\n`;
 	for (const file of sorted.slice(0, topCount)) {
 		const share = totalBytes > 0 ? `${((file.size / totalBytes) * 100).toFixed(1)}%` : '-';
-		output += `| ${file.path} | ${formatBytes(file.size)} | ${share} |\n`;
+		output += `| ${target.displayPrefix}${file.path} | ${formatBytes(file.size)} | ${share} |\n`;
 	}
 	if (sorted.length > topCount) {
 		output += `\n... and ${sorted.length - topCount} more files accounting for ${formatBytes(sorted.slice(topCount).reduce((sum, f) => sum + f.size, 0))}.`;
@@ -101,8 +98,8 @@ function directorySize(dir: string): number {
 	return total;
 }
 
-async function performanceReport(): Promise<string> {
-	const workspaceRoot = await getWorkspaceRoot();
+async function performanceReport(workspace?: string): Promise<string> {
+	const workspaceRoot = await getWorkspaceRoot(workspace);
 	const mem = process.memoryUsage();
 
 	let fileCount = 0;
@@ -165,11 +162,11 @@ async function performanceReport(): Promise<string> {
 
 let sharedTerminal: vscode.Terminal | undefined;
 
-async function profileCommand(command: string, runs: number): Promise<string> {
+async function profileCommand(command: string, runs: number, workspace?: string): Promise<string> {
 	if (!sharedTerminal) {
 		throw new Error('Terminal not available for performance tools');
 	}
-	const workspaceRoot = await getWorkspaceRoot();
+	const workspaceRoot = await getWorkspaceRoot(workspace);
 	const durations: number[] = [];
 	let lastOutput = '';
 	let lastExit = 0;
@@ -202,16 +199,19 @@ export function registerPerformanceTools(server: McpServer, terminal?: vscode.Te
 
 WHEN TO USE: after a build, spotting bloated assets before shipping, comparing bundler configuration changes.`, {
 		dir: z.string().optional().default('dist').describe('Directory to analyze, relative to the workspace root'),
-		top: z.number().int().min(1).max(50).optional().default(15).describe('How many of the largest files to list')
-	}, async ({ dir = 'dist', top = 15 }) => {
-		const result = await analyzeBundle(dir, top);
+		top: z.number().int().min(1).max(50).optional().default(15).describe('How many of the largest files to list'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ dir = 'dist', top = 15, workspace }) => {
+		const result = await analyzeBundle(dir, top, workspace);
 		return { content: [{ type: 'text', text: result }] };
 	});
 
 	server.tool('get_performance_report_code', `Reports the MCP server's own footprint (uptime, RSS/heap memory, Node version) plus workspace weight: file count, total size and the heaviest installed npm packages.
 
-WHEN TO USE: checking what an agent session is costing in memory, finding dependency bloat.`, {}, async () => {
-		const result = await performanceReport();
+WHEN TO USE: checking what an agent session is costing in memory, finding dependency bloat.`, {
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ workspace }) => {
+		const result = await performanceReport(workspace);
 		return { content: [{ type: 'text', text: result }] };
 	});
 
@@ -219,9 +219,10 @@ WHEN TO USE: checking what an agent session is costing in memory, finding depend
 
 WHEN TO USE: measuring how long a build/test/bundle step really takes, comparing toolchain changes with repeatable numbers.`, {
 		command: z.string().describe('Shell command to measure'),
-		runs: z.number().int().min(1).max(10).optional().default(1).describe('Number of runs (best/worst/mean are reported)')
-	}, async ({ command, runs = 1 }) => {
-		const result = await profileCommand(command, runs);
+		runs: z.number().int().min(1).max(10).optional().default(1).describe('Number of runs (best/worst/mean are reported)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ command, runs = 1, workspace }) => {
+		const result = await profileCommand(command, runs, workspace);
 		return { content: [{ type: 'text', text: result }] };
 	});
 }

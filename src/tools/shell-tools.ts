@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { resolveWorkspaceFolder, resolveInputPath, listWorkspaceFolders, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
 export type ShellKind = 'bash' | 'powershell';
 
@@ -24,10 +26,12 @@ export function detectShellKind(terminal: vscode.Terminal): ShellKind {
         shellPath = terminal.name;
     }
     const asString = String(shellPath || '');
-    if (/powershell|pwsh|cmd/i.test(asString)) {
+    if (/powershell|pwsh|\bcmd\b/i.test(asString)) {
         return 'powershell';
     }
-    if (/bash|sh|zsh|wsl|git/i.test(asString)) {
+    // Word boundaries: "MCP Shell Commands" must not read as sh and push POSIX
+    // syntax into a PowerShell terminal
+    if (/\b(?:bash|zsh|sh|wsl|fish|dash|ksh)\b|git\s*bash/i.test(asString)) {
         return 'bash';
     }
     return process.platform === 'win32' ? 'powershell' : 'bash';
@@ -39,7 +43,7 @@ function toBashPath(p: string): string {
 }
 
 function toPosixQuoted(p: string): string {
-    return `"${toBashPath(p)}"`;
+    return `'${toBashPath(p).replace(/'/g, `'\\''`)}'`;
 }
 
 function toPowerShellQuoted(p: string): string {
@@ -55,15 +59,32 @@ function toPowerShellQuoted(p: string): string {
  */
 export function buildFullCommand(terminal: vscode.Terminal, command: string, cwd?: string): string {
     const kind = detectShellKind(terminal);
-    let prefixed = command;
-    if (cwd && cwd !== '.' && cwd !== './') {
-        prefixed = kind === 'bash'
-            ? `cd ${toPosixQuoted(cwd)} && ${command}`
-            : `Set-Location ${toPowerShellQuoted(cwd)}; ${command}`;
+    const wantsCd = !!cwd && cwd !== '.' && cwd !== './';
+    if (kind === 'bash') {
+        const body = wantsCd ? `cd ${toPosixQuoted(cwd!)} && ${command}` : command;
+        // Marker on its own line: appended after a trailing "# comment" it
+        // would become part of that comment and failures would read as exit 0
+        return `${body}\necho "${EXIT_MARKER}:$?"`;
     }
-    return kind === 'bash'
-        ? `${prefixed}; echo "${EXIT_MARKER}:$?"`
-        : `${prefixed}; Write-Output "${EXIT_MARKER}:$LASTEXITCODE"`;
+    // The whole template runs inside a script block so our variables stay
+    // scoped to it instead of leaking into the user's session; $LASTEXITCODE
+    // stays readable because the marker line sits inside the block too
+    const lines = ['& {', '$ok = $true'];
+    if (wantsCd) {
+        // ';' would run the command anyway after a failed cd, landing it in
+        // whatever directory the terminal happened to sit in
+        lines.push(`Set-Location ${toPowerShellQuoted(cwd!)}`, '$ok = $?');
+    }
+    // Braces on their own lines: a trailing "# comment" in the user command
+    // must not be able to swallow the closing brace of an if on one line
+    lines.push('if ($ok) {');
+    lines.push(command);
+    lines.push('}');
+    // Cmdlets never set $LASTEXITCODE, so $? covers what it leaves behind
+    const rc = '$(if (-not $ok) { 1 } elseif ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 })';
+    lines.push(`Write-Output "${EXIT_MARKER}:${rc}"`);
+    lines.push('}');
+    return lines.join('\n');
 }
 
 /**
@@ -134,19 +155,40 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
                 clearTimeout(timer);
 
                 // Recover the real exit code and strip the marker line plus the
-                // echoed command / trailing prompt noise from the captured stream
+                // echoed command / trailing prompt noise from the captured stream.
+                // Last match per line wins: a printed marker-shaped string must
+                // not shadow the real reading
                 let exitCode = 0;
                 const lines = output.split('\n');
+                const markerRegex = new RegExp(`${EXIT_MARKER}:(\\d+)`, 'g');
                 for (let i = lines.length - 1; i >= 0; i--) {
-                    const markerMatch = lines[i].match(new RegExp(`${EXIT_MARKER}:(\\d+)`));
+                    let markerMatch: RegExpExecArray | null = null;
+                    let m: RegExpExecArray | null;
+                    while ((m = markerRegex.exec(lines[i])) !== null) {
+                        markerMatch = m;
+                    }
+                    markerRegex.lastIndex = 0;
                     if (markerMatch) {
                         exitCode = parseInt(markerMatch[1], 10);
                         lines.splice(i, 1);
                         break;
                     }
                 }
+                // Commands now span several lines (cd guard, braces, exit
+                // marker), so their echo comes back row by row instead of as
+                // one string; rows of two chars or less ("}", "& {") are kept —
+                // JSON output legitimately contains them and they carry no echo
+                const templateLines = new Set(
+                    fullCommand.split('\n').map(l => l.trim()).filter(l => l.length > 2)
+                );
                 let cleaned = lines
-                    .filter(line => !line.includes(fullCommand))
+                    .filter(line => {
+                        const trimmed = line.trim();
+                        if (trimmed !== '' && templateLines.has(trimmed)) {
+                            return false;
+                        }
+                        return !line.includes(fullCommand);
+                    })
                     .join('\n')
                     .replace(/\n{3,}/g, '\n\n')
                     .trim();
@@ -221,20 +263,42 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
         WHEN TO USE: Running CLI commands, builds, git operations, npm/pip installs.
 
         Working directory: Use cwd to run commands in specific directories. Defaults to workspace root. If you get unexpected results, ensure the cwd is correct.
+        Multi-root: pass workspace to anchor cwd against that folder (name or 1-based index).
 
         Timeout: A command that exceeds its time limit (default 10s) returns the output captured so far with exit code 124 and a note; the process keeps running in the terminal. Slow scans or installs need a larger timeout passed explicitly.`,
         {
             command: z.string().describe('The shell command to execute'),
             cwd: z.string().optional().default('.').describe('Optional working directory for the command'),
-            timeout: z.number().optional().default(10000).describe('Command timeout in milliseconds (default: 10000)')
+            timeout: z.number().optional().default(10000).describe('Command timeout in milliseconds (default: 10000)'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ command, cwd, timeout = 10000 }): Promise<CallToolResult> => {
+        async ({ command, cwd, timeout = 10000, workspace }): Promise<CallToolResult> => {
             try {
                 if (!terminal) {
                     throw new Error('Terminal not available');
                 }
 
-                const { output, exitCode } = await executeShellCommand(terminal, command, cwd, timeout);
+                // Without a workspace ref the raw cwd is kept so '.' keeps
+                // following the terminal's own persisted directory
+                let fullCwd = cwd;
+                if (workspace !== undefined && workspace.trim() !== '') {
+                    fullCwd = path.resolve(resolveWorkspaceFolder(workspace).uri.fsPath, cwd ?? '.');
+                } else if (cwd && cwd !== '.' && cwd !== './' && listWorkspaceFolders().length > 1) {
+                    // A "Beta/tools" style cwd picks its folder by name, same
+                    // rule as every other path parameter; bare names stay
+                    // relative to wherever the terminal sits
+                    const segments = cwd.trim().split(/[\\/]+/).filter(s => s !== '' && s !== '.');
+                    const hit =
+                        segments.length > 1 &&
+                        listWorkspaceFolders().some(
+                            f => f.name.normalize('NFC').toLowerCase() === segments[0].normalize('NFC').toLowerCase()
+                        );
+                    if (hit) {
+                        fullCwd = resolveInputPath(cwd).fsPath;
+                    }
+                }
+
+                const { output, exitCode } = await executeShellCommand(terminal, command, fullCwd, timeout);
 
                 const result: CallToolResult = {
                     content: [

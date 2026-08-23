@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
+import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
 const DEFAULT_EXCLUDES = [
 	'**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/*.min.js',
@@ -34,11 +35,8 @@ function globToRegExp(pattern: string): RegExp {
 	return new RegExp(`^${body}$`);
 }
 
-async function getWorkspaceRoot(): Promise<string> {
-	if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-		throw new Error('No workspace folder is open');
-	}
-	return vscode.workspace.workspaceFolders[0].uri.fsPath;
+async function getWorkspaceRoot(ref?: string): Promise<string> {
+	return resolveWorkspaceFolder(ref).uri.fsPath;
 }
 
 interface WorkspaceFile {
@@ -97,10 +95,12 @@ const EXPORT_DECLARATION_PATTERNS: Array<{ regex: RegExp; kind: string }> = [
 
 const CODE_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'];
 
-async function findDeadSymbols(options: { path?: string; include?: string[]; exclude?: string[]; maxResults?: number }): Promise<{ totalScanned: number; totalDead: number; dead: Array<{ symbol: string; kind: string; file: string; line: number }> }> {
-	const workspaceRoot = options.path
-		? path.isAbsolute(options.path) ? options.path : path.join(await getWorkspaceRoot(), options.path)
-		: await getWorkspaceRoot();
+async function findDeadSymbols(options: { path?: string; include?: string[]; exclude?: string[]; maxResults?: number; workspace?: string }): Promise<{ totalScanned: number; totalDead: number; dead: Array<{ symbol: string; kind: string; file: string; line: number }> }> {
+	const target = resolveRelativeToolPath(options.path ?? '.', options.workspace);
+	if (options.path !== undefined && !fs.existsSync(target.fsPath)) {
+		throw new Error(`Path not found: ${options.path}`);
+	}
+	const workspaceRoot = target.dir;
 	const { excludeRegexes, includeRegexes, includeAll } = parseExcludeInclude(options.exclude, options.include);
 	const maxResults = options.maxResults ?? 50;
 
@@ -126,7 +126,7 @@ async function findDeadSymbols(options: { path?: string; include?: string[]; exc
 			for (const pattern of EXPORT_DECLARATION_PATTERNS) {
 				const match = trimmed.match(pattern.regex);
 				if (match) {
-					declared.push({ symbol: match[1], kind: pattern.kind, file: file.relativePath, line: lineIndex + 1 });
+					declared.push({ symbol: match[1], kind: pattern.kind, file: `${target.displayBase}${file.relativePath}`, line: lineIndex + 1 });
 					return;
 				}
 			}
@@ -179,8 +179,8 @@ function snapshotsDir(workspaceRoot: string): string {
 	return path.join(workspaceRoot, '.vscode-mcp', 'snapshots');
 }
 
-async function snapshotWorkspace(action: 'save' | 'compare' | 'list', name?: string, baseline?: string): Promise<string> {
-	const workspaceRoot = await getWorkspaceRoot();
+async function snapshotWorkspace(action: 'save' | 'compare' | 'list', name?: string, baseline?: string, workspace?: string): Promise<string> {
+	const workspaceRoot = await getWorkspaceRoot(workspace);
 	const dir = snapshotsDir(workspaceRoot);
 
 	if (action === 'list') {
@@ -256,7 +256,7 @@ function locateIndex(text: string, index: number): { line: number; column: numbe
 	return { line, column };
 }
 
-async function testRegex(pattern: string, flags: string, text: string | undefined, filePath: string | undefined, replace?: string): Promise<string> {
+async function testRegex(pattern: string, flags: string, text: string | undefined, filePath: string | undefined, replace?: string, workspace?: string): Promise<string> {
 	if (!/^[\w]*$/.test(flags) || /[^dgimsuy]/.test(flags)) {
 		throw new Error(`Invalid flags "${flags}" — allowed: d g i m s u y`);
 	}
@@ -272,10 +272,8 @@ async function testRegex(pattern: string, flags: string, text: string | undefine
 		if (!filePath) {
 			throw new Error('Provide either "text" or "filePath"');
 		}
-		const workspaceRoot = await getWorkspaceRoot();
-		const fullPath = path.isAbsolute(filePath) ? filePath : path.join(workspaceRoot, filePath);
 		try {
-			source = fs.readFileSync(fullPath, 'utf-8');
+			source = fs.readFileSync(resolveRelativeToolPath(filePath, workspace).fsPath, 'utf-8');
 		} catch {
 			throw new Error(`Cannot read ${filePath}`);
 		}
@@ -366,17 +364,16 @@ function detectEncoding(buffer: Buffer): string {
 	}
 }
 
-async function resolveWorkspaceFile(filePath: string): Promise<string> {
-	const workspaceRoot = await getWorkspaceRoot();
-	const fullPath = path.isAbsolute(filePath) ? filePath : path.join(workspaceRoot, filePath);
+async function resolveWorkspaceFile(filePath: string, workspace?: string): Promise<string> {
+	const fullPath = resolveRelativeToolPath(filePath, workspace).fsPath;
 	if (!fs.existsSync(fullPath)) {
 		throw new Error(`File not found: ${filePath}`);
 	}
 	return fullPath;
 }
 
-async function handleEncodingConvert(filePath: string, from: SupportedEncoding, to: SupportedEncoding): Promise<string> {
-	const fullPath = await resolveWorkspaceFile(filePath);
+async function handleEncodingConvert(filePath: string, from: SupportedEncoding, to: SupportedEncoding, workspace?: string): Promise<string> {
+	const fullPath = await resolveWorkspaceFile(filePath, workspace);
 	const original = fs.readFileSync(fullPath);
 	const text = decodeContent(original, from);
 	const converted = encodeContent(text, to);
@@ -393,9 +390,10 @@ Heuristic scanner: an export whose name appears only once across all scanned fil
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		include: z.array(z.string()).optional().describe('Glob patterns to include'),
 		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude'),
-		maxResults: z.number().int().min(1).max(500).optional().default(50).describe('Maximum dead symbols to report')
-	}, async ({ path: searchPath, include, exclude, maxResults }) => {
-		const result = await findDeadSymbols({ path: searchPath, include, exclude, maxResults });
+		maxResults: z.number().int().min(1).max(500).optional().default(50).describe('Maximum dead symbols to report'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: searchPath, include, exclude, maxResults, workspace }) => {
+		const result = await findDeadSymbols({ path: searchPath, include, exclude, maxResults, workspace });
 		if (result.dead.length === 0) {
 			return { content: [{ type: 'text', text: `No dead exports found among ${result.totalScanned} exported symbols.` }] };
 		}
@@ -413,9 +411,10 @@ WHEN TO USE: capture the workspace state before an automated edit session, then 
 Snapshots live in .vscode-mcp/snapshots/ inside the workspace.`, {
 		action: z.enum(['save', 'compare', 'list']).describe('save: create a snapshot. compare: diff current state against a baseline. list: show saved snapshots.'),
 		name: z.string().optional().describe('Name for a new snapshot (save only)'),
-		baseline: z.string().optional().describe('Name of the snapshot to compare against (compare only)')
-	}, async ({ action, name, baseline }) => {
-		const result = await snapshotWorkspace(action, name, baseline);
+		baseline: z.string().optional().describe('Name of the snapshot to compare against (compare only)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ action, name, baseline, workspace }) => {
+		const result = await snapshotWorkspace(action, name, baseline, workspace);
 		return { content: [{ type: 'text', text: result }] };
 	});
 
@@ -426,9 +425,10 @@ WHEN TO USE: debugging patterns before applying them, extracting data from logs,
 		flags: z.string().optional().default('g').describe('Regex flags (default: g)'),
 		text: z.string().optional().describe('Inline text to test against'),
 		filePath: z.string().optional().describe('File to test against (used when text is not provided)'),
-		replace: z.string().optional().describe('Optional replacement expression ($1, $<name> supported) — adds a preview of the replaced result')
-	}, async ({ pattern, flags = 'g', text, filePath, replace }) => {
-		const result = await testRegex(pattern, flags, text, filePath, replace);
+		replace: z.string().optional().describe('Optional replacement expression ($1, $<name> supported) — adds a preview of the replaced result'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ pattern, flags = 'g', text, filePath, replace, workspace }) => {
+		const result = await testRegex(pattern, flags, text, filePath, replace, workspace);
 		return { content: [{ type: 'text', text: result }] };
 	});
 
@@ -438,17 +438,18 @@ WHEN TO USE: fixing files saved in the wrong encoding, adding or removing a BOM,
 		path: z.string().describe('File to inspect or convert (relative to workspace root)'),
 		action: z.enum(['detect', 'convert']).describe('detect: report the current encoding. convert: rewrite the file.'),
 		from: z.enum(['utf-8', 'utf-8-bom', 'utf-16le', 'latin1']).optional().describe('Source encoding (convert only)'),
-		to: z.enum(['utf-8', 'utf-8-bom', 'utf-16le', 'latin1']).optional().describe('Target encoding (convert only)')
-	}, async ({ path: filePath, action, from, to }) => {
+		to: z.enum(['utf-8', 'utf-8-bom', 'utf-16le', 'latin1']).optional().describe('Target encoding (convert only)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: filePath, action, from, to, workspace }) => {
 		if (action === 'detect') {
-			const fullPath = await resolveWorkspaceFile(filePath);
+			const fullPath = await resolveWorkspaceFile(filePath, workspace);
 			const detection = detectEncoding(fs.readFileSync(fullPath));
 			return { content: [{ type: 'text', text: `${filePath}: ${detection}` }] };
 		}
 		if (!from || !to) {
 			throw new Error('Both "from" and "to" encodings are required for convert');
 		}
-		const result = await handleEncodingConvert(filePath, from, to);
+		const result = await handleEncodingConvert(filePath, from, to, workspace);
 		return { content: [{ type: 'text', text: result }] };
 	});
 }
