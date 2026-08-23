@@ -20,6 +20,9 @@ import { registerPerformanceTools } from './tools/performance-tools';
 import { registerRefactorTools } from './tools/refactor-tools';
 import { registerFrontendTools } from './tools/frontend-tools';
 import { registerWorkflowTools } from './tools/workflow-tools';
+import { registerAdvancedTools } from './tools/advanced-tools';
+import { registerCoffeeTools } from './tools/coffee-tools';
+import { recordToolCall } from './utils/usage';
 import { logger } from './utils/logger';
 
 export interface ToolConfiguration {
@@ -39,6 +42,7 @@ export interface ToolConfiguration {
     refactoring: boolean;
     frontend: boolean;
     workflow: boolean;
+    advanced: boolean;
 }
 
 export class MCPServer {
@@ -74,7 +78,8 @@ export class MCPServer {
             performance: true,
             refactoring: true,
             frontend: true,
-            workflow: true
+            workflow: true,
+            advanced: true
         };
         this.app = express();
         this.app.use(express.json());
@@ -99,7 +104,7 @@ export class MCPServer {
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.10.0",
+            version: "0.11.0",
         }, {
             capabilities: {
                 logging: {},
@@ -121,6 +126,21 @@ export class MCPServer {
             throw new Error('File listing callback not set');
         }
 
+        // Count calls locally (feeds get_server_info_code). The callback is
+        // always the last argument of server.tool(), whatever the overload.
+        const originalTool = server.tool.bind(server);
+        server.tool = ((name: string, ...args: unknown[]) => {
+            const last = args.length - 1;
+            if (typeof args[last] === 'function') {
+                const handler = args[last] as (...cbArgs: unknown[]) => unknown;
+                args[last] = (...cbArgs: unknown[]) => {
+                    recordToolCall(name);
+                    return handler(...cbArgs);
+                };
+            }
+            return (originalTool as (...toolArgs: unknown[]) => unknown)(name, ...args);
+        }) as typeof server.tool;
+
         const groups: Array<[string, boolean, () => void]> = [
             ['file', c.file, () => registerFileTools(server, fileListing)],
             ['edit', c.edit, () => registerEditTools(server)],
@@ -137,7 +157,8 @@ export class MCPServer {
             ['performance', c.performance, () => registerPerformanceTools(server, terminal)],
             ['refactoring', c.refactoring, () => registerRefactorTools(server)],
             ['frontend', c.frontend, () => registerFrontendTools(server)],
-            ['workflow', c.workflow, () => registerWorkflowTools(server, terminal)]
+            ['workflow', c.workflow, () => registerWorkflowTools(server, terminal)],
+            ['advanced', c.advanced, () => registerAdvancedTools(server, { host: this.host, port: this.port })]
         ];
 
         for (const [, enabled, register] of groups) {
@@ -145,6 +166,9 @@ export class MCPServer {
                 register();
             }
         }
+
+        // Not tied to any enabledTools setting: the bar stays open
+        registerCoffeeTools(server);
     }
 
     private setupRoutes(): void {

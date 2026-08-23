@@ -40,7 +40,8 @@ function getToolConfiguration(): ToolConfiguration {
         performance: enabledTools.performance ?? true,
         refactoring: enabledTools.refactoring ?? true,
         frontend: enabledTools.frontend ?? true,
-        workflow: enabledTools.workflow ?? true
+        workflow: enabledTools.workflow ?? true,
+        advanced: enabledTools.advanced ?? true
     };
 }
 
@@ -101,8 +102,12 @@ function updateStatusBar(port: number) {
     }
 
     if (serverEnabled) {
+        // Inside a devcontainer/WSL/SSH window the server binds the REMOTE's
+        // localhost, so say so before someone wonders why their client can't connect
+        const remoteName = vscode.env.remoteName;
+        const remoteNote = remoteName ? ` — running inside remote "${remoteName}"` : '';
         statusBarItem.text = `$(server) MCP Server: ${port}`;
-        statusBarItem.tooltip = `MCP Server running at localhost:${port} (Click to toggle)`;
+        statusBarItem.tooltip = `MCP Server running at localhost:${port}${remoteNote} (Click to toggle)`;
         statusBarItem.backgroundColor = undefined;
     } else {
         statusBarItem.text = `$(server) MCP Server: Off`;
@@ -136,9 +141,9 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
             const terminal = getExtensionTerminal(context);
             const toolConfig = getToolConfiguration();
             mcpServer = new MCPServer(port, host, terminal, toolConfig);
-            mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
+            mcpServer.setFileListingCallback(async (path: string, recursive: boolean, workspace?: string) => {
                 try {
-                    return await listWorkspaceFiles(path, recursive);
+                    return await listWorkspaceFiles(path, recursive, workspace);
                 } catch (error) {
                     logger.error(`[toggleServerState] Error listing files: ${error instanceof Error ? error.message : String(error)}`);
                     throw error;
@@ -154,7 +159,8 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
             const duration = Date.now() - startTime;
             logger.info(`[toggleServerState] Server started successfully at ${new Date().toISOString()} (took ${duration}ms)`);
             
-            vscode.window.showInformationMessage(`MCP Server enabled and running at http://localhost:${port}/mcp`);
+            const remoteSuffix = vscode.env.remoteName ? ` (inside remote "${vscode.env.remoteName}" — forward the port or connect from within the remote)` : '';
+            vscode.window.showInformationMessage(`MCP Server enabled and running at http://localhost:${port}/mcp${remoteSuffix}`);
         }
     } else {
         // Stop the server if it was enabled
@@ -188,6 +194,9 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
 
 export async function activate(context: vscode.ExtensionContext) {
     logger.info('Activating vscode-mcp-server extension');
+    if (vscode.env.remoteName) {
+        logger.info(`[activate] Remote environment detected: "${vscode.env.remoteName}" — the server binds this host's localhost only`);
+    }
 
     try {
         // Get configuration
@@ -219,9 +228,9 @@ export async function activate(context: vscode.ExtensionContext) {
             mcpServer = new MCPServer(port, host, terminal, toolConfig);
 
             // Set up file listing callback
-            mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
+            mcpServer.setFileListingCallback(async (path: string, recursive: boolean, workspace?: string) => {
                 try {
-                    return await listWorkspaceFiles(path, recursive);
+                    return await listWorkspaceFiles(path, recursive, workspace);
                 } catch (error) {
                     logger.error(`Error listing files: ${error instanceof Error ? error.message : String(error)}`);
                     throw error;
@@ -274,9 +283,9 @@ export async function activate(context: vscode.ExtensionContext) {
                     const toolConfig = getToolConfiguration();
                     
                     mcpServer = new MCPServer(port, host, terminal, toolConfig);
-                    mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
+                    mcpServer.setFileListingCallback(async (path: string, recursive: boolean, workspace?: string) => {
                         try {
-                            return await listWorkspaceFiles(path, recursive);
+                            return await listWorkspaceFiles(path, recursive, workspace);
                         } catch (error) {
                             logger.error(`[configChangeListener] Error listing files: ${error instanceof Error ? error.message : String(error)}`);
                             throw error;
