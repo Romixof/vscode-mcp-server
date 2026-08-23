@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
-import { resolveInputPath, listWorkspaceFolders, findOwningFolder, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
+import { resolveInputPath, listWorkspaceFolders, findOwningFolder, prefixDisplay, displayLabelFor, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 // Type for file listing results
@@ -31,8 +31,8 @@ export async function listWorkspaceFiles(workspacePath: string, recursive: boole
     // root gets an absolute prefix because nothing shorter would round-trip
     const owner = findOwningFolder(targetUri);
     const rootPrefix =
-        owner && listWorkspaceFolders().length > 1
-            ? owner.name
+        owner && prefixDisplay()
+            ? displayLabelFor(owner)
             : owner
                 ? ''
                 : targetUri.fsPath.replace(/\\/g, '/');
@@ -179,7 +179,9 @@ export async function readWorkspaceFile(
  */
 export function registerFileTools(
     server: McpServer, 
-    fileListingCallback: FileListingCallback
+    fileListingCallback: FileListingCallback,
+    // Cluster-wide folder view; undefined keeps single-window output byte-identical
+    clusterFolders?: () => { lines: string[]; windowsFooter: string } | undefined
 ): void {
     server.tool(
         'list_workspace_folders_code',
@@ -191,6 +193,17 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
             const folders = listWorkspaceFolders();
             if (folders.length === 0) {
                 return { content: [{ type: 'text', text: 'No workspace folder is open.' }] };
+            }
+            const cluster = clusterFolders?.();
+            if (cluster) {
+                // Several windows share this server: number folders globally
+                // so the indexes match what routing expects on every window
+                const text = [
+                    `Open workspace folders (${cluster.lines.length}, cluster-wide):`,
+                    ...cluster.lines,
+                    `Windows: ${cluster.windowsFooter}`
+                ].join('\n');
+                return { content: [{ type: 'text', text }] };
             }
             const lines = folders.map((f, i) => `${i + 1}. ${f.name} -> ${f.uri.fsPath}`);
             return { content: [{ type: 'text', text: `Open workspace folders (${folders.length}):\n${lines.join('\n')}` }] };

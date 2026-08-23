@@ -7,7 +7,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveWorkspaceFolder, listWorkspaceFolders, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { getUsageSnapshot, getTotalCalls, getServerStartTime } from '../utils/usage';
 
-const EXTENSION_ID = 'Romixo.vscode-mcp-server';
+export const EXTENSION_ID = 'Romixo.vscode-mcp-server';
 
 interface ExtensionSummary {
 	id: string;
@@ -68,7 +68,7 @@ function formatExtensionList(title: string, extensions: ExtensionSummary[]): str
  * @param server MCP server instance
  * @param endpoint host:port the HTTP server binds, for display purposes
  */
-export function registerAdvancedTools(server: McpServer, endpoint: { host: string; port: number }): void {
+export function registerAdvancedTools(server: McpServer, endpoint: { host: string; port: number }, clusterInfo?: () => string | undefined): void {
 	server.tool(
 		'get_server_info_code',
 		`Reports this MCP server's own status: extension/VS Code/Node versions, platform, remote environment (devcontainer / WSL / SSH), open workspace folders, uptime, and how many times each tool has been called since activation.
@@ -97,6 +97,10 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
 			];
 			if (usage.length > 0) {
 				lines.push('- Top tools: ' + usage.map(u => `${u.tool} (${u.calls})`).join(', '));
+			}
+			const clusterLine = clusterInfo?.();
+			if (clusterLine) {
+				lines.push(clusterLine);
 			}
 			return { content: [{ type: 'text', text: lines.join('\n') }] };
 		}
