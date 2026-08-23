@@ -127,11 +127,13 @@ async function verifyShellKind(terminal: vscode.Terminal): Promise<ShellKind> {
         return cached;
     }
     let kind = detectShellKind(terminal);
-    // Explicit signals (shell path, telling terminal name) are trusted as-is,
-    // and so is a guessed PowerShell family: probing one would type a visible
-    // CommandNotFound error into the user's session for no information. Only
-    // terminals guessed POSIX are worth a round-trip.
-    if (!explicitShellKind(terminal) && kind === 'bash') {
+    // Explicit signals (shell path, telling terminal name) are trusted as-is.
+    // Everything else gets one probe round-trip, whatever the guess was: the
+    // guess can be wrong in both directions (a stale reused terminal running
+    // Git Bash while the default profile says PowerShell), and probing costs
+    // genuine PowerShell sessions nothing worse than one visible
+    // CommandNotFound line — cached afterwards, never repeated.
+    if (!explicitShellKind(terminal)) {
         try {
             const { output, exitCode } = await executeAndWait(terminal, probeCommand(), 2000);
             // Only a genuine answer settles anything: 'none' or a version
