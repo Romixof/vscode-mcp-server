@@ -246,6 +246,24 @@ export async function waitForShellIntegration(terminal: vscode.Terminal, timeout
 // (a second command typed into a busy session corrupts both)
 const terminalQueues = new WeakMap<vscode.Terminal, Promise<unknown>>();
 
+// Shell integration leaks its own control sequences into the read stream:
+// OSC 633 marks command boundaries (a bare "]633;C" is what showed up in
+// results), and other OSC/CSI escapes can ride along with prompt redraws.
+// Stripping them keeps tool output byte-clean for the client.
+const OSC_SEQUENCE_REGEX = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+const CSI_SEQUENCE_REGEX = /\x1b\[[0-9;?]*[A-Za-z]/g;
+// Some paths deliver the sequence with its ESC byte already swallowed, leaving
+// a bare "]633;X" fragment on a line of its own; only whole-line fragments go,
+// so legitimate text containing "633;C" mid-line survives
+const BARE_OSC_FRAGMENT_REGEX = /(^|\n)\]?633;[A-Z](?:;[^\n]*)?(?=\n|$)/g;
+
+function stripControlSequences(text: string): string {
+	return text
+		.replace(OSC_SEQUENCE_REGEX, '')
+		.replace(CSI_SEQUENCE_REGEX, '')
+		.replace(BARE_OSC_FRAGMENT_REGEX, '$1');
+}
+
 function queueOnTerminal<T>(terminal: vscode.Terminal, task: () => Promise<T>): Promise<T> {
     const prev = terminalQueues.get(terminal) || Promise.resolve();
     const run = prev.catch(() => undefined).then(task);
@@ -288,7 +306,10 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
                 // not shadow the real reading
                 let exitCode = 0;
                 let markerFound = false;
-                const lines = output.split('\n');
+                // Control sequences go first: a stray "]633;C" glued to a line
+                // could otherwise break marker matching or echo filtering
+                const sanitized = stripControlSequences(output);
+                const lines = sanitized.split('\n');
                 const markerRegex = new RegExp(`${EXIT_MARKER}:(\\d+)`, 'g');
                 for (let i = lines.length - 1; i >= 0; i--) {
                     let markerMatch: RegExpExecArray | null = null;
@@ -331,7 +352,7 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
                     // wrong shell guess sprays them within milliseconds instead
                     // of ever reaching the marker. A quiet long-running process
                     // times out too, so bare absence of the marker proves nothing.
-                    if (!markerFound && /command not found|syntax error|unexpected token|is not recognized|ParserError/i.test(output)) {
+                    if (!markerFound && /command not found|syntax error|unexpected token|is not recognized|ParserError/i.test(sanitized)) {
                         cleaned += `\n\n[No exit marker came back and the output above looks like shell parse errors — this terminal is probably running a different shell than expected.]`;
                     }
                     resolve({ output: cleaned, exitCode: 124 });

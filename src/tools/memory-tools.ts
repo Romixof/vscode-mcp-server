@@ -170,7 +170,7 @@ async function loadAllMemory(workspace?: string): Promise<{ global: string | nul
 export function registerMemoryTools(server: McpServer): void {
 	server.tool('memory_load_code', `Loads the persistent memory system. Reads global memory (~/Mammouth/MEMORY.md) and project memory ({workspaceName}_MEMORY.md in workspace root).
 
-WHEN TO USE: First thing to do at the start of any session. Loads user identity, preferences, workflow rules, and project-specific context.
+WHEN TO USE: ONCE per conversation, on the very first user message only — not before every reply. Skip it when memory is already loaded in the current conversation, even if several turns have passed. Loads user identity, preferences, workflow rules, and project-specific context.
 
 Returns merged content with clear separation between global and project memory.`, {
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
