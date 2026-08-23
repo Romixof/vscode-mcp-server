@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveWorkspaceFolder, resolveInputPath, listWorkspaceFolders, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
+import { logger } from '../utils/logger';
 
 export type ShellKind = 'bash' | 'powershell';
 
@@ -104,6 +105,17 @@ function probeCommand(): string {
 }
 
 /**
+ * Positive evidence for the other family: only this literal answer settles
+ * 'powershell'. A finished round-trip proves nothing — the probe itself can
+ * arrive mangled (a busy pty ate the leading characters of the very first
+ * submission once, turning printf into rintf) and must never poison the
+ * verdict by absence.
+ */
+function powerShellProbeCommand(): string {
+    return 'Write-Output "__MCP_PS:$($PSVersionTable.PSVersion.Major)"';
+}
+
+/**
  * Settled shell kind for callers that build dialect-specific fragments
  * themselves instead of passing a plain command. Verification goes through the
  * same per-terminal queue as executions, so the probe can never interleave
@@ -135,26 +147,25 @@ async function verifyShellKind(terminal: vscode.Terminal): Promise<ShellKind> {
     // CommandNotFound line — cached afterwards, never repeated.
     if (!explicitShellKind(terminal)) {
         try {
-            const { output, exitCode } = await executeAndWait(terminal, probeCommand(), 2000);
-            // Only a genuine answer settles anything: 'none' or a version
-            // number. The echoed command carries the literal '%s' placeholder
-            // and can survive output cleaning when its row wraps, so a bare
-            // '__MCP_SHELL:' substring proves nothing. A deadline cut (exit
-            // 124) proves nothing either — a busy tty looks identical to a
-            // foreign shell — and both stay uncached so the next call retries
-            // with fresh evidence instead of pinning a wrong verdict forever.
+            let { output } = await executeAndWait(terminal, probeCommand(), 2000);
+            if (!/__MCP_SHELL:(none|\d)/.test(output)) {
+                // No POSIX answer: ask the other family directly instead of
+                // settling anything by absence
+                const ps = await executeAndWait(terminal, powerShellProbeCommand(), 2000);
+                output = ps.output;
+            }
             if (/__MCP_SHELL:(none|\d)/.test(output)) {
                 kind = 'bash';
                 verifiedShellKinds.set(terminal, kind);
-            } else if (exitCode !== 124 && process.platform === 'win32') {
-                // A finished round-trip with no POSIX answer: every POSIX shell
-                // runs printf, so on Windows this session hosts cmd/PowerShell
+            } else if (/__MCP_PS:\d/.test(output)) {
+                // Positive PowerShell answer: the only way absence of a bash
+                // reply may settle anything. A finished-but-silent round-trip
+                // (mangled probe on a busy pty) stays uncached and retries.
                 kind = 'powershell';
                 verifiedShellKinds.set(terminal, kind);
             }
-            // Off Windows, silence usually means a third-family shell (fish,
-            // csh) choked on the brace expansion; the static guess already
-            // covered it
+            // No readable verdict either way: keep the static guess for this
+            // call and probe again on the next one
         } catch {
             // unreadable stream: same as no answer, retried on a later call
         }
@@ -407,8 +418,34 @@ export async function executeShellCommand(
     // with a real command; buildFullCommand then reads the settled kind
     return queueOnTerminal(terminal, async () => {
         await verifyShellKind(terminal);
+        const usedKind = detectShellKind(terminal);
         const fullCommand = buildFullCommand(terminal, command, cwd);
-        return executeAndWait(terminal, fullCommand, timeout);
+        const result = await executeAndWait(terminal, fullCommand, timeout);
+
+        // A finished command that never reached its marker while spraying
+        // foreign-family parse errors means the verdict is wrong (or was
+        // poisoned by a mangled first submission). Invalidate it and re-probe
+        // so the next call wraps in the right dialect — this exact loop once
+        // burned every timeout on a Git Bash fed PowerShell syntax.
+        if (!/__MCP_EXIT/.test(result.output) &&
+            /bash: (syntax error|command not found)|unexpected token|is not recognized|ParserError/i.test(result.output)) {
+            const foreign: ShellKind = usedKind === 'bash' ? 'powershell' : 'bash';
+            logger.info(`[execute_shell_command] Terminal rejected ${usedKind} syntax — invalidating verdict, re-probing`);
+            verifiedShellKinds.delete(terminal);
+            const probe = foreign === 'bash' ? probeCommand() : powerShellProbeCommand();
+            try {
+                const { output } = await executeAndWait(terminal, probe, 2000);
+                if (/__MCP_SHELL:(none|\d)/.test(output)) {
+                    verifiedShellKinds.set(terminal, 'bash');
+                } else if (/__MCP_PS:\d/.test(output)) {
+                    verifiedShellKinds.set(terminal, 'powershell');
+                }
+            } catch {
+                // probe failed again; nothing cached, next call retries
+            }
+        }
+
+        return result;
     });
 }
 
