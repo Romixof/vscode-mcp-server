@@ -226,7 +226,7 @@ Each request gets its own stateless MCP session, so one slow or hung call never 
 
 ## Caveats
 
-Multiple workspace folders are supported; tools pick one through the `workspace` parameter described above. Local connections only. Shell execution means a misbehaving client can run commands on your machine: keep the port closed to your network and only connect clients you trust. No authentication yet; the MCP auth spec is still moving. Inside a devcontainer, WSL or SSH remote the server listens within that environment, so forward the port or connect from a client inside the same remote.
+Multiple workspace folders are supported; tools pick one through the `workspace` parameter described above. Local connections only. Every VS Code window serves its own server instance, and two windows pointed at the same port collide — give each window its own `vscode-mcp-server.port`. Shell execution means a misbehaving client can run commands on your machine: keep the port closed to your network and only connect clients you trust. No authentication yet; the MCP auth spec is still moving. Inside a devcontainer, WSL or SSH remote the server listens within that environment, so forward the port or connect from a client inside the same remote.
 
 ## Credits and license
 
