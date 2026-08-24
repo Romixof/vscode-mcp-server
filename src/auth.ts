@@ -31,7 +31,7 @@ export function generateSessionToken(): string {
 export function tokensMatch(presented: string, expected: string): boolean {
 	const a = Buffer.from(presented);
 	const b = Buffer.from(expected);
-	if (a.length !== b.length) return false; // length leak reveals nothing useful
+	if (a.length !== b.length) {return false;} // length leak reveals nothing useful
 	return crypto.timingSafeEqual(a, b);
 }
 
@@ -43,10 +43,10 @@ export function extractToken(headers: Record<string, string | string[] | undefin
 	const authz = headers['authorization'];
 	if (typeof authz === 'string' && authz.toLowerCase().startsWith('bearer ')) {
 		const t = authz.slice(7).trim();
-		if (t) return t;
+		if (t) {return t;}
 	}
 	const alt = headers['x-mcp-token'];
-	if (typeof alt === 'string' && alt.trim()) return alt.trim();
+	if (typeof alt === 'string' && alt.trim()) {return alt.trim();}
 	return undefined;
 }
 
@@ -57,7 +57,7 @@ export function extractToken(headers: Record<string, string | string[] | undefin
  * cross-site POSTs — that is exactly the drive-by case being killed.
  */
 export function originAllowed(origin: string | undefined, cfg: AuthConfig, selfPort: number): boolean {
-	if (!origin) return cfg.allowNoOrigin !== false;
+	if (!origin) {return cfg.allowNoOrigin !== false;}
 	const allowed = new Set([
 		`http://127.0.0.1:${selfPort}`,
 		`http://localhost:${selfPort}`,
@@ -80,7 +80,7 @@ export function originGuard(getCfg: () => AuthConfig, selfPort: number): Request
 export function bearerAuth(getExpected: () => string | undefined): RequestHandler {
 	return (req: Request, res: Response, next: NextFunction) => {
 		const expected = getExpected();
-		if (!expected) return next(); // mode none, or oauth verifies through its own path
+		if (!expected) {return next();} // mode none, or oauth verifies through its own path
 		const presented = extractToken(req.headers as Record<string, string | string[] | undefined>);
 		if (!presented || !tokensMatch(presented, expected)) {
 			res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server", error="invalid_token"');
