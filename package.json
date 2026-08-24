@@ -38,6 +38,42 @@
           "default": false,
           "description": "Whether the MCP server should be enabled by default on VS Code startup"
         },
+        "vscode-mcp-server.auth.mode": {
+          "type": "string",
+          "enum": [
+            "session-token",
+            "static-token",
+            "oauth",
+            "none"
+          ],
+          "default": "session-token",
+          "markdownEnumDescriptions": [
+            "A random secret is generated once and required on every call (recommended)",
+            "You pin the secret yourself in #vscode-mcp-server.auth.staticToken#",
+            "MCP OAuth 2.1 with dynamic client registration — what remote clients like Mammouth require",
+            "No authentication (any local process or web page can run tools — not recommended)"
+          ],
+          "description": "How clients must authenticate to the MCP endpoint."
+        },
+        "vscode-mcp-server.auth.staticToken": {
+          "type": "string",
+          "default": "",
+          "description": "Token required when auth.mode is static-token. Pick a long random string (32+ characters).",
+          "minLength": 0
+        },
+        "vscode-mcp-server.auth.allowedOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra Origin values allowed besides the server's own (e.g. https://mammouth.ai when it calls through a tunnel). Browser requests from other sites stay blocked."
+        },
+        "vscode-mcp-server.auth.allowNoOrigin": {
+          "type": "boolean",
+          "default": true,
+          "description": "Accept requests that carry no Origin header (curl, SDK clients). Browsers always send Origin on cross-site posts, so this does not weaken the drive-by protection."
+        },
         "vscode-mcp-server.enabledTools": {
           "type": "object",
           "default": {
@@ -145,6 +181,10 @@
       {
         "command": "vscode-mcp-server.toggleServer",
         "title": "Toggle MCP Server"
+      },
+      {
+        "command": "vscode-mcp-server.copyAuthToken",
+        "title": "MCP Server: Copy access token"
       }
     ]
   },

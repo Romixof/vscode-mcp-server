@@ -142,6 +142,7 @@ async function startOrJoinServer(
     const terminal = getExtensionTerminal(context);
 
     mcpServer = new MCPServer(port, host, terminal, getToolConfiguration());
+    mcpServer.extensionContext = context;
     mcpServer.setFileListingCallback(async (path: string, recursive: boolean, workspace?: string) => {
         try {
             return await listWorkspaceFiles(path, recursive, workspace);
@@ -292,13 +293,27 @@ export async function activate(context: vscode.ExtensionContext) {
         );
 
         const showServerInfoCommand = vscode.commands.registerCommand(
-            'vscode-mcp-server.showServerInfo', 
+            'vscode-mcp-server.showServerInfo',
             () => {
                 if (serverEnabled) {
                     vscode.window.showInformationMessage(`MCP Server is running at http://localhost:${port}/mcp`);
                 } else {
                     vscode.window.showInformationMessage('MCP Server is currently disabled. Click on the status bar item to enable it.');
                 }
+            }
+        );
+
+        const copyAuthTokenCommand = vscode.commands.registerCommand(
+            'vscode-mcp-server.copyAuthToken',
+            async () => {
+                const token = mcpServer?.authToken
+                    ?? context.globalState.get<string>('vscode-mcp.authToken');
+                if (!token) {
+                    vscode.window.showInformationMessage('No access token yet — start the MCP server first.');
+                    return;
+                }
+                await vscode.env.clipboard.writeText(token);
+                vscode.window.showInformationMessage('MCP access token copied to the clipboard.');
             }
         );
 
@@ -338,6 +353,7 @@ export async function activate(context: vscode.ExtensionContext) {
             statusBarItem,
             toggleServerCommand,
             showServerInfoCommand,
+            copyAuthTokenCommand,
             configChangeListener,
             workspaceFoldersListener,
             { dispose: async () => mcpServer && await mcpServer.stop() }
