@@ -142,6 +142,27 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		res.redirect(302, `${redirect_uri}${sep}code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ''}`);
 	});
 
+	// Landing the client hits after the consent redirect when its app does
+	// not own the callback path (Mammouth's callback is its chat root, so a
+	// bare redirect looks like "connection canceled"). This page closes the
+	// loop visibly: success banner + the code, then auto-close.
+	router.get('/oauth/done', (req, res) => {
+		const ok = req.query.code || !req.query.error;
+		res.status(200).send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>MCP authorization</title>
+<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1e1e1e;color:#ccc}
+.box{max-width:520px;text-align:center;padding:2rem}
+h1{font-size:1.3rem;color:${ok ? '#4ec9a6' : '#f48771'}}
+code{background:#2a2a2a;padding:.2rem .4rem;border-radius:4px;font-size:.85em;word-break:break-all}</style></head>
+<body><div class="box">
+${ok
+	? `<h1>&#10003; Authorization complete</h1><p>You can close this tab and return to the client. The authorization code has been delivered to your callback URL.</p>`
+	: `<h1>&#10007; Authorization failed</h1><p>Reason: <code>${String(req.query.error)}</code>. Close this tab and try connecting again.</p>`}
+<p style="margin-top:1.5rem"><button onclick="window.close()" style="padding:.5rem 1.5rem;font-size:1rem;cursor:pointer;background:#0e639c;color:#fff;border:none;border-radius:4px">Close this tab</button></p>
+</div><script>setTimeout(()=>{try{window.close()}catch(e){}},4000)</script>
+</body></html>`);
+	});
+
 	// ---------- token exchange ----------
 	router.post('/token', expressUrlencoded({ extended: false }), async (req, res) => {
 		const { grant_type, code, client_id, code_verifier, redirect_uri } = req.body as Record<string, string | undefined>;
