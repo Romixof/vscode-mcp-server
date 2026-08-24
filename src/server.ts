@@ -216,9 +216,9 @@ export class MCPServer {
         this.app.use(originGuard(authCfg, this.port));
         this.app.use('/mcp', bearerAuth(() => {
             const mode = authCfg().mode;
-            if (mode === 'none') return undefined;
-            if (mode === 'static-token') return authCfg().staticToken;
-            if (mode === 'session-token') return this.authToken;
+            if (mode === 'none') {return undefined;}
+            if (mode === 'static-token') {return authCfg().staticToken;}
+            if (mode === 'session-token') {return this.authToken;}
             return undefined; // oauth verifies through its own middleware
         }));
 
