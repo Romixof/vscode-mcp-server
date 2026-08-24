@@ -237,8 +237,9 @@ export class MCPServer {
             const mode = authCfg().mode;
             if (mode === 'none') {return undefined;}
             if (mode === 'static-token') {return authCfg().staticToken;}
-            if (mode === 'session-token') {return this.authToken;}
-            return undefined; // oauth verifies through its own middleware
+            // session-token AND oauth: in oauth mode issued access tokens ARE
+            // this secret, so the endpoint stays protected end to end
+            return this.authToken;
         }));
         // OAuth endpoints mount before the bearer gate so discovery,
         // registration, authorize and token stay reachable pre-auth (per spec)
