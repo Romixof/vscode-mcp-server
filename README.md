@@ -246,7 +246,21 @@ Three modes under `vscode-mcp-server.auth.mode`:
 
 One honest limit: a token proves whoever holds it may act here — it cannot prove they are an AI.
 
-Connecting [Mammouth](https://mammouth.ai): set `auth.mode` to `oauth`, expose the port through a tunnel if Mammouth runs outside this machine (cloudflared, tailscale funnel), add the tunnel's public origin to `auth.allowedOrigins`, then give Mammouth the URL — it discovers the OAuth endpoints on its own. When their direct API connection ships, switching to `static-token` is a two-line change.
+### Reaching the server from outside
+
+The OAuth metadata always announces the origin the request actually arrived through (`Host` / `X-Forwarded-Host` header), so any front door works without configuration:
+
+| Setup | What the user does | What the metadata announce |
+|---|---|---|
+| Local client only | nothing | `http://127.0.0.1:3000` |
+| nginx / Caddy reverse proxy | proxy to `127.0.0.1:3000`, set `proxy_set_header Host $host;` | the proxy's public `https://domain` |
+| Tailscale Funnel | `tailscale funnel 3000` | `https://machine.tailnet.ts.net` |
+| cloudflared | `cloudflared tunnel --url http://localhost:3000` | the `trycloudflare.com` URL |
+| ngrok | `ngrok http 3000` | the `ngrok-free.app` URL |
+
+No tunnel-specific setting exists on purpose: run the tunnel, connect through it, and discovery reflects it. For remote clients that POST from a browser context (not server-side), also add the public origin to `vscode-mcp-server.auth.allowedOrigins`; pure server-to-server calls carry no Origin header and pass regardless.
+
+Connecting [Mammouth](https://mammouth.ai): set `auth.mode` to `oauth`, expose the port through any of the tunnels above, then give Mammouth the public URL — it discovers the OAuth endpoints itself. Log into mammouth.ai in the same browser first; their flow bounces through their login page otherwise. Approve the VS Code consent dialog when it appears. When their direct API connection ships, switching to `static-token` is a two-line change.
 
 ## Caveats
 
