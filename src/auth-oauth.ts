@@ -57,14 +57,14 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 	setInterval(() => {
 		const now = Date.now();
 		for (const [id, g] of grants) {
-			if (now > g.expiresAt || (g.usedCode ?? false)) grants.delete(id);
+			if (now > g.expiresAt || (g.usedCode ?? false)) {grants.delete(id);}
 		}
 	}, 60_000).unref();
 
 	function pruneOldest<K, V>(map: Map<K, V>, cap: number): void {
 		while (map.size >= cap) {
 			const oldest = map.keys().next().value;
-			if (oldest === undefined) break;
+			if (oldest === undefined) {break;}
 			map.delete(oldest);
 		}
 	}
@@ -175,11 +175,45 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		});
 		lastClientName = client.client_name ?? client.client_id;
 
+		// Consent context: who is asking, from where. The Host header names
+		// the door the request came through (loopback vs tunnel), the socket
+		// address shows the network origin, and known-client recognition
+		// turns opaque redirect URLs into names the user can judge.
+		function describeClient(name: string | undefined, redirect: string): { title: string; detail: string } {
+			const KNOWN: Array<[RegExp, string]> = [
+				[/mammouth\.ai$/i, 'Mammouth'],
+				[/claude\.ai$|anthropic\.com$/i, 'Claude'],
+				[/chatgpt\.com$|openai\.com$/i, 'ChatGPT'],
+				[/cursor\.(com|sh)$/i, 'Cursor'],
+				[/codeium\.com$/i, 'Codeium'],
+				[/gemini\.google\.com$|deepmind\.com$/i, 'Gemini'],
+			];
+			let host = 'unknown';
+			try {
+				host = new URL(redirect).hostname;
+			} catch { /* keep unknown */ }
+			const known = KNOWN.find(([re]) => re.test(host));
+			const label = name?.trim() || known?.[1] || host;
+			const via = typeof req.headers.host === 'string' ? req.headers.host : `127.0.0.1:${selfPort}`;
+			const ip = req.socket.remoteAddress?.replace('::ffff:', '') ?? 'unknown';
+			const local = ip === '127.0.0.1' || ip === '::1';
+			return {
+				title: `MCP authorization — ${label}`,
+				detail: [
+					`Client: ${label}${name && known ? ` (${known[1]})` : ''}`,
+					`Callback: ${redirect}`,
+					`Requested through: ${via}`,
+					`Origin: ${local ? `${ip} — this machine` : `${ip} — external`}`
+				].join('\n')
+			};
+		}
+		const prompt = describeClient(client.client_name ?? client.client_id, redirect_uri);
+
 		// Native VS Code consent: buttons ride an information message. The
 		// grant resolves when the user answers; denial clears it.
 		const answer = await vscode.window.showInformationMessage(
-			`MCP authorization request`,
-			{ modal: true, detail: `"${lastClientName}" wants to call tools in this VS Code window (files, terminal, git…).\n\nRedirect: ${redirect_uri}` },
+			prompt.title,
+			{ modal: true, detail: `${prompt.detail}\n\n"Allow" hands this window's tools to the requester until it disconnects.` },
 			'Allow',
 			'Deny'
 		);
@@ -200,21 +234,40 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 	// Landing the client hits after the consent redirect when its app does
 	// not own the callback path (Mammouth's callback is its chat root, so a
 	// bare redirect looks like "connection canceled"). This page closes the
-	// loop visibly: success banner + the code, then auto-close.
+	// loop visibly: success banner + what happened, then auto-close.
 	router.get('/oauth/done', (req, res) => {
-		const ok = req.query.code || !req.query.error;
+		const esc = (s: unknown): string => String(s ?? '')
+			.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+		const ok = Boolean(req.query.code) && !req.query.error;
 		res.status(200).send(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>MCP authorization</title>
-<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1e1e1e;color:#ccc}
-.box{max-width:520px;text-align:center;padding:2rem}
-h1{font-size:1.3rem;color:${ok ? '#4ec9a6' : '#f48771'}}
-code{background:#2a2a2a;padding:.2rem .4rem;border-radius:4px;font-size:.85em;word-break:break-all}</style></head>
-<body><div class="box">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#181818;color:#cccccc}
+.card{max-width:440px;width:90%;background:#212121;border:1px solid #333;border-radius:12px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.banner{padding:28px 24px;text-align:center;background:${ok ? '#1a2f26' : '#322226'};border-bottom:1px solid ${ok ? '#2d4a3e' : '#4a2d33'}}
+.banner .icon{width:56px;height:56px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;background:${ok ? '#2ecc71' : '#e74c3c'};color:#fff}
+.banner h1{font-size:1.25rem;color:${ok ? '#4ec9a6' : '#f48771'};font-weight:600}
+.body{padding:20px 24px}
+.row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid #2a2a2a;font-size:.86rem}
+.row:last-child{border-bottom:none}
+.row .k{color:#888;white-space:nowrap}
+.row .v{text-align:right;word-break:break-all;color:#d0d0d0}
+.actions{padding:0 24px 24px;display:flex;gap:10px}
+button{flex:1;padding:11px;border:none;border-radius:6px;font-size:.92rem;font-weight:600;cursor:pointer}
+.primary{background:#0e639c;color:#fff}
+.primary:hover{background:#1177bb}
+</style></head>
+<body><div class="card">
+<div class="banner"><div class="icon">${ok ? '&#10003;' : '&#10007;'}</div><h1>${ok ? 'Authorization complete' : 'Authorization failed'}</h1></div>
+<div class="body">
 ${ok
-	? `<h1>&#10003; Authorization complete</h1><p>You can close this tab and return to the client. The authorization code has been delivered to your callback URL.</p>`
-	: `<h1>&#10007; Authorization failed</h1><p>Reason: <code>${String(req.query.error)}</code>. Close this tab and try connecting again.</p>`}
-<p style="margin-top:1.5rem"><button onclick="window.close()" style="padding:.5rem 1.5rem;font-size:1rem;cursor:pointer;background:#0e639c;color:#fff;border:none;border-radius:4px">Close this tab</button></p>
-</div><script>setTimeout(()=>{try{window.close()}catch(e){}},4000)</script>
+	? `<div class="row"><span class="k">Status</span><span class="v">The authorization code was delivered to the client's callback URL.</span></div><div class="row"><span class="k">Next step</span><span class="v">Return to the client — it should connect within seconds.</span></div>`
+	: `<div class="row"><span class="k">Reason</span><span class="v">${esc(req.query.error) || 'denied'}</span></div><div class="row"><span class="k">Next step</span><span class="v">Close this tab and start the connection again if this was a mistake.</span></div>`}
+</div>
+<div class="actions"><button class="primary" onclick="window.close()">Close this tab</button></div>
+</div><script>setTimeout(()=>{try{window.close()}catch(e){}},8000)</script>
 </body></html>`);
 	});
 
