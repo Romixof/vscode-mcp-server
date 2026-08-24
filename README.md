@@ -225,12 +225,32 @@ Project tasks, builds, editor snippets and shared shell shortcuts, discovered fr
 * `vscode-mcp-server.host`: bind address (default 127.0.0.1)
 * `vscode-mcp-server.defaultEnabled`: start the server automatically on launch
 * `vscode-mcp-server.enabledTools`: which of the 17 groups above are active, all on by default. Changing it restarts the server.
+* `vscode-mcp-server.auth.mode`: how clients authenticate — `session-token` (default), `static-token`, `oauth` or `none` (unsafe). See Security below.
+* `vscode-mcp-server.auth.staticToken`: the secret required when mode is `static-token`.
+* `vscode-mcp-server.auth.allowedOrigins`: extra Origins allowed besides the server itself (tunneled remote clients).
+* `vscode-mcp-server.auth.allowNoOrigin`: accept Origin-less requests (curl, SDK clients). On by default; browsers always send Origin so drive-by protection is unaffected.
 
 Each request gets its own stateless MCP session, so one slow or hung call never blocks the others.
 
+## Security
+
+Every call to the endpoint needs a credential. On first start a random token is generated and shown once in a notification (with a copy button); you can retrieve it any time through `get_server_info_code` (the Auth line) or the **MCP Server: Copy access token** command. Clients send it on every request as `Authorization: Bearer <token>` or `X-MCP-Token: <token>` — requests without it get a 401 before any tool executes.
+
+Cross-origin browser requests are rejected with 403 outright, so visiting a hostile page cannot silently reach your files even with the port number known.
+
+Three modes under `vscode-mcp-server.auth.mode`:
+
+- `session-token` (default): one random secret per installation, persisted across window reloads.
+- `static-token`: you pin the secret in `auth.staticToken`; handy for scripted setups.
+- `oauth`: MCP OAuth 2.1 for remote clients that require it (Mammouth today). Clients discover `/.well-known/oauth-protected-resource`, register themselves at `/register`, and the authorization shows a VS Code consent dialog before any code is issued. PKCE S256 is mandatory; issued access tokens are this installation's session secret.
+
+One honest limit: a token proves whoever holds it may act here — it cannot prove they are an AI.
+
+Connecting [Mammouth](https://mammouth.ai): set `auth.mode` to `oauth`, expose the port through a tunnel if Mammouth runs outside this machine (cloudflared, tailscale funnel), add the tunnel's public origin to `auth.allowedOrigins`, then give Mammouth the URL — it discovers the OAuth endpoints on its own. When their direct API connection ships, switching to `static-token` is a two-line change.
+
 ## Caveats
 
-Multiple workspace folders are supported; tools pick one through the `workspace` parameter described above. Local connections only. Every VS Code window shares the one server automatically — extra windows join the first one, so there is nothing to configure per window (a foreign program squatting on the port still reports an explicit already-in-use error, and windows on different extension versions refuse to mix). Shell execution means a misbehaving client can run commands on your machine: keep the port closed to your network and only connect clients you trust. No authentication yet; the MCP auth spec is still moving. Inside a devcontainer, WSL or SSH remote the server listens within that environment, so forward the port or connect from a client inside the same remote.
+Multiple workspace folders are supported; tools pick one through the `workspace` parameter described above. Local connections only. Every VS Code window shares the one server automatically — extra windows join the first one, so there is nothing to configure per window (a foreign program squatting on the port still reports an explicit already-in-use error, and windows on different extension versions refuse to mix). Shell execution means a misbehaving *authenticated* client can run commands on your machine: keep the port closed to your network and only connect clients you trust. Inside a devcontainer, WSL or SSH remote the server listens within that environment, so forward the port or connect from a client inside the same remote.
 
 ## Credits and license
 
