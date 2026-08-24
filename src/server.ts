@@ -123,7 +123,7 @@ export class MCPServer {
             this as unknown as ClusterHost,
             this.port,
             this.host,
-            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? '0.12.42'
+            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.12.43"
         );
         // Spokes present the shared per-machine secret on cluster calls; both
         // windows read the same globalState so this converges naturally
@@ -154,7 +154,7 @@ export class MCPServer {
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.12.42",
+            version: "0.12.43",
         }, {
             capabilities: {
                 logging: {},
@@ -248,13 +248,15 @@ export class MCPServer {
         this.app.use(originGuard(authCfg, this.port));
         // Credential enforcement. Public surface (no secret needed):
         //   - OAuth discovery and handshake endpoints
-        //   - /__mcp_cluster/identity (read-only) and /register (version-
-        //     checked; a joining window needs them before it holds the token)
+        //   - /__mcp_cluster/identity (read-only)
         // Everything else — /mcp, /invoke, heartbeat, deregister,
-        // hub-shutdown — requires the session credential.
+        // hub-shutdown and now REGISTER — requires the session credential.
+        // A joining window reads the shared per-machine secret from
+        // globalState before it registers, so legitimate spokes always
+        // have it; remote attackers over the tunnel never do (F1).
         const PUBLIC_PATHS = new Set([
             '/register', '/authorize', '/token', '/revoke',
-            CLUSTER_IDENTITY_PATH, CLUSTER_REGISTER_PATH
+            CLUSTER_IDENTITY_PATH
         ]);
         // Cluster control plane first: state-changing routes accept the
         // X-MCP-Cluster proof from local spokes OR a full bearer; everything
@@ -264,7 +266,7 @@ export class MCPServer {
             if (mode === 'static-token') {return authCfg().staticToken;}
             return this.authToken;
         };
-        const clusterRoutes = [CLUSTER_HEARTBEAT_PATH, CLUSTER_DEREGISTER_PATH,
+        const clusterRoutes = [CLUSTER_REGISTER_PATH, CLUSTER_HEARTBEAT_PATH, CLUSTER_DEREGISTER_PATH,
                                CLUSTER_HUB_SHUTDOWN_PATH, INVOKE_PATH];
         this.app.use((req, res, next) => {
             if (authCfg().mode === 'none') {return next();}
@@ -390,6 +392,16 @@ export class MCPServer {
         this.app.post(INVOKE_PATH, express.json(), async (req, res) => {
             const result = await this.cluster.handleInvoke(req.body);
             res.status(result.status).json(result.body);
+        });
+
+        // F11 — last-resort error handler. Without this, Express answers an
+        // unexpected throw with an HTML page carrying the full stack trace
+        // (absolute install paths included) to whoever triggered it.
+        this.app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+            const message = err instanceof Error ? err.message : 'Internal error';
+            logger.error(`[http] Unhandled error on ${_req.method} ${_req.path}: ${message}`);
+            if (res.headersSent) return;
+            res.status(500).json({ ok: false, code: 'INTERNAL_ERROR' });
         });
     }
 

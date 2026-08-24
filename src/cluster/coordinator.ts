@@ -281,6 +281,24 @@ export class ClusterCoordinator {
 				}
 			};
 		}
+		// Defense in depth (F1): a registration is only ever a loopback
+		// handshake between VS Code windows. Reject shapes no real join
+		// produces instead of trusting the caller.
+		if (!Number.isInteger(req.port) || req.port < 1024 || req.port > 65535) {
+			return { status: 400, body: { ok: false, code: 'INVALID_PORT' } };
+		}
+		if (typeof req.windowId !== 'string' || !req.windowId || req.windowId.length > 128
+			|| typeof req.proposedName !== 'string' || req.proposedName.length > 256
+			|| !Array.isArray((req as unknown as { folders?: unknown }).folders)) {
+			return { status: 400, body: { ok: false, code: 'INVALID_REQUEST' } };
+		}
+		for (const f of (req as unknown as { folders: Array<{ name?: unknown; fsPath?: unknown }> }).folders) {
+			if (typeof f !== 'object' || f === null
+				|| typeof f.name !== 'string' || typeof f.fsPath !== 'string'
+				|| f.name.length > 512 || f.fsPath.length > 1024) {
+				return { status: 400, body: { ok: false, code: 'INVALID_FOLDERS' } };
+			}
+		}
 		const wasStandalone = this.state === 'standalone';
 		const result = this.hub!.register(req);
 		if (wasStandalone) {
