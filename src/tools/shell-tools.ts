@@ -83,6 +83,12 @@ export function detectShellKind(terminal: vscode.Terminal): ShellKind {
     if (verified) {
         return verified;
     }
+    // A force-flip from a demonstrated wrong wrap outranks the static guess
+    // (but not a later positive verdict, which replaces it)
+    const forced = forcedShellKinds.get(terminal);
+    if (forced) {
+        return forced;
+    }
     const explicit = explicitShellKind(terminal);
     if (explicit) {
         return explicit;
@@ -261,6 +267,7 @@ const terminalQueues = new WeakMap<vscode.Terminal, Promise<unknown>>();
 // OSC 633 marks command boundaries (a bare "]633;C" is what showed up in
 // results), and other OSC/CSI escapes can ride along with prompt redraws.
 // Stripping them keeps tool output byte-clean for the client.
+// Shell-integration control sequences and friends, stripped from captures
 const OSC_SEQUENCE_REGEX = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 const CSI_SEQUENCE_REGEX = /\x1b\[[0-9;?]*[A-Za-z]/g;
 // Some paths deliver the sequence with its ESC byte already swallowed, leaving
@@ -274,6 +281,13 @@ function stripControlSequences(text: string): string {
 		.replace(CSI_SEQUENCE_REGEX, '')
 		.replace(BARE_OSC_FRAGMENT_REGEX, '$1');
 }
+
+// A reused terminal whose origin nobody remembers can carry a wrong static
+// guess forever: hints say PowerShell, the pty actually runs Git Bash. When
+// the family in charge demonstrably rejects our template AND neither probe
+// answers, this override force-flips the dialect for the next attempt —
+// the strongest evidence there is.
+const forcedShellKinds = new WeakMap<vscode.Terminal, ShellKind>();
 
 function queueOnTerminal<T>(terminal: vscode.Terminal, task: () => Promise<T>): Promise<T> {
     const prev = terminalQueues.get(terminal) || Promise.resolve();
@@ -420,33 +434,38 @@ export async function executeShellCommand(
         await verifyShellKind(terminal);
         const usedKind = detectShellKind(terminal);
         const fullCommand = buildFullCommand(terminal, command, cwd);
-        const result = await executeAndWait(terminal, fullCommand, timeout);
+        let result = await executeAndWait(terminal, fullCommand, timeout);
 
         // A finished command that never reached its marker while spraying
-        // foreign-family parse errors means the verdict is wrong (or was
-        // poisoned by a mangled first submission). Invalidate it and re-probe
-        // so the next call wraps in the right dialect — this exact loop once
-        // burned every timeout on a Git Bash fed PowerShell syntax.
-        if (!/__MCP_EXIT/.test(result.output) &&
-            /bash: (syntax error|command not found)|unexpected token|is not recognized|ParserError/i.test(result.output)) {
-            const foreign: ShellKind = usedKind === 'bash' ? 'powershell' : 'bash';
-            logger.info(`[execute_shell_command] Terminal rejected ${usedKind} syntax — invalidating verdict, re-probing`);
-            verifiedShellKinds.delete(terminal);
-            const probe = foreign === 'bash' ? probeCommand() : powerShellProbeCommand();
-            try {
-                const { output } = await executeAndWait(terminal, probe, 2000);
-                if (/__MCP_SHELL:(none|\d)/.test(output)) {
-                    verifiedShellKinds.set(terminal, 'bash');
-                } else if (/__MCP_PS:\d/.test(output)) {
-                    verifiedShellKinds.set(terminal, 'powershell');
-                }
-            } catch {
-                // probe failed again; nothing cached, next call retries
+        // foreign-family parse errors means the dialect was wrong. The wrap is
+        // retried ONCE in the opposite family inside the same call — the user
+        // gets their answer instead of a timeout — and the override persists
+        // so later calls start in the right dialect.
+        if (looksLikeWrongWrap(result.output)) {
+            logger.info(`[execute_shell_command] Terminal rejected ${usedKind} syntax — retrying once with the other family`);
+            forcedShellKinds.set(terminal, usedKind === 'bash' ? 'powershell' : 'bash');
+            const retried = await executeAndWait(terminal, buildFullCommandFor(forcedShellKinds.get(terminal)!, command, cwd), timeout);
+            if (!looksLikeWrongWrap(retried.output)) {
+                result = retried;
             }
         }
 
         return result;
     });
+}
+
+/**
+ * True when the captured stream shows the template itself was rejected by a
+ * shell of the other family: no exit marker plus parse errors naming bash
+ * constructs or PowerShell constructs. Both markers absent AND errors present
+ * keeps a legitimately failing command (which still prints its marker) out of
+ * this branch.
+ */
+function looksLikeWrongWrap(output: string): boolean {
+    if (output.includes(EXIT_MARKER)) {
+        return false;
+    }
+    return /(?:^|\n)\s*\$ok = \$true|(?:^|\n)\s*& \{|bash: (?:syntax error|command not found)|unexpected token|is not recognized|ParserError/i.test(output);
 }
 
 /**
