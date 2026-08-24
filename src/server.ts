@@ -195,7 +195,13 @@ export class MCPServer {
             ['refactoring', c.refactoring, () => registerRefactorTools(server)],
             ['frontend', c.frontend, () => registerFrontendTools(server)],
             ['workflow', c.workflow, () => registerWorkflowTools(server, terminal)],
-            ['advanced', c.advanced, () => registerAdvancedTools(server, { host: this.host, port: this.port }, () => this.cluster.clusterInfoLine())]
+            ['advanced', c.advanced, () => registerAdvancedTools(server, { host: this.host, port: this.port }, () => this.cluster.clusterInfoLine(), () => {
+                const mode = readAuthConfig().mode;
+                if (mode === 'none') {return 'disabled — any local process can call tools (set vscode-mcp-server.auth.mode to secure this)';}
+                if (mode === 'static-token') {return 'static token — clients send Authorization: Bearer <your pinned secret> or X-MCP-Token';}
+                if (mode === 'oauth') {return 'MCP OAuth 2.1 (dynamic client registration) — remote clients authenticate through the /authorize and /token endpoints';}
+                return `session token — clients send Authorization: Bearer <token> or X-MCP-Token. Token for this installation: ${this.authToken}`;
+            })]
         ];
 
         for (const [, enabled, register] of groups) {
