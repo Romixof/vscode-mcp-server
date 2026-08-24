@@ -195,12 +195,15 @@ function toPowerShellQuoted(p: string): string {
 /**
  * Collapses a multi-line command to one ASCII line. Some ptys (Git Bash on
  * Windows, reliably reproducible) eat the first character of any multi-line
- * submission — `python -c "\n..."` arrived as `ython -c ...`. Base64 keeps
- * every byte intact, and eval/Invoke-Expression preserve semantics: current
- * shell, environment, stdin, and the script's real exit code.
+ * submission — `python -c "\n..."` arrived as `ython -c ...`, and once even a
+ * single-line one (`eval` became `val`). Interactive bash also expands `!`
+ * history references inside double quotes, corrupting negated globs
+ * mid-flight. Base64 keeps every byte intact, and eval/Invoke-Expression
+ * preserve semantics: current shell, environment, stdin, and the script's
+ * real exit code.
  */
 function encodeMultiline(kind: ShellKind, command: string): string {
-    if (!command.includes('\n')) {
+    if (!command.includes('\n') && !command.includes('!')) {
         return command;
     }
     const b64 = Buffer.from(command, 'utf-8').toString('base64');
@@ -336,12 +339,21 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
                 let output = '';
                 outputStream = (execution as any).read();
                 const reader = (outputStream as AsyncIterableIterator<unknown>)[Symbol.asyncIterator]();
+                // Early-exit marker regex: VS Code occasionally misses the
+                // command-end boundary, so the stream never closes and the
+                // reader would burn the whole timeout on an already-finished
+                // command (its answer sits right there in the capture). The
+                // marker is ours: once it arrives, the command IS done.
+                const earlyMarkerRegex = new RegExp(`${EXIT_MARKER}:(\\d+)`);
                 for (;;) {
                     const chunk = await Promise.race([reader.next(), deadline]);
                     if (chunk === null || chunk.done) {
                         break;
                     }
                     output += chunk.value;
+                    if (earlyMarkerRegex.test(output)) {
+                        break;
+                    }
                 }
 
                 clearTimeout(timer);
