@@ -117,6 +117,20 @@ export class ClusterCoordinator {
 	}
 
 	private extensionVersion: string;
+	/**
+	 * Credential presented on every cluster call. Both windows on one machine
+	 * read the same globalState, so a spoke naturally holds the hub's session
+	 * secret; remote callers over a tunnel have no such copy.
+	 */
+	setClusterCredential(getToken: () => string | undefined): void {
+		this.getCredential = getToken;
+	}
+	private getCredential: () => string | undefined = () => undefined;
+
+	private authHeaders(): Record<string, string> {
+		const t = this.getCredential();
+		return t ? { 'X-MCP-Cluster': t } : {};
+	}
 
 	setOnStateChange(cb: (status: ClusterStatus) => void): void {
 		this.onStateChange = cb;
@@ -201,7 +215,7 @@ export class ClusterCoordinator {
 		try {
 			response = await fetchWithTimeout(`http://127.0.0.1:${port}${INVOKE_PATH}`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
 				body: JSON.stringify({ tool, args })
 			}, timeoutMs);
 		} catch (error) {
@@ -397,7 +411,7 @@ export class ClusterCoordinator {
 		};
 		const response = await fetchWithTimeout(`http://127.0.0.1:${this.hubPort}${CLUSTER_REGISTER_PATH}`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
 			body: JSON.stringify(req)
 		}, IDENTITY_TIMEOUT_MS);
 		const body = await response.json().catch(() => undefined) as { ok?: boolean; assignedName?: string; labelOverrides?: Record<string, string> } | undefined;
@@ -430,7 +444,7 @@ export class ClusterCoordinator {
 		try {
 			const response = await fetchWithTimeout(`http://127.0.0.1:${this.hubPort}${CLUSTER_HEARTBEAT_PATH}`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
 				body: JSON.stringify({
 					windowId: this.windowId,
 					port: this.spokePort,
@@ -540,7 +554,7 @@ export class ClusterCoordinator {
 			try {
 				await fetchWithTimeout(`http://127.0.0.1:${this.hubPort}${CLUSTER_DEREGISTER_PATH}`, {
 					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
+					headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
 					body: JSON.stringify({ windowId: this.windowId })
 				}, DEREGISTER_TIMEOUT_MS);
 			} catch {
@@ -552,7 +566,8 @@ export class ClusterCoordinator {
 			// cost them one lease period at most
 			await Promise.allSettled(this.hub.getSpokes().map(spoke =>
 				fetchWithTimeout(`http://127.0.0.1:${spoke.port}${CLUSTER_HUB_SHUTDOWN_PATH}`, {
-					method: 'POST'
+					method: 'POST',
+					headers: { ...this.authHeaders() }
 				}, DEREGISTER_TIMEOUT_MS)
 			));
 		}
