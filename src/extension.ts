@@ -172,6 +172,23 @@ async function startOrJoinServer(
         vscode.window.showErrorMessage(`MCP Server failed to start: ${message}`);
         return undefined;
     }
+
+    // First-run announcement of the access credential, with a one-click copy.
+    // Only when this window is the hub — joined windows share another's URL
+    // and never accept external calls themselves.
+    if (serverEnabled && mcpServer.authToken && mcpServer.cluster.getRole() !== 'spoke'
+        && context.globalState.get<string>('vscode-mcp.authTokenAnnounced') !== mcpServer.authToken) {
+        void context.globalState.update('vscode-mcp.authTokenAnnounced', mcpServer.authToken);
+        vscode.window.showInformationMessage(
+            `MCP Server ready on localhost:${port}. Keep this access token — clients must send it on every call.`,
+            'Copy token'
+        ).then(choice => {
+            if (choice === 'Copy token' && mcpServer?.authToken) {
+                void vscode.env.clipboard.writeText(mcpServer.authToken as string);
+                vscode.window.showInformationMessage('Access token copied to the clipboard.');
+            }
+        });
+    }
     return mcpServer;
 }
 

@@ -122,7 +122,7 @@ export class MCPServer {
             this as unknown as ClusterHost,
             this.port,
             this.host,
-            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? '0.11.1'
+            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? '0.12.0'
         );
 
         this.setupRoutes();
@@ -145,7 +145,7 @@ export class MCPServer {
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.11.1",
+            version: "0.12.0",
         }, {
             capabilities: {
                 logging: {},
