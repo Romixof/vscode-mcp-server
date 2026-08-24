@@ -1,6 +1,6 @@
 import * as crypto from 'crypto';
 import * as vscode from 'vscode';
-import { Router, json as expressJson, urlencoded as expressUrlencoded } from 'express';
+import { Router, json as expressJson, urlencoded as expressUrlencoded, type Request as ExpressRequest } from 'express';
 import { tokensMatch } from './auth';
 
 /**
@@ -48,25 +48,39 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 	const grants = new Map<string, PendingGrant>();
 	let lastClientName: string | undefined;
 
+	// Public origin for metadata and redirects: when the request arrives
+	// through a tunnel (Tailscale Funnel, cloudflared…) the Host header is the
+	// public name — announcing http://127.0.0.1 would make remote token
+	// exchanges impossible. Direct local requests keep the loopback form.
+	function publicOrigin(req: ExpressRequest): string {
+		const host = req.headers['x-forwarded-host'] ?? req.headers.host;
+		if (typeof host === 'string' && !host.includes('127.0.0.1') && !host.startsWith('localhost')) {
+			return host.startsWith('http') ? host : `https://${host}`;
+		}
+		return `http://127.0.0.1:${selfPort}`;
+	}
+
 	const router = Router();
 
 	// ---------- metadata ----------
-	router.get('/.well-known/oauth-protected-resource', (_req, res) => {
+	router.get('/.well-known/oauth-protected-resource', (req, res) => {
+		const origin = publicOrigin(req);
 		res.json({
-			resource: `http://127.0.0.1:${selfPort}`,
-			authorization_servers: [`http://127.0.0.1:${selfPort}`],
+			resource: origin,
+			authorization_servers: [origin],
 			scopes_supported: ['mcp'],
 			bearer_methods_supported: ['header'],
 		});
 	});
 
-	router.get('/.well-known/oauth-authorization-server', (_req, res) => {
+	router.get('/.well-known/oauth-authorization-server', (req, res) => {
+		const origin = publicOrigin(req);
 		res.json({
-			issuer: `http://127.0.0.1:${selfPort}`,
-			registration_endpoint: `http://127.0.0.1:${selfPort}/register`,
-			authorization_endpoint: `http://127.0.0.1:${selfPort}/authorize`,
-			token_endpoint: `http://127.0.0.1:${selfPort}/token`,
-			revocation_endpoint: `http://127.0.0.1:${selfPort}/revoke`,
+			issuer: origin,
+			registration_endpoint: `${origin}/register`,
+			authorization_endpoint: `${origin}/authorize`,
+			token_endpoint: `${origin}/token`,
+			revocation_endpoint: `${origin}/revoke`,
 			response_types_supported: ['code'],
 			grant_types_supported: ['authorization_code'],
 			code_challenge_methods_supported: ['S256'],
@@ -76,7 +90,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 	});
 
 	// ---------- dynamic client registration ----------
-	router.post('/register', (req, res) => {
+	router.post('/register', (req: ExpressRequest, res) => {
 		const redirectUris = req.body?.redirect_uris;
 		if (!Array.isArray(redirectUris) || redirect_uris_invalid(redirectUris)) {
 			return res.status(400).json({ error: 'invalid_redirect_uri' });
