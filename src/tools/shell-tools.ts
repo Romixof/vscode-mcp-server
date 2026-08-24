@@ -335,7 +335,11 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
         void (async () => {
             let outputStream: AsyncIterable<unknown> | undefined;
             try {
-                const execution = terminal.shellIntegration!.executeCommand(fullCommand);
+                // Two sacrificial spaces: the pty intermittently swallows the
+                // first submitted byte (printf->rintf, eval->val were both
+                // observed). Spaces are inert in both shell families, and
+                // whether or not one gets eaten the command arrives whole.
+                const execution = terminal.shellIntegration!.executeCommand(`  ${fullCommand}`);
                 let output = '';
                 outputStream = (execution as any).read();
                 const reader = (outputStream as AsyncIterableIterator<unknown>)[Symbol.asyncIterator]();
