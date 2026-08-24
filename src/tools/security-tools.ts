@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
+import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { executeShellCommand } from './shell-tools';
 
 const DEFAULT_EXCLUDES = [
@@ -32,11 +33,8 @@ function globToRegExp(pattern: string): RegExp {
 	return new RegExp(`^${body}$`);
 }
 
-async function getWorkspaceRoot(): Promise<string> {
-	if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-		throw new Error('No workspace folder is open');
-	}
-	return vscode.workspace.workspaceFolders[0].uri.fsPath;
+async function getWorkspaceRoot(ref?: string): Promise<string> {
+	return resolveWorkspaceFolder(ref).uri.fsPath;
 }
 
 function collectFiles(rootDir: string, excludeRegexes: RegExp[]): Array<{ fullPath: string; relativePath: string }> {
@@ -89,10 +87,22 @@ const SECRET_PATTERNS: Array<{ name: string; severity: 'high' | 'medium'; regex:
 	{ name: 'AWS secret in config', severity: 'medium', regex: /aws.{0,30}['"]([0-9a-zA-Z/+]{40})['"]/i, secretGroup: 1 }
 ];
 
-async function findSecrets(options: { path?: string; exclude?: string[]; maxResults?: number }): Promise<{ totalFiles: number; findings: Finding[] }> {
-	const workspaceRoot = options.path
-		? path.isAbsolute(options.path) ? options.path : path.join(await getWorkspaceRoot(), options.path)
-		: await getWorkspaceRoot();
+
+/**
+ * Resolves a scanner target under the multi-root rules. An explicit path that
+ * does not exist throws: silently scanning nothing would read as a clean
+ * result.
+ */
+async function resolveScanTarget(optionsPath: string | undefined, workspace?: string): Promise<{ dir: string; displayPrefix: string }> {
+	const target = resolveRelativeToolPath(optionsPath ?? '.', workspace);
+	if (optionsPath !== undefined && !fs.existsSync(target.fsPath)) {
+		throw new Error(`Path not found: ${optionsPath}`);
+	}
+	return { dir: target.dir, displayPrefix: target.displayBase };
+}
+
+async function findSecrets(options: { path?: string; exclude?: string[]; maxResults?: number; workspace?: string }): Promise<{ totalFiles: number; findings: Finding[] }> {
+	const { dir: workspaceRoot, displayPrefix } = await resolveScanTarget(options.path, options.workspace);
 	const excludeRegexes = (options.exclude ?? DEFAULT_EXCLUDES).map(globToRegExp);
 	const maxResults = options.maxResults ?? 50;
 	const files = collectFiles(workspaceRoot, excludeRegexes);
@@ -122,7 +132,7 @@ async function findSecrets(options: { path?: string; exclude?: string[]; maxResu
 				findings.push({
 					severity: pattern.severity,
 					kind: pattern.name,
-					file: file.relativePath,
+					file: `${displayPrefix}${file.relativePath}`,
 					line: i + 1,
 					snippet: maskSecret(secretValue ?? '')
 				});
@@ -156,10 +166,8 @@ const SECURITY_RULES: Rule[] = [
 	{ id: 'py-hashlib-md5', severity: 'medium', languages: ['py'], regex: /hashlib\.md5\s*\(/ }
 ];
 
-async function securityScan(options: { path?: string; severity?: 'high' | 'medium' | 'low'; maxResults?: number }): Promise<{ totalFiles: number; findings: Finding[] }> {
-	const workspaceRoot = options.path
-		? path.isAbsolute(options.path) ? options.path : path.join(await getWorkspaceRoot(), options.path)
-		: await getWorkspaceRoot();
+async function securityScan(options: { path?: string; severity?: 'high' | 'medium' | 'low'; maxResults?: number; workspace?: string }): Promise<{ totalFiles: number; findings: Finding[] }> {
+	const { dir: workspaceRoot, displayPrefix } = await resolveScanTarget(options.path, options.workspace);
 	const excludeRegexes = DEFAULT_EXCLUDES.map(globToRegExp);
 	const maxResults = options.maxResults ?? 100;
 	const severityRank = { high: 3, medium: 2, low: 1 };
@@ -190,7 +198,7 @@ async function securityScan(options: { path?: string; severity?: 'high' | 'mediu
 					findings.push({
 						severity: rule.severity,
 						kind: rule.id,
-						file: file.relativePath,
+						file: `${displayPrefix}${file.relativePath}`,
 						line: i + 1,
 						snippet: lineText.trim().slice(0, 120)
 					});
@@ -225,11 +233,11 @@ function formatFindings(title: string, result: { totalFiles: number; findings: F
 
 let sharedTerminal: vscode.Terminal | undefined;
 
-async function runShellCommand(command: string): Promise<{ output: string; exitCode: number }> {
+async function runShellCommand(command: string, workspace?: string): Promise<{ output: string; exitCode: number }> {
 	if (!sharedTerminal) {
 		throw new Error('Terminal not available for security tools');
 	}
-	const workspaceRoot = await getWorkspaceRoot();
+	const workspaceRoot = await getWorkspaceRoot(workspace);
 	try {
 		return await executeShellCommand(sharedTerminal, command, workspaceRoot, 60000);
 	} catch (error) {
@@ -277,9 +285,10 @@ WHEN TO USE: before committing or publishing, verifying that no credentials leak
 Matched values are masked in the output. Obvious placeholders ("your-api-key", "xxxx") are ignored.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude'),
-		maxResults: z.number().int().min(1).max(500).optional().default(50).describe('Maximum findings to report')
-	}, async ({ path: searchPath, exclude, maxResults }) => {
-		const result = await findSecrets({ path: searchPath, exclude, maxResults });
+		maxResults: z.number().int().min(1).max(500).optional().default(50).describe('Maximum findings to report'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: searchPath, exclude, maxResults, workspace }) => {
+		const result = await findSecrets({ path: searchPath, exclude, maxResults, workspace });
 		// snippets hold the masked value only, safe to display
 		return { content: [{ type: 'text', text: formatFindings('# Secret Scan', result, true) }] };
 	});
@@ -289,20 +298,23 @@ Matched values are masked in the output. Obvious placeholders ("your-api-key", "
 WHEN TO USE: security review before a release, auditing AI-generated code, checking legacy modules.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		severity: z.enum(['high', 'medium', 'low']).optional().describe('Minimum severity to report'),
-		maxResults: z.number().int().min(1).max(500).optional().default(100).describe('Maximum findings to report')
-	}, async ({ path: searchPath, severity, maxResults }) => {
-		const result = await securityScan({ path: searchPath, severity, maxResults });
+		maxResults: z.number().int().min(1).max(500).optional().default(100).describe('Maximum findings to report'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: searchPath, severity, maxResults, workspace }) => {
+		const result = await securityScan({ path: searchPath, severity, maxResults, workspace });
 		return { content: [{ type: 'text', text: formatFindings('# Security Scan', result, true) }] };
 	});
 
 	server.tool('check_dependencies_vulnerabilities_code', `Runs npm audit against the workspace package-lock.json and reports known vulnerabilities per dependency with severities and patched versions.
 
-WHEN TO USE: dependency review during releases, triaging CI audit failures. Requires network access to the npm registry.`, {}, async () => {
-		const workspaceRoot = await getWorkspaceRoot();
+WHEN TO USE: dependency review during releases, triaging CI audit failures. Requires network access to the npm registry.`, {
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ workspace }) => {
+		const workspaceRoot = await getWorkspaceRoot(workspace);
 		if (!fs.existsSync(path.join(workspaceRoot, 'package-lock.json')) && !fs.existsSync(path.join(workspaceRoot, 'package.json'))) {
 			return { content: [{ type: 'text', text: 'No package.json/package-lock.json in the workspace — nothing to audit.' }] };
 		}
-		const { output, exitCode } = await runShellCommand('npm audit --json --no-audit-fund');
+		const { output, exitCode } = await runShellCommand('npm audit --json --no-audit-fund', workspace);
 		if (exitCode !== 0 && !output.trim().startsWith('{')) {
 			return { content: [{ type: 'text', text: `npm audit failed: ${output.slice(0, 500)}` }] };
 		}

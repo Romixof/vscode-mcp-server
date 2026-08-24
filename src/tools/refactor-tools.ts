@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
+import { resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
 const DEFAULT_EXCLUDES = [
 	'**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/*.min.js',
@@ -43,12 +44,6 @@ function globToRegExp(pattern: string): RegExp {
 	return new RegExp(`^${body}$`);
 }
 
-async function getWorkspaceRoot(): Promise<string> {
-	if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-		throw new Error('No workspace folder is open');
-	}
-	return vscode.workspace.workspaceFolders[0].uri.fsPath;
-}
 
 function collectFiles(rootDir: string, excludeRegexes: RegExp[]): Array<{ fullPath: string; relativePath: string }> {
 	const files: Array<{ fullPath: string; relativePath: string }> = [];
@@ -89,6 +84,7 @@ async function renameSymbol(options: {
 	newName: string;
 	dryRun: boolean;
 	exclude?: string[];
+	workspace?: string;
 }): Promise<{ scanned: number; changed: Array<{ file: string; count: number }>; total: number }> {
 	assertIdentifier(options.oldName, 'oldName');
 	assertIdentifier(options.newName, 'newName');
@@ -96,7 +92,8 @@ async function renameSymbol(options: {
 		throw new Error('oldName and newName are identical');
 	}
 
-	const workspaceRoot = await getWorkspaceRoot();
+	const target = resolveRelativeToolPath('.', options.workspace);
+	const workspaceRoot = target.root;
 	const excludeRegexes = (options.exclude ?? DEFAULT_EXCLUDES).map(globToRegExp);
 	const files = collectFiles(workspaceRoot, excludeRegexes)
 		.filter(f => RENAME_EXTENSIONS.includes(path.extname(f.fullPath)));
@@ -123,7 +120,7 @@ async function renameSymbol(options: {
 		if (!options.dryRun) {
 			fs.writeFileSync(file.fullPath, content.replace(wordRe, options.newName));
 		}
-		changed.push({ file: file.relativePath, count: matches.length });
+		changed.push({ file: `${target.displayBase}${file.relativePath}`, count: matches.length });
 		total += matches.length;
 	}
 
@@ -138,14 +135,13 @@ async function extractFunction(options: {
 	endLine: number;
 	functionName: string;
 	params: string[];
+	workspace?: string;
 }): Promise<string> {
 	assertIdentifier(options.functionName, 'functionName');
 	options.params.forEach(p => assertIdentifier(p, 'parameter'));
 
-	const workspaceRoot = await getWorkspaceRoot();
-	const absolutePath = path.isAbsolute(options.filePath)
-		? options.filePath
-		: path.join(workspaceRoot, options.filePath);
+	const target = resolveRelativeToolPath(options.filePath, options.workspace);
+	const absolutePath = target.fsPath;
 	const ext = path.extname(absolutePath);
 	if (!EXTRACT_EXTENSIONS.includes(ext)) {
 		throw new Error(`Extraction supports ${EXTRACT_EXTENSIONS.join(', ')} files, got "${ext || 'extensionless file'}"`);
@@ -224,11 +220,10 @@ async function findDuplicates(options: {
 	searchPath?: string;
 	minLines: number;
 	exclude?: string[];
+	workspace?: string;
 }): Promise<{ scanned: number; groups: Array<{ length: number; locations: Array<{ file: string; line: number }>; snippet: string[] }> }> {
-	const workspaceRoot = await getWorkspaceRoot();
-	const rootDir = options.searchPath
-		? path.isAbsolute(options.searchPath) ? options.searchPath : path.join(workspaceRoot, options.searchPath)
-		: workspaceRoot;
+	const target = resolveRelativeToolPath(options.searchPath ?? '.', options.workspace);
+	const rootDir = target.dir;
 	const excludeRegexes = (options.exclude ?? DEFAULT_EXCLUDES).map(globToRegExp);
 
 	interface Occurrence { file: string; line: number }
@@ -313,6 +308,11 @@ async function findDuplicates(options: {
 		}
 	}
 
+	for (const group of groups) {
+		for (const loc of group.locations) {
+			loc.file = `${target.displayBase}${loc.file}`;
+		}
+	}
 	return { scanned: fileLines.size, groups };
 }
 
@@ -436,11 +436,10 @@ async function suggestRefactoring(options: {
 	maxLines: number;
 	maxParams: number;
 	maxComplexity: number;
+	workspace?: string;
 }): Promise<{ scannedFunctions: number; flagged: Array<FuncStat & { reasons: string[] }> }> {
-	const workspaceRoot = await getWorkspaceRoot();
-	const rootDir = options.searchPath
-		? path.isAbsolute(options.searchPath) ? options.searchPath : path.join(workspaceRoot, options.searchPath)
-		: workspaceRoot;
+	const target = resolveRelativeToolPath(options.searchPath ?? '.', options.workspace);
+	const rootDir = target.dir;
 	const excludeRegexes = DEFAULT_EXCLUDES.map(globToRegExp);
 	const files = collectFiles(rootDir, excludeRegexes)
 		.filter(f => ANALYZE_EXTENSIONS.includes(path.extname(f.fullPath)));
@@ -479,6 +478,9 @@ async function suggestRefactoring(options: {
 		.sort((a, b) => b.reasons.length - a.reasons.length || b.bodyLines - a.bodyLines)
 		.slice(0, 30);
 
+	for (const stat of flagged) {
+		stat.file = `${target.displayBase}${stat.file}`;
+	}
 	return { scannedFunctions: all.length, flagged };
 }
 
@@ -493,9 +495,10 @@ Pass dryRun=true first to preview how many occurrences change per file. Partial 
 		oldName: z.string().describe('Current identifier name'),
 		newName: z.string().describe('New identifier name'),
 		dryRun: z.boolean().optional().default(false).describe('Preview the rename without writing files'),
-		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude')
-	}, async ({ oldName, newName, dryRun = false, exclude }) => {
-		const result = await renameSymbol({ oldName, newName, dryRun, exclude });
+		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ oldName, newName, dryRun = false, exclude, workspace }) => {
+		const result = await renameSymbol({ oldName, newName, dryRun, exclude, workspace });
 		if (result.total === 0) {
 			return { content: [{ type: 'text', text: `No occurrences of "${oldName}" found in ${result.scanned} scanned file(s).` }] };
 		}
@@ -518,9 +521,10 @@ You supply the parameter names explicitly — locals are not analysed, so review
 		startLine: z.number().int().min(1).describe('First line to extract (1-based)'),
 		endLine: z.number().int().min(1).describe('Last line to extract (inclusive)'),
 		functionName: z.string().describe('Name for the new function'),
-		params: z.array(z.string()).optional().default([]).describe('Parameter names for the new function')
-	}, async ({ path: filePath, startLine, endLine, functionName, params = [] }) => {
-		const text = await extractFunction({ filePath, startLine, endLine, functionName, params });
+		params: z.array(z.string()).optional().default([]).describe('Parameter names for the new function'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: filePath, startLine, endLine, functionName, params = [], workspace }) => {
+		const text = await extractFunction({ filePath, startLine, endLine, functionName, params, workspace });
 		return { content: [{ type: 'text', text }] };
 	});
 
@@ -531,9 +535,10 @@ WHEN TO USE: before refactoring, hunting copy-pasted logic, deciding what deserv
 Comment-only and empty lines never break or join a block.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		minLines: z.number().int().min(3).max(50).optional().default(5).describe('Block size in consecutive code lines (default 5)'),
-		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude')
-	}, async ({ path: searchPath, minLines = 5, exclude }) => {
-		const result = await findDuplicates({ searchPath, minLines, exclude });
+		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: searchPath, minLines = 5, exclude, workspace }) => {
+		const result = await findDuplicates({ searchPath, minLines, exclude, workspace });
 		if (result.groups.length === 0) {
 			return { content: [{ type: 'text', text: `No duplicate blocks of >= ${minLines} lines found across ${result.scanned} file(s).` }] };
 		}
@@ -554,9 +559,10 @@ WHEN TO USE: deciding where to start cleaning up a file or module, reviewing AI-
 		path: z.string().optional().describe('File or subdirectory to analyse (default: whole workspace)'),
 		maxLines: z.number().int().min(10).optional().default(80).describe('Flag functions longer than this many lines'),
 		maxParams: z.number().int().min(1).optional().default(4).describe('Flag functions with more than this many parameters'),
-		maxComplexity: z.number().int().min(1).optional().default(10).describe('Flag functions above this complexity estimate')
-	}, async ({ path: searchPath, maxLines = 80, maxParams = 4, maxComplexity = 10 }) => {
-		const result = await suggestRefactoring({ searchPath, maxLines, maxParams, maxComplexity });
+		maxComplexity: z.number().int().min(1).optional().default(10).describe('Flag functions above this complexity estimate'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: searchPath, maxLines = 80, maxParams = 4, maxComplexity = 10, workspace }) => {
+		const result = await suggestRefactoring({ searchPath, maxLines, maxParams, maxComplexity, workspace });
 		if (result.flagged.length === 0) {
 			return { content: [{ type: 'text', text: `No refactoring candidates among ${result.scannedFunctions} function(s) scanned.` }] };
 		}

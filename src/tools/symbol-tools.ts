@@ -5,6 +5,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as path from 'path';
 import * as fs from 'fs';
 import { logger } from '../utils/logger';
+import { resolveInputPath, listWorkspaceFolders, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
 /**
  * Convert a symbol kind to a string representation
@@ -44,20 +45,27 @@ function symbolKindToString(kind: vscode.SymbolKind): string {
 }
 
 /**
- * Converts a workspace URI to a path relative to the workspace root
+ * Converts a workspace URI to a display path. With several folders open,
+ * paths carry the owning folder's name so results stay unambiguous.
  * @param uri The URI to convert
  * @returns Path relative to workspace root
  */
-function uriToWorkspacePath(uri: vscode.Uri): string {
-    if (!vscode.workspace.workspaceFolders) {
+function workspaceDisplayPath(uri: vscode.Uri): string {
+    const folders = listWorkspaceFolders();
+    if (folders.length === 0) {
         return uri.fsPath;
     }
 
-    const workspaceFolder = vscode.workspace.workspaceFolders[0];
-    const workspaceRoot = workspaceFolder.uri.fsPath;
-    
-    // Convert to relative path
-    const relativePath = path.relative(workspaceRoot, uri.fsPath);
+    // Find the folder that contains this file — first match wins for nested roots
+    for (const folder of folders) {
+        const root = folder.uri.fsPath;
+        const relative = path.relative(root, uri.fsPath);
+        if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+            return folders.length > 1 ? `${folder.name}/${relative}` : relative;
+        }
+    }
+
+    const relativePath = path.relative(folders[0].uri.fsPath, uri.fsPath);
     return relativePath;
 }
 
@@ -259,7 +267,7 @@ export async function searchWorkspaceSymbols(query: string, maxResults: number =
                 const formatted = {
                     name: symbol.name,
                     kind: symbolKindToString(symbol.kind),
-                    location: `${uriToWorkspacePath(symbol.location.uri)}:${symbol.location.range.start.line + 1}:${symbol.location.range.start.character}`,
+                    location: `${workspaceDisplayPath(symbol.location.uri)}:${symbol.location.range.start.line + 1}:${symbol.location.range.start.character}`,
                     range: {
                         start: {
                             line: symbol.location.range.start.line + 1,
@@ -468,29 +476,24 @@ export function registerSymbolTools(server: McpServer): void {
         {
             path: z.string().describe('The path to the file containing the symbol'),
             line: z.number().describe('The line number of the symbol (1-based)'),
-            symbol: z.string().describe('The symbol name to look for on the specified line')
+            symbol: z.string().describe('The symbol name to look for on the specified line'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ path, line, symbol }): Promise<CallToolResult> => {
+        async ({ path, line, symbol, workspace }): Promise<CallToolResult> => {
             logger.info(`[get_symbol_definition_code] Tool called with path="${path}", line=${line}, symbol="${symbol}"`);
-            
+
             // Convert 1-based input to 0-based for VS Code API
             const zeroBasedLine = line - 1;
             try {
-                if (!vscode.workspace.workspaceFolders) {
-                    throw new Error('No workspace folder open');
-                }
-                
-                const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
-                const fullPath = require('path').resolve(workspaceRoot, path);
-                const uri = vscode.Uri.file(fullPath);
-                
+                const uri = resolveInputPath(path, workspace);
+
                 // Check if file exists
                 try {
                     await vscode.workspace.fs.stat(uri);
                 } catch (error) {
                     throw new Error(`File not found: ${path}`);
                 }
-                
+
                 // Get the content of the specified line
                 const lineText = await getLineText(uri, zeroBasedLine);
                 if (!lineText) {
@@ -569,27 +572,22 @@ export function registerSymbolTools(server: McpServer): void {
         Shows classes, functions, methods, variables with line ranges. Use maxDepth for large files to avoid deep nesting.`,
         {
             path: z.string().describe('The path to the file to analyze (relative to workspace)'),
-            maxDepth: z.number().optional().describe('Maximum nesting depth to display (optional)')
+            maxDepth: z.number().optional().describe('Maximum nesting depth to display (optional)'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ path, maxDepth }): Promise<CallToolResult> => {
+        async ({ path, maxDepth, workspace }): Promise<CallToolResult> => {
             logger.info(`[get_document_symbols_code] Tool called with path="${path}", maxDepth=${maxDepth}`);
-            
+
             try {
-                if (!vscode.workspace.workspaceFolders) {
-                    throw new Error('No workspace folder open');
-                }
-                
-                const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
-                const fullPath = require('path').resolve(workspaceRoot, path);
-                const uri = vscode.Uri.file(fullPath);
-                
+                const uri = resolveInputPath(path, workspace);
+
                 // Check if file exists
                 try {
                     await vscode.workspace.fs.stat(uri);
                 } catch (error) {
                     throw new Error(`File not found: ${path}`);
                 }
-                
+
                 logger.info('[get_document_symbols_code] Getting document symbols');
                 const result = await getDocumentSymbols(uri, maxDepth);
                 
