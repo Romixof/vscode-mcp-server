@@ -4,7 +4,7 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [0.12.0]
+## [0.12.42]
 
 ### Added
 
