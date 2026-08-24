@@ -1,6 +1,7 @@
 import express from "express";
 import * as vscode from 'vscode';
 import { generateSessionToken, readAuthConfig, bearerAuth, originGuard } from './auth';
+import { createOAuthRouter } from './auth-oauth';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Server } from 'http';
@@ -63,6 +64,18 @@ export class MCPServer {
     public authToken?: string;
     /** Set by the extension so session tokens persist in globalState. */
     public extensionContext?: vscode.ExtensionContext;
+    /** OAuth endpoints, created lazily on first use in oauth mode. */
+    private oauthRouterInstance?: ReturnType<typeof createOAuthRouter>;
+
+    private get oauthRouter() {
+        if (!this.oauthRouterInstance) {
+            this.oauthRouterInstance = createOAuthRouter(this.port, {
+                getAccessToken: () => this.authToken,
+                getLastClientName: () => undefined,
+            });
+        }
+        return this.oauthRouterInstance;
+    }
     private port: number;
     private host: string;
     private fileListingCallback?: FileListingCallback;
@@ -227,6 +240,14 @@ export class MCPServer {
             if (mode === 'session-token') {return this.authToken;}
             return undefined; // oauth verifies through its own middleware
         }));
+        // OAuth endpoints mount before the bearer gate so discovery,
+        // registration, authorize and token stay reachable pre-auth (per spec)
+        this.app.use((req, res, next) => {
+            if (authCfg().mode === 'oauth') {
+                return this.oauthRouter(req, res, next);
+            }
+            next();
+        });
 
         // Stateless mode, one session per request: every POST gets its own
         // transport and tool registry, disposed once the response is out. The
@@ -387,12 +408,15 @@ export class MCPServer {
             logger.info('[MCPServer.start] Starting MCP server');
             const startTime = Date.now();
 
-            // Session-token mode: create once, persist across window reloads
+            // Session-token mode: create once, persist across window reloads.
+            // OAuth mode also needs the secret — issued tokens ARE this value.
             const authMode = readAuthConfig().mode;
-            if (authMode === 'session-token') {
-                this.authToken = this.extensionContext?.globalState.get<string>('vscode-mcp.authToken')
-                    || generateSessionToken();
-                void this.extensionContext?.globalState.update('vscode-mcp.authToken', this.authToken);
+            if (authMode === 'session-token' || authMode === 'oauth') {
+                if (!this.authToken) {
+                    this.authToken = this.extensionContext?.globalState.get<string>('vscode-mcp.authToken')
+                        || generateSessionToken();
+                    void this.extensionContext?.globalState.update('vscode-mcp.authToken', this.authToken);
+                }
                 logger.info('[MCPServer.start] Access token ready (shown once at activation; available via get_server_info_code and the copy command)');
             } else if (authMode === 'static-token') {
                 this.authToken = readAuthConfig().staticToken;
