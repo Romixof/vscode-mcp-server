@@ -1,6 +1,7 @@
 import express from "express";
 import * as vscode from 'vscode';
-import { generateSessionToken, readAuthConfig, bearerAuth, originGuard } from './auth';
+import { generateSessionToken, readAuthConfig, bearerAuth, originGuard, tokensMatch, extractToken } from './auth';
+import type { RequestHandler } from 'express';
 import { createOAuthRouter } from './auth-oauth';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -124,6 +125,14 @@ export class MCPServer {
             this.host,
             () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? '0.12.42'
         );
+        // Spokes present the shared per-machine secret on cluster calls; both
+        // windows read the same globalState so this converges naturally
+        this.cluster.setClusterCredential(() => {
+            const mode = readAuthConfig().mode;
+            if (mode === 'none') {return undefined;}
+            if (mode === 'static-token') {return readAuthConfig().staticToken;}
+            return this.authToken ?? this.extensionContext?.globalState.get<string>('vscode-mcp.authToken');
+        });
 
         this.setupRoutes();
     }
@@ -228,19 +237,52 @@ export class MCPServer {
     }
 
     private setupRoutes(): void {
-        // --- Auth gates (Phase 12) ---
+        // --- Auth gates (Phase 12.1) ---
         // Origin first: a hostile page gets 403 before it learns anything
         // about tokens. Bearer second: no valid credential, no tool runs.
+        // BOTH gates cover every route: /mcp, /invoke and the cluster
+        // control plane. A public tunnel exposes all of them, so a request
+        // without a credential must never reach a tool — local cluster
+        // spokes authenticate with the shared session token too.
         const authCfg = () => readAuthConfig();
         this.app.use(originGuard(authCfg, this.port));
-        this.app.use('/mcp', bearerAuth(() => {
+        // Credential enforcement. Public surface (no secret needed):
+        //   - OAuth discovery and handshake endpoints
+        //   - /__mcp_cluster/identity (read-only) and /register (version-
+        //     checked; a joining window needs them before it holds the token)
+        // Everything else — /mcp, /invoke, heartbeat, deregister,
+        // hub-shutdown — requires the session credential.
+        const PUBLIC_PATHS = new Set([
+            '/register', '/authorize', '/token', '/revoke',
+            CLUSTER_IDENTITY_PATH, CLUSTER_REGISTER_PATH
+        ]);
+        // Cluster control plane first: state-changing routes accept the
+        // X-MCP-Cluster proof from local spokes OR a full bearer; everything
+        // else falls through to the plain bearer gate.
+        const expectedToken = () => {
             const mode = authCfg().mode;
-            if (mode === 'none') {return undefined;}
             if (mode === 'static-token') {return authCfg().staticToken;}
-            // session-token AND oauth: in oauth mode issued access tokens ARE
-            // this secret, so the endpoint stays protected end to end
             return this.authToken;
-        }));
+        };
+        const clusterRoutes = [CLUSTER_HEARTBEAT_PATH, CLUSTER_DEREGISTER_PATH,
+                               CLUSTER_HUB_SHUTDOWN_PATH, INVOKE_PATH];
+        this.app.use((req, res, next) => {
+            if (authCfg().mode === 'none') {return next();}
+            if (req.path.startsWith('/.well-known/') || PUBLIC_PATHS.has(req.path)) {return next();}
+            if (clusterRoutes.includes(req.path)) {
+                const expected = expectedToken();
+                if (!expected) {return next();}
+                const presented = req.headers['x-mcp-cluster'];
+                if (typeof presented === 'string' && presented && tokensMatch(presented, expected)) {
+                    return next();
+                }
+                const bearer = extractToken(req.headers as Record<string, string | string[] | undefined>);
+                if (bearer && tokensMatch(bearer, expected)) {return next();}
+                res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server"');
+                return res.status(401).json({ error: 'invalid_token', error_description: 'cluster control plane requires the session credential (X-MCP-Cluster or Authorization: Bearer)' });
+            }
+            bearerAuth(expectedToken)(req, res, next);
+        });
         // OAuth endpoints mount before the bearer gate so discovery,
         // registration, authorize and token stay reachable pre-auth (per spec)
         this.app.use((req, res, next) => {
