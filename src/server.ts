@@ -123,7 +123,7 @@ export class MCPServer {
             this as unknown as ClusterHost,
             this.port,
             this.host,
-            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.12.43"
+            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.12.44"
         );
         // Spokes present the shared per-machine secret on cluster calls; both
         // windows read the same globalState so this converges naturally
@@ -154,7 +154,7 @@ export class MCPServer {
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.12.43",
+            version: "0.12.44",
         }, {
             capabilities: {
                 logging: {},
@@ -400,7 +400,7 @@ export class MCPServer {
         this.app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
             const message = err instanceof Error ? err.message : 'Internal error';
             logger.error(`[http] Unhandled error on ${_req.method} ${_req.path}: ${message}`);
-            if (res.headersSent) return;
+            if (res.headersSent) {return;}
             res.status(500).json({ ok: false, code: 'INTERNAL_ERROR' });
         });
     }
