@@ -1,5 +1,6 @@
 import express from "express";
 import * as vscode from 'vscode';
+import { generateSessionToken, readAuthConfig, bearerAuth, originGuard } from './auth';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Server } from 'http';
@@ -58,6 +59,10 @@ export interface ToolConfiguration {
 export class MCPServer {
     private app: express.Application;
     private httpServer?: Server;
+    /** Access credential required on /mcp (mode-dependent). Undefined = open. */
+    public authToken?: string;
+    /** Set by the extension so session tokens persist in globalState. */
+    public extensionContext?: vscode.ExtensionContext;
     private port: number;
     private host: string;
     private fileListingCallback?: FileListingCallback;
@@ -204,6 +209,19 @@ export class MCPServer {
     }
 
     private setupRoutes(): void {
+        // --- Auth gates (Phase 12) ---
+        // Origin first: a hostile page gets 403 before it learns anything
+        // about tokens. Bearer second: no valid credential, no tool runs.
+        const authCfg = () => readAuthConfig();
+        this.app.use(originGuard(authCfg, this.port));
+        this.app.use('/mcp', bearerAuth(() => {
+            const mode = authCfg().mode;
+            if (mode === 'none') return undefined;
+            if (mode === 'static-token') return authCfg().staticToken;
+            if (mode === 'session-token') return this.authToken;
+            return undefined; // oauth verifies through its own middleware
+        }));
+
         // Stateless mode, one session per request: every POST gets its own
         // transport and tool registry, disposed once the response is out. The
         // old shared transport serialized everything, so a single hung tool
@@ -362,6 +380,19 @@ export class MCPServer {
         try {
             logger.info('[MCPServer.start] Starting MCP server');
             const startTime = Date.now();
+
+            // Session-token mode: create once, persist across window reloads
+            const authMode = readAuthConfig().mode;
+            if (authMode === 'session-token') {
+                this.authToken = this.extensionContext?.globalState.get<string>('vscode-mcp.authToken')
+                    || generateSessionToken();
+                void this.extensionContext?.globalState.update('vscode-mcp.authToken', this.authToken);
+                logger.info('[MCPServer.start] Access token ready (shown once at activation; available via get_server_info_code and the copy command)');
+            } else if (authMode === 'static-token') {
+                this.authToken = readAuthConfig().staticToken;
+            } else {
+                this.authToken = undefined;
+            }
 
             // Start HTTP server
             logger.info('[MCPServer.start] Starting HTTP server');
