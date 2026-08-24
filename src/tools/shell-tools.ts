@@ -193,6 +193,24 @@ function toPowerShellQuoted(p: string): string {
 }
 
 /**
+ * Collapses a multi-line command to one ASCII line. Some ptys (Git Bash on
+ * Windows, reliably reproducible) eat the first character of any multi-line
+ * submission — `python -c "\n..."` arrived as `ython -c ...`. Base64 keeps
+ * every byte intact, and eval/Invoke-Expression preserve semantics: current
+ * shell, environment, stdin, and the script's real exit code.
+ */
+function encodeMultiline(kind: ShellKind, command: string): string {
+    if (!command.includes('\n')) {
+        return command;
+    }
+    const b64 = Buffer.from(command, 'utf-8').toString('base64');
+    if (kind === 'bash') {
+        return `eval "$(printf %s '${b64}' | base64 -d)"`;
+    }
+    return `Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64}')))`;
+}
+
+/**
  * Builds the command handed to the terminal: cwd prefix adapted to the shell,
  * plus the exit-code marker used to recover the command's real exit status
  * @param terminal The terminal the command will run in
@@ -204,9 +222,12 @@ export function buildFullCommand(terminal: vscode.Terminal, command: string, cwd
 }
 
 function buildFullCommandFor(kind: ShellKind, command: string, cwd?: string): string {
+    // Multi-line submissions lose their first character on some ptys; the
+    // payload travels base64-encoded on a single line instead
+    const safeCommand = encodeMultiline(kind, command);
     const wantsCd = !!cwd && cwd !== '.' && cwd !== './';
     if (kind === 'bash') {
-        const body = wantsCd ? `cd ${toPosixQuoted(cwd!)} && ${command}` : command;
+        const body = wantsCd ? `cd ${toPosixQuoted(cwd!)} && ${safeCommand}` : safeCommand;
         // Marker on its own line: appended after a trailing "# comment" it
         // would become part of that comment and failures would read as exit 0
         return `${body}\necho "${EXIT_MARKER}:$?"`;
@@ -223,7 +244,7 @@ function buildFullCommandFor(kind: ShellKind, command: string, cwd?: string): st
     // Braces on their own lines: a trailing "# comment" in the user command
     // must not be able to swallow the closing brace of an if on one line
     lines.push('if ($ok) {');
-    lines.push(command);
+    lines.push(safeCommand);
     lines.push('}');
     // Cmdlets never set $LASTEXITCODE, so $? covers what it leaves behind
     const rc = '$(if (-not $ok) { 1 } elseif ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 })';
