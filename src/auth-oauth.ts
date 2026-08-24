@@ -48,13 +48,45 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 	const grants = new Map<string, PendingGrant>();
 	let lastClientName: string | undefined;
 
+	// F3 — resource caps. Both maps are written by unauthenticated requests;
+	// without limits a tunnel attacker grows them at will.
+	const MAX_CLIENTS = 200;
+	const MAX_PENDING_GRANTS = 50;
+	// A grant that never reaches /token (ignored consent dialog) must not sit
+	// in the map forever; the sweep reaps expired and orphaned entries.
+	setInterval(() => {
+		const now = Date.now();
+		for (const [id, g] of grants) {
+			if (now > g.expiresAt || (g.usedCode ?? false)) grants.delete(id);
+		}
+	}, 60_000).unref();
+
+	function pruneOldest<K, V>(map: Map<K, V>, cap: number): void {
+		while (map.size >= cap) {
+			const oldest = map.keys().next().value;
+			if (oldest === undefined) break;
+			map.delete(oldest);
+		}
+	}
+
 	// Public origin for metadata and redirects: when the request arrives
 	// through a tunnel (Tailscale Funnel, cloudflared…) the Host header is the
 	// public name — announcing http://127.0.0.1 would make remote token
 	// exchanges impossible. Direct local requests keep the loopback form.
+	// F4 — the reflected value must at least look like a DNS hostname; a
+	// request can otherwise smuggle arbitrary strings (or URLs) into the
+	// issuer other clients may follow.
+	function isPlausibleHostname(host: string): boolean {
+		return /^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?(:\d{1,5})?$/.test(host)
+			&& !host.includes('..');
+	}
 	function publicOrigin(req: ExpressRequest): string {
 		const host = req.headers['x-forwarded-host'] ?? req.headers.host;
-		if (typeof host === 'string' && !host.includes('127.0.0.1') && !host.startsWith('localhost')) {
+		if (typeof host === 'string'
+			&& !host.includes('127.0.0.1')
+			&& !host.startsWith('localhost')
+			&& !host.startsWith('[') // literal IPv6 loopback forms stay local
+			&& isPlausibleHostname(host)) {
 			return host.startsWith('http') ? host : `https://${host}`;
 		}
 		return `http://127.0.0.1:${selfPort}`;
@@ -101,6 +133,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 			redirect_uris: redirectUris as string[],
 			client_name: typeof req.body?.client_name === 'string' ? req.body.client_name : undefined,
 		};
+		pruneOldest(clients, MAX_CLIENTS);
 		clients.set(clientId, client);
 		res.status(201).json({
 			client_id: clientId,
@@ -126,7 +159,14 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		if (!code_challenge || code_challenge_method !== 'S256') {
 			return res.status(400).json({ error: 'PKCE S256 is required', error_code: 'invalid_request' });
 		}
+		// RFC 7636: a verifier is 43-128 base64url chars, so its S256
+		// challenge is exactly 43. Rejecting anything else keeps degenerate
+		// challenges (empty-string hash, single char) out of the grants map.
+		if (!/^[A-Za-z0-9_-]{43}$/.test(code_challenge)) {
+			return res.status(400).json({ error: 'invalid_code_challenge', error_description: 'code_challenge must be 43 base64url chars (S256 of a valid verifier)' });
+		}
 		const grantId = crypto.randomBytes(16).toString('hex');
+		pruneOldest(grants, MAX_PENDING_GRANTS);
 		grants.set(grantId, {
 			clientId: client.client_id,
 			redirectUri: redirect_uri,
@@ -151,6 +191,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		}
 		const code = crypto.randomBytes(24).toString('base64url');
 		grant.code = code;
+		pruneOldest(grants, MAX_PENDING_GRANTS);
 		grants.set(code, grant); // re-key by code for the token exchange
 		const sep = redirect_uri.includes('?') ? '&' : '?';
 		res.redirect(302, `${redirect_uri}${sep}code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ''}`);
@@ -190,10 +231,15 @@ ${ok
 		if (client_id !== grant.clientId || redirect_uri !== grant.redirectUri) {
 			return res.status(400).json({ error: 'invalid_grant' });
 		}
-		// PKCE S256: SHA-256(verifier) base64url must equal the challenge
-		const expected = crypto.createHash('sha256').update(code_verifier ?? '').digest('base64url');
+		// PKCE S256: SHA-256(verifier) base64url must equal the challenge.
+		// A missing or malformed verifier is refused outright (RFC 7636 shape)
+		// so the empty-string hash can never satisfy a grant.
+		if (typeof code_verifier !== 'string' || !/^[A-Za-z0-9-._~]{43,128}$/.test(code_verifier)) {
+				return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
+		}
+		const expected = crypto.createHash('sha256').update(code_verifier).digest('base64url');
 		if (!tokensMatch(expected, grant.codeChallenge)) {
-			return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
+				return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
 		}
 		grant.usedCode = true;
 		grants.delete(code as string);
