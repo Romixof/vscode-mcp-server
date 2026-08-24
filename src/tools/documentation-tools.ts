@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { z } from 'zod';
+import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { executeShellCommand } from './shell-tools';
 
@@ -55,6 +56,7 @@ interface TodoOptions {
 	contextLines?: number;
 	format?: string;
 	groupBy?: string;
+	workspace?: string;
 }
 
 interface FileHistoryCommit {
@@ -67,11 +69,8 @@ interface FileHistoryCommit {
 	diff?: string;
 }
 
-async function getWorkspaceRoot(): Promise<string> {
-	if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-		throw new Error('No workspace folder is open');
-	}
-	return vscode.workspace.workspaceFolders[0].uri.fsPath;
+async function getWorkspaceRoot(ref?: string): Promise<string> {
+	return resolveWorkspaceFolder(ref).uri.fsPath;
 }
 
 function getTerminal(): vscode.Terminal {
@@ -433,8 +432,8 @@ async function getRubyDependencies(workspaceRoot: string): Promise<EcosystemDepe
 	}];
 }
 
-async function getAllDependencies(): Promise<EcosystemDependencies[]> {
-	const workspaceRoot = await getWorkspaceRoot();
+async function getAllDependencies(workspace?: string): Promise<EcosystemDependencies[]> {
+	const workspaceRoot = await getWorkspaceRoot(workspace);
 	const allResults: EcosystemDependencies[] = [];
 	allResults.push(...await getNodeDependencies(workspaceRoot));
 	allResults.push(...await getPythonDependencies(workspaceRoot));
@@ -471,7 +470,8 @@ function globToRegExp(pattern: string): RegExp {
 
 
 async function findTodoComments(options: TodoOptions): Promise<{ matches: TodoMatch[] | Record<string, TodoMatch[]>; stats: TodoStats }> {
-	const workspaceRoot = options.path || await getWorkspaceRoot();
+	const target = resolveRelativeToolPath(options.path ?? '.', options.workspace);
+	const workspaceRoot = target.dir;
 	const defaultPatterns = ['TODO', 'FIXME', 'HACK', 'XXX', 'NOTE', 'BUG', 'OPTIMIZE', 'REVIEW', 'WARNING', 'TEMP'];
 	const searchPatterns = options.customPatterns ? [...defaultPatterns, ...options.customPatterns] : defaultPatterns;
 	const caseSensitive = options.caseSensitive ?? false;
@@ -530,7 +530,7 @@ async function findTodoComments(options: TodoOptions): Promise<{ matches: TodoMa
 							severity = 'medium';
 						}
 						matches.push({
-							file: relativePath,
+							file: `${target.displayPrefix}${relativePath}`,
 							line: i + 1,
 							column: lines[i].indexOf(match[0]) + 1,
 							tag,
@@ -589,9 +589,14 @@ async function getFileHistory(options: {
 	includeStats?: boolean;
 	includeDiff?: boolean;
 	format?: string;
+	workspace?: string;
 }): Promise<string> {
-	const workspaceRoot = await getWorkspaceRoot();
-	const filePath = options.path;
+	// Same routing as git blame: the git CLI wants a path relative to the
+	// folder it runs in, or the untouched absolute path when the target sits
+	// outside every open root
+	const target = resolveRelativeToolPath(options.path, options.workspace);
+	const workspaceRoot = target.root;
+	const filePath = target.gitPath;
 	const maxCommits = options.maxCommits ?? 50;
 	const includeStats = options.includeStats ?? true;
 	const includeDiff = options.includeDiff ?? false;
@@ -705,9 +710,9 @@ async function generateDocstring(options: {
 	includeExamples?: boolean;
 	async?: boolean;
 	overwrite?: boolean;
+	workspace?: string;
 }): Promise<string> {
-	const workspaceRoot = await getWorkspaceRoot();
-	const filePath = path.join(workspaceRoot, options.path);
+	const filePath = resolveRelativeToolPath(options.path, options.workspace).fsPath;
 	const ext = path.extname(filePath).toLowerCase();
 
 	const content = await readTextFile(filePath);
@@ -912,8 +917,9 @@ async function getProjectContext(options: {
 	includeScripts?: boolean;
 	includeConfigFiles?: boolean;
 	includeReadme?: boolean;
+	workspace?: string;
 }): Promise<string> {
-	const workspaceRoot = await getWorkspaceRoot();
+	const workspaceRoot = await getWorkspaceRoot(options.workspace);
 	const depth = options.depth ?? 3;
 	const includeScripts = options.includeScripts ?? true;
 	const includeConfigFiles = options.includeConfigFiles ?? true;
@@ -1161,8 +1167,9 @@ WHEN TO USE: Auditing dependencies, checking versions, finding outdated packages
 Supports: npm/yarn/pnpm, pip/poetry/pipenv, cargo, go modules, composer, bundler, and more.
 Returns unified format with type (prod/dev/peer/optional), ecosystem, and metadata.`, {
 		ecosystem: z.enum(['all', 'npm', 'pypi', 'cargo', 'go', 'composer', 'bundler', 'nuget', 'maven', 'gradle']).optional().default('all').describe('Filter by ecosystem (default: all)'),
-		includeOutdated: z.boolean().optional().default(false).describe('Check for outdated versions (slower)')
-	}, async ({ ecosystem = 'all', includeOutdated = false }) => {
+		includeOutdated: z.boolean().optional().default(false).describe('Check for outdated versions (slower)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ ecosystem = 'all', includeOutdated = false, workspace }) => {
 		try {
 			// module ecosystems use friendlier names than the public enum
 			const ecosystemAliases: Record<string, string[]> = {
@@ -1173,7 +1180,7 @@ Returns unified format with type (prod/dev/peer/optional), ecosystem, and metada
 				composer: ['php'],
 				bundler: ['ruby']
 			};
-			const results = await getAllDependencies();
+			const results = await getAllDependencies(workspace);
 			const wanted = ecosystemAliases[ecosystem] || [ecosystem];
 			const filtered = ecosystem === 'all' ? results : results.filter(r => wanted.includes(r.ecosystem));
 
@@ -1220,10 +1227,11 @@ Supports filtering by date, author, commit message, and commit count. Returns st
 		grep: z.string().optional().describe('Filter commit messages'),
 		includeStats: z.boolean().optional().default(true).describe('Include file change stats'),
 		includeDiff: z.boolean().optional().default(false).describe('Include full diff per commit'),
-		format: z.enum(['json', 'text', 'csv']).optional().default('json').describe('Output format')
-	}, async ({ path: filePath, maxCommits = 50, since, until, author, grep, includeStats = true, includeDiff = false, format = 'json' }) => {
+		format: z.enum(['json', 'text', 'csv']).optional().default('json').describe('Output format'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: filePath, maxCommits = 50, since, until, author, grep, includeStats = true, includeDiff = false, format = 'json', workspace }) => {
 		try {
-			const result = await getFileHistory({ path: filePath, maxCommits, since, until, author, grep, includeStats, includeDiff, format });
+			const result = await getFileHistory({ path: filePath, maxCommits, since, until, author, grep, includeStats, includeDiff, format, workspace });
 			return { content: [{ type: 'text', text: result }] };
 		} catch (error) {
 			console.error('[get_file_history_code] Error:', error);
@@ -1244,10 +1252,11 @@ Can insert directly into file or return the docstring only.`, {
 		includeTypes: z.boolean().optional().default(true).describe('Include parameter/return types'),
 		includeExamples: z.boolean().optional().default(false).describe('Include example section'),
 		async: z.boolean().optional().describe('Mark function as async'),
-		overwrite: z.boolean().optional().default(true).describe('Overwrite existing docstring')
-	}, async ({ path: filePath, symbol, line, includeExamples = false, overwrite = true }) => {
+		overwrite: z.boolean().optional().default(true).describe('Overwrite existing docstring'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: filePath, symbol, line, includeExamples = false, overwrite = true, workspace }) => {
 		try {
-			const result = await generateDocstring({ path: filePath, symbol, line, includeExamples, overwrite });
+			const result = await generateDocstring({ path: filePath, symbol, line, includeExamples, overwrite, workspace });
 			return { content: [{ type: 'text', text: result }] };
 		} catch (error) {
 			console.error('[generate_docstring_code] Error:', error);
@@ -1265,10 +1274,11 @@ Aggregates package.json, configs, file structure, languages, frameworks, entry p
 		includeScripts: z.boolean().optional().default(true).describe('Include npm/composer scripts'),
 		includeConfigFiles: z.boolean().optional().default(true).describe('List config files found'),
 		includeReadme: z.boolean().optional().default(true).describe('Include README summary'),
-		maxFileSize: z.number().optional().default(102400).describe('Max file size for content reads (bytes)')
-	}, async ({ depth = 3, includeScripts = true, includeConfigFiles = true, includeReadme = true }) => {
+		maxFileSize: z.number().optional().default(102400).describe('Max file size for content reads (bytes)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ depth = 3, includeScripts = true, includeConfigFiles = true, includeReadme = true, workspace }) => {
 		try {
-			const result = await getProjectContext({ depth, includeScripts, includeConfigFiles, includeReadme });
+			const result = await getProjectContext({ depth, includeScripts, includeConfigFiles, includeReadme, workspace });
 			return { content: [{ type: 'text', text: result }] };
 		} catch (error) {
 			console.error('[get_project_context_code] Error:', error);
@@ -1289,10 +1299,11 @@ Returns structured data with severity classification (high/medium/low).`, {
 		caseSensitive: z.boolean().optional().default(false).describe('Case sensitive search'),
 		contextLines: z.number().optional().default(2).describe('Lines of context around matches'),
 		format: z.enum(['json', 'text', 'markdown']).optional().default('json').describe('Output format'),
-		groupBy: z.enum(['file', 'tag', 'none']).optional().default('file').describe('Group results by file, tag, or flat list')
-	}, async ({ customPatterns, path: searchPath, include, exclude, caseSensitive = false, contextLines = 2, format = 'json', groupBy = 'file' }) => {
+		groupBy: z.enum(['file', 'tag', 'none']).optional().default('file').describe('Group results by file, tag, or flat list'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ customPatterns, path: searchPath, include, exclude, caseSensitive = false, contextLines = 2, format = 'json', groupBy = 'file', workspace }) => {
 		try {
-			const result = await findTodoComments({ customPatterns, path: searchPath, include, exclude, caseSensitive, contextLines, groupBy });
+			const result = await findTodoComments({ customPatterns, path: searchPath, include, exclude, caseSensitive, contextLines, groupBy, workspace });
 
 			if (format === 'markdown') {
 				let output = `# TODO/FIXME Report\n\n`;

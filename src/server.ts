@@ -19,7 +19,21 @@ import { registerSecurityTools } from './tools/security-tools';
 import { registerPerformanceTools } from './tools/performance-tools';
 import { registerRefactorTools } from './tools/refactor-tools';
 import { registerFrontendTools } from './tools/frontend-tools';
+import { registerWorkflowTools } from './tools/workflow-tools';
+import { registerAdvancedTools } from './tools/advanced-tools';
+import { registerCoffeeTools } from './tools/coffee-tools';
+import { EXTENSION_ID } from './tools/advanced-tools';
+import { recordToolCall } from './utils/usage';
 import { logger } from './utils/logger';
+import { ClusterCoordinator, ClusterHost } from './cluster/coordinator';
+import {
+	CLUSTER_DEREGISTER_PATH,
+	CLUSTER_HEARTBEAT_PATH,
+	CLUSTER_HUB_SHUTDOWN_PATH,
+	CLUSTER_IDENTITY_PATH,
+	CLUSTER_REGISTER_PATH,
+	INVOKE_PATH
+} from './cluster/types';
 
 export interface ToolConfiguration {
     file: boolean;
@@ -37,6 +51,8 @@ export interface ToolConfiguration {
     performance: boolean;
     refactoring: boolean;
     frontend: boolean;
+    workflow: boolean;
+    advanced: boolean;
 }
 
 export class MCPServer {
@@ -47,6 +63,11 @@ export class MCPServer {
     private fileListingCallback?: FileListingCallback;
     private terminal?: vscode.Terminal;
     private toolConfig: ToolConfiguration;
+    // Post-zod tool callbacks of the most recent registration; the /invoke
+    // endpoint dispatches through this map instead of rebuilding a session
+    private invokeHandlers = new Map<string, (args: unknown, extra: unknown) => unknown>();
+    // Multi-window cluster state machine; every window runs one
+    public readonly cluster: ClusterCoordinator;
 
     public setFileListingCallback(callback: FileListingCallback) {
         this.fileListingCallback = callback;
@@ -71,14 +92,24 @@ export class MCPServer {
             security: true,
             performance: true,
             refactoring: true,
-            frontend: true
+            frontend: true,
+            workflow: true,
+            advanced: true
         };
         this.app = express();
         this.app.use(express.json());
 
+        // Cluster coordinator needs a ClusterHost; we implement it below
+        this.cluster = new ClusterCoordinator(
+            this as unknown as ClusterHost,
+            this.port,
+            this.host,
+            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? '0.11.1'
+        );
+
         this.setupRoutes();
     }
-    
+
     public setupTools(): void {
         logger.info(`Setting up MCP tools with configuration: ${JSON.stringify(this.toolConfig)}`);
 
@@ -96,7 +127,7 @@ export class MCPServer {
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.10.0",
+            version: "0.11.1",
         }, {
             capabilities: {
                 logging: {},
@@ -118,8 +149,32 @@ export class MCPServer {
             throw new Error('File listing callback not set');
         }
 
+        // Count calls locally (feeds get_server_info_code). The callback is
+        // always the last argument of server.tool(), whatever the overload.
+        const originalTool = server.tool.bind(server);
+        server.tool = ((name: string, ...args: unknown[]) => {
+            const last = args.length - 1;
+            if (typeof args[last] === 'function') {
+                const handler = args[last] as (...cbArgs: unknown[]) => unknown;
+                // Store handler for /invoke dispatch; latest registration wins
+                this.invokeHandlers.set(name, handler);
+                args[last] = (...cbArgs: unknown[]) => {
+                    recordToolCall(name);
+                    const decision = this.cluster.resolveRoute(name, cbArgs[0] as Record<string, unknown>);
+                    if (decision.kind === 'local') {
+                        if (decision.args) {
+                            cbArgs[0] = decision.args;
+                        }
+                        return handler(...cbArgs);
+                    }
+                    return this.cluster.dispatchRoute(name, decision, cbArgs, handler);
+                };
+            }
+            return (originalTool as (...toolArgs: unknown[]) => unknown)(name, ...args);
+        }) as typeof server.tool;
+
         const groups: Array<[string, boolean, () => void]> = [
-            ['file', c.file, () => registerFileTools(server, fileListing)],
+            ['file', c.file, () => registerFileTools(server, fileListing, () => this.cluster.clusterFolderListing())],
             ['edit', c.edit, () => registerEditTools(server)],
             ['shell', c.shell, () => registerShellTools(server, terminal)],
             ['diagnostics', c.diagnostics, () => registerDiagnosticsTools(server)],
@@ -133,7 +188,9 @@ export class MCPServer {
             ['security', c.security, () => registerSecurityTools(server, terminal)],
             ['performance', c.performance, () => registerPerformanceTools(server, terminal)],
             ['refactoring', c.refactoring, () => registerRefactorTools(server)],
-            ['frontend', c.frontend, () => registerFrontendTools(server)]
+            ['frontend', c.frontend, () => registerFrontendTools(server)],
+            ['workflow', c.workflow, () => registerWorkflowTools(server, terminal)],
+            ['advanced', c.advanced, () => registerAdvancedTools(server, { host: this.host, port: this.port }, () => this.cluster.clusterInfoLine())]
         ];
 
         for (const [, enabled, register] of groups) {
@@ -141,6 +198,9 @@ export class MCPServer {
                 register();
             }
         }
+
+        // Not tied to any enabledTools setting: the bar stays open
+        registerCoffeeTools(server);
     }
 
     private setupRoutes(): void {
@@ -207,23 +267,95 @@ export class MCPServer {
             res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
             res.status(204).end();
         });
+
+        // --- Cluster control plane ---
+        // Identity endpoint: tells joining windows this is a hub they can join
+        this.app.get(CLUSTER_IDENTITY_PATH, (req, res) => {
+            res.json(this.cluster.handleIdentity());
+        });
+
+        // Registration endpoint: spokes POST their folders to the hub
+        this.app.post(CLUSTER_REGISTER_PATH, express.json(), (req, res) => {
+            const result = this.cluster.handleRegister(req.body);
+            res.status(result.status).json(result.body);
+        });
+
+        // Heartbeat endpoint: spokes refresh their lease
+        this.app.post(CLUSTER_HEARTBEAT_PATH, express.json(), (req, res) => {
+            const result = this.cluster.handleHeartbeat(req.body.windowId, req.body.port, req.body.folders);
+            res.status(result.status).json(result.body);
+        });
+
+        // Deregister endpoint: spoke says goodbye
+        this.app.post(CLUSTER_DEREGISTER_PATH, express.json(), (req, res) => {
+            this.cluster.handleDeregister(req.body.windowId);
+            res.json({ ok: true });
+        });
+
+        // Hub shutdown broadcast: hub tells spokes to start election
+        this.app.post(CLUSTER_HUB_SHUTDOWN_PATH, (req, res) => {
+            this.cluster.handleHubShutdown();
+            res.json({ ok: true });
+        });
+
+        // Invocation endpoint: hub forwards tool calls to spokes
+        this.app.post(INVOKE_PATH, express.json(), async (req, res) => {
+            const result = await this.cluster.handleInvoke(req.body);
+            res.status(result.status).json(result.body);
+        });
     }
 
-    private setupEventHandlers(): void {
-        // Log HTTP server events
+    // --- ClusterHost implementation ---
+
+    /** Binds the shared express app; rejects with the underlying error (code EADDRINUSE et al). */
+    async listenOn(port: number, host: string): Promise<number> {
+        return new Promise((resolve, reject) => {
+            const server = this.app.listen(port, host, () => {
+                const addr = server.address();
+                const boundPort = typeof addr === 'object' && addr ? addr.port : port;
+                // Remember the socket so stop()/closeListener() can reach it:
+                // a spoke's ephemeral listener is bound here, never in start()
+                this.httpServer = server;
+                logger.info(`[ClusterHost.listenOn] Bound to ${host}:${boundPort}`);
+                resolve(boundPort);
+            });
+            server.once('error', (error: Error & { code?: string }) => {
+                reject(error);
+            });
+        });
+    }
+
+    /** Closes whichever listener currently holds the app. */
+    async closeListener(): Promise<void> {
         if (this.httpServer) {
-            this.httpServer.on('error', (error: Error) => {
-                logger.error(`[Server] HTTP Server Error: ${error.message}`);
-            });
-
-            this.httpServer.on('listening', () => {
-                logger.info(`[Server] HTTP Server ready`);
-            });
-
-            this.httpServer.on('close', () => {
-                logger.info(`[Server] HTTP Server closed`);
+            const server = this.httpServer;
+            this.httpServer = undefined;
+            await new Promise<void>((resolve, reject) => {
+                server.close((err) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve();
+                    }
+                });
             });
         }
+    }
+
+    /** Executes a registered tool handler directly (post-zod), bypassing routing. */
+    async invokeLocally(tool: string, args: Record<string, unknown>): Promise<unknown> {
+        const handler = this.invokeHandlers.get(tool);
+        if (!handler) {
+            throw new Error(`Tool ${tool} not registered`);
+        }
+        return handler(args, {});
+    }
+
+    /** True when this window registered the tool (enabledTools differ per window). */
+    hasTool(tool: string): boolean {
+        // Registrations happen during setupTools(); before that nothing is
+        // served, which is exactly what the caller needs to know
+        return this.invokeHandlers.has(tool);
     }
 
     public async start(): Promise<void> {
@@ -234,18 +366,42 @@ export class MCPServer {
             // Start HTTP server
             logger.info('[MCPServer.start] Starting HTTP server');
             const httpServerStartTime = Date.now();
-            
-            return new Promise((resolve) => {
+
+            return new Promise((resolve, reject) => {
                 // Bind to localhost only for security
                 this.httpServer = this.app.listen(this.port, this.host, () => {
                     const httpStartTime = Date.now() - httpServerStartTime;
                     logger.info(`[MCPServer.start] HTTP Server started (took ${httpStartTime}ms)`);
                     logger.info(`MCP Server listening on ${this.host}:${this.port}`);
-                    
+
                     const totalTime = Date.now() - startTime;
                     logger.info(`[MCPServer.start] Server startup complete (total: ${totalTime}ms)`);
-                    
+
                     resolve();
+                });
+                // A taken port surfaces as an 'error' event, not an exception:
+                // without this listener the startup promise never settles and
+                // the window sits half-started with no explanation
+                this.httpServer.once('error', async (error: Error & { code?: string }) => {
+                    const detail = error.code === 'EADDRINUSE'
+                        ? `port ${this.port} is already in use — another VS Code window may already be serving MCP there; give this window its own vscode-mcp-server.port`
+                        : error.message;
+                    logger.error(`[MCPServer.start] HTTP Server failed to listen: ${detail}`);
+                    if (error.code === 'EADDRINUSE') {
+                        try {
+                            // On success this swapped this.httpServer to the
+                            // spoke's ephemeral listener via listenOn()
+                            await this.cluster.joinAfterAddressInUse(error);
+                            logger.info('[MCPServer.start] Successfully joined as spoke');
+                            resolve();
+                            return;
+                        } catch (joinError) {
+                            logger.error(`[MCPServer.start] Failed to join cluster: ${joinError instanceof Error ? joinError.message : String(joinError)}`);
+                            reject(joinError);
+                            return;
+                        }
+                    }
+                    reject(new Error(detail));
                 });
             });
         } catch (error) {
@@ -257,28 +413,28 @@ export class MCPServer {
     public async stop(forceTimeout: number = 5000): Promise<void> {
         logger.info('[MCPServer.stop] Starting server shutdown process');
         const stopStartTime = Date.now();
-        
+
         try {
             // Close HTTP server with timeout
             if (this.httpServer) {
                 logger.info('[MCPServer.stop] Closing HTTP server (with timeout)');
                 const httpServerCloseStart = Date.now();
-                
+
                 await Promise.race([
                     // Normal close operation
                     new Promise<void>((resolve, reject) => {
                         this.httpServer!.close((err) => {
                             const httpCloseTime = Date.now() - httpServerCloseStart;
                             if (err) {
-                                logger.error(`[MCPServer.stop] HTTP server closed with error: ${err.message} (took ${httpCloseTime}ms)`);
-                                reject(err);
+                                logger.warn(`[MCPServer.stop] HTTP server closed with error: ${err.message} (took ${httpCloseTime}ms)`);
+                                resolve();
                             } else {
                                 logger.info(`[MCPServer.stop] HTTP server closed successfully (took ${httpCloseTime}ms)`);
                                 resolve();
                             }
                         });
                     }),
-                    
+
                     // Timeout fallback
                     new Promise<void>((resolve) => {
                         setTimeout(() => {
@@ -292,6 +448,11 @@ export class MCPServer {
 
             // Per-request sessions tear themselves down through their own
             // res 'close' handlers as the sockets die with the server
+
+            // Cluster goodbye (deregister / hub-shutdown fan-out) runs after
+            // the listener is down so a spoke that promotes instantly never
+            // races our still-open port
+            await this.cluster.stop();
 
             const totalStopTime = Date.now() - stopStartTime;
             logger.info(`[MCPServer.stop] MCP Server shutdown complete (total: ${totalStopTime}ms)`);

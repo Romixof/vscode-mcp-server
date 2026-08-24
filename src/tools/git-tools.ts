@@ -1,13 +1,11 @@
 import * as vscode from 'vscode';
 import { z } from 'zod';
+import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { executeShellCommand } from './shell-tools';
 
-function getWorkspaceRoot(): string {
-	if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-		throw new Error('No workspace folder is open');
-	}
-	return vscode.workspace.workspaceFolders[0].uri.fsPath;
+function getWorkspaceRoot(ref?: string): string {
+	return resolveWorkspaceFolder(ref).uri.fsPath;
 }
 
 function getTerminal(): vscode.Terminal {
@@ -97,10 +95,11 @@ Auto-stages all changes by default. Use amend=true to modify last commit.`, {
 		message: z.string().optional().describe('Custom commit message (optional, auto-generated from diff if omitted)'),
 		addAll: z.boolean().optional().default(true).describe('Stage all changes before commit (git add -A)'),
 		amend: z.boolean().optional().default(false).describe('Amend the previous commit instead of creating new one'),
-		noVerify: z.boolean().optional().default(false).describe('Skip pre-commit hooks (--no-verify)')
-	}, async ({ message, addAll = true, amend = false, noVerify = false }) => {
+		noVerify: z.boolean().optional().default(false).describe('Skip pre-commit hooks (--no-verify)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ message, addAll = true, amend = false, noVerify = false, workspace }) => {
 		try {
-			const cwd = getWorkspaceRoot();
+			const cwd = getWorkspaceRoot(workspace);
 			const repoCheck = await runGitCommand('git rev-parse --git-dir', cwd);
 			if (repoCheck.exitCode !== 0) {
 				throw new Error('Not a git repository');
@@ -151,10 +150,11 @@ Creates branch from current HEAD by default. Use 'from' to specify source. Set c
 		name: z.string().describe('Branch name (will be slugified)'),
 		from: z.string().optional().describe('Source branch/commit/tag (default: current HEAD)'),
 		checkout: z.boolean().optional().default(true).describe('Switch to the new branch after creation'),
-		listOnly: z.boolean().optional().default(false).describe('Only list existing branches (local and remote)')
-	}, async ({ name, from, checkout = true, listOnly = false }) => {
+		listOnly: z.boolean().optional().default(false).describe('Only list existing branches (local and remote)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ name, from, checkout = true, listOnly = false, workspace }) => {
 		try {
-			const cwd = getWorkspaceRoot();
+			const cwd = getWorkspaceRoot(workspace);
 			if (listOnly) {
 				const local = await runGitCommand('git branch', cwd);
 				const remote = await runGitCommand('git branch -r', cwd);
@@ -219,24 +219,25 @@ Creates branch from current HEAD by default. Use 'from' to specify source. Set c
 WHEN TO USE: Understanding who wrote/changed specific code, finding when bugs were introduced.
 
 Supports line ranges. Returns author, commit hash, date, and line content.`, {
-		path: z.string().describe('File path relative to workspace root'),
+		path: z.string().describe('File path relative to its workspace root; with multiple folders open, "FolderName/path" targets another folder'),
 		startLine: z.number().optional().describe('Start line number (1-based, inclusive)'),
 		endLine: z.number().optional().describe('End line number (1-based, inclusive)'),
-		format: z.enum(['text', 'json']).optional().default('text').describe('Output format')
-	}, async ({ path, startLine, endLine, format = 'text' }) => {
+		format: z.enum(['text', 'json']).optional().default('text').describe('Output format'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path, startLine, endLine, format = 'text', workspace }) => {
 		try {
-			const cwd = getWorkspaceRoot();
-			const fileCheck = await runGitCommand(`git ls-files "${path}"`, cwd);
+			const target = resolveRelativeToolPath(path, workspace);
+			const fileCheck = await runGitCommand(`git ls-files "${target.gitPath}"`, target.root);
 			if (fileCheck.exitCode !== 0 || !fileCheck.output.trim()) {
 				throw new Error(`File not tracked by git: ${path}`);
 			}
-			let blameCmd = `git blame --line-porcelain "${path}"`;
+			let blameCmd = `git blame --line-porcelain "${target.gitPath}"`;
 			if (startLine && endLine) {
-				blameCmd = `git blame -L ${startLine},${endLine} --line-porcelain "${path}"`;
+				blameCmd = `git blame -L ${startLine},${endLine} --line-porcelain "${target.gitPath}"`;
 			} else if (startLine) {
-				blameCmd = `git blame -L ${startLine},${startLine} --line-porcelain "${path}"`;
+				blameCmd = `git blame -L ${startLine},${startLine} --line-porcelain "${target.gitPath}"`;
 			}
-			const result = await runGitCommand(blameCmd, cwd);
+			const result = await runGitCommand(blameCmd, target.root);
 			if (result.exitCode !== 0) {
 				throw new Error(`Git blame failed: ${result.output}`);
 			}
@@ -296,9 +297,11 @@ Supports line ranges. Returns author, commit hash, date, and line content.`, {
 
 WHEN TO USE: After failed merge/rebase, before resolving conflicts.
 
-Shows conflicted files and the actual conflict sections (<<<<<<< HEAD ... >>>>>>> branch).`, {}, async () => {
+Shows conflicted files and the actual conflict sections (<<<<<<< HEAD ... >>>>>>> branch).`, {
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ workspace }) => {
 		try {
-			const cwd = getWorkspaceRoot();
+			const cwd = getWorkspaceRoot(workspace);
 			// diff-filter=U covers every unmerged state (UU, AA, DD, AU, UA, DU, UD)
 			const diffCheck = await runGitCommand('git diff --name-only --diff-filter=U', cwd);
 			let conflictedFiles = diffCheck.output.split('\n').map(l => l.trim()).filter(l => l && !l.includes(' '));
@@ -348,10 +351,11 @@ Default action: push with auto-generated WIP message.`, {
 		action: z.enum(['push', 'pop', 'list', 'drop', 'apply', 'show']).optional().default('push').describe('Stash action to perform'),
 		message: z.string().optional().describe('Custom stash message (for push)'),
 		index: z.number().int().min(0).optional().default(0).describe('Stash index (for pop/drop/apply/show, 0=latest)'),
-		includeUntracked: z.boolean().optional().default(false).describe('Include untracked files (git stash -u)')
-	}, async ({ action = 'push', message, index = 0, includeUntracked = false }) => {
+		includeUntracked: z.boolean().optional().default(false).describe('Include untracked files (git stash -u)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ action = 'push', message, index = 0, includeUntracked = false, workspace }) => {
 		try {
-			const cwd = getWorkspaceRoot();
+			const cwd = getWorkspaceRoot(workspace);
 			switch (action) {
 				case 'list': {
 					const result = await runGitCommand('git stash list', cwd);

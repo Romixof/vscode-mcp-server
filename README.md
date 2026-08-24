@@ -1,8 +1,8 @@
 # VSCodium MCP Server
 
-Turn VS Code into a local MCP server: 54 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
+Turn VS Code into a local MCP server: 61 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
 
-This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 42 came later. Credit for the core idea and the first implementation belongs to him.
+This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 49 came later. Credit for the core idea and the first implementation belongs to him.
 
 ## Demo
 
@@ -10,7 +10,7 @@ https://github.com/user-attachments/assets/f60da97b-a5a9-45cb-8379-3bf91c9bbad0
 
 ## Quick start
 
-1. Install the extension from the `.vsix` file (Extensions view → `⋯` → *Install from VSIX*), or build it yourself with `npm install && npm run compile`.
+1. Install the extension from a `.vsix` (Extensions view → `⋯` → *Install from VSIX*), or build it yourself with `npm install && npm run compile`.
 2. Click the status bar item to start the server.
 3. Point your MCP client at `http://localhost:3000/mcp`.
 
@@ -41,6 +41,7 @@ WORKFLOW ESSENTIALS:
 2. CRITICAL: Run get_diagnostics_code after EVERY set of code changes before completing tasks
 3. For small edits (≤10 lines): use replace_lines_code with exact original content
 4. For large changes, new files, or uncertain content: use create_file_code with overwrite=true
+5. Before committing: run find_secrets_code and security_scan_code, fix what they flag
 
 EXPLORATION STRATEGY:
 - Start: list_files_code with path='.' (never recursive on root)
@@ -51,8 +52,18 @@ EXPLORATION STRATEGY:
 EDITING BEST PRACTICES:
 - Small modifications: replace_lines_code (requires exact original content match)
 - If replace_lines_code fails: read_file_code the target lines, then retry with correct content
+- Renaming a function or class across files: rename_symbol_code, never manual search and replace
 - Large changes: create_file_code with overwrite=true is more reliable
 - After any changes: get_diagnostics_code to check for errors
+
+MULTI-ROOT WORKSPACES:
+- With several folders open, every path tool accepts workspace='<folder name or number>'
+- Results show paths as FolderName/path; feed those strings straight back in, they resolve correctly
+
+BUILDS AND CHECKS:
+- Project tasks: run_task_code without arguments lists what exists, then run them by name
+- Tests and coverage: run_tests_code, get_test_coverage_code; style: format_document_code, lint_and_fix_code
+- Builds: build_project_code detects the command; if a tool misbehaves, get_server_info_code shows versions and per-tool call counts
 
 APPROVAL PROCESS:
 IMPORTANT: Only run code modification tools after presenting a plan and receiving explicit approval.
@@ -72,9 +83,19 @@ Workflow: outline → search → definition → read only what you need
 
 Every group maps to a key in the `vscode-mcp-server.enabledTools` setting and can be turned off individually. Useful when your coding agent already has some of these abilities: disable file/edit and keep only symbol tools, for example.
 
+### Multiple workspace folders
+
+Every tool that takes a path or a working directory also accepts an optional `workspace` parameter: an open folder's name (case-insensitive) or its 1-based position in the window. Relative paths resolve against that folder; leave the parameter out and the first folder is used, so single-folder setups behave exactly as before. A folder literally named "2" is matched by name before the number 2 means anything. `list_workspace_folders_code` prints the numbering to quote back.
+
+Paths round-trip in both directions: results are displayed as `FolderName/relative/path` when several folders are open, and that same form is accepted as input — as are absolute paths — so an output of one tool can be fed to the next without re-deriving which root it lives in.
+
+### Several VS Code windows, one server
+
+Windows do not fight over the port: the first one to start serves `http://localhost:3000/mcp` exactly as before, and every other VS Code window joins it automatically. There is still one client URL to configure, no matter how many windows are open — each joined window registers its open folders with the hosting window, which forwards every tool call to whichever window owns the target folder. Folder names, deduped labels (`proj-beta-2` when two windows open same-named folders) and the 1-based indexes all span the whole cluster; `list_workspace_folders_code` shows the global numbering and names the window behind each folder, and whole-workspace diagnostics or symbol searches fan out to every window at once. The status bar reads `MCP Server: 3000 (joined)` on a window sharing another's server. Close the hosting window and the remaining ones elect a new host within seconds — the client URL never changes.
+
 | Group | Tools | Covers |
 |---|---|---|
-| File | 5 | list, read (paged, truncated gracefully), move, rename, copy |
+| File | 6 | list, read (paged, truncated gracefully), move, rename, copy, open-folder inventory |
 | Edit | 2 | create files, replace line ranges with validation |
 | Diagnostics | 1 | errors/warnings from the Problems panel |
 | Symbol | 3 | fuzzy search, hover definitions, document outlines |
@@ -89,6 +110,8 @@ Every group maps to a key in the `vscode-mcp-server.enabledTools` setting and ca
 | Performance | 3 | bundle sizes, server report, command profiling |
 | Refactoring | 4 | rename symbol, extract function, duplicates, suggestions |
 | Frontend | 4 | accessibility, CSS quality, element inspection, unused CSS |
+| Workflow | 4 | npm/composer/Makefile tasks, project build, snippets, shell aliases |
+| Advanced | 2 | server info, installed extensions |
 
 ## Tool reference
 
@@ -97,6 +120,7 @@ Optional parameters are listed with their defaults.
 ### File tools
 - **list_files_code**: lists files and directories. Params: `path`, `recursive` (default false; never recursive on the root, the output is huge).
 - **read_file_code**: reads file contents. Params: `path`, `encoding` (default utf-8, or base64), `maxCharacters` (default 100000; 0 disables the limit), `startLine`/`endLine` (1-based, inclusive). Text above `maxCharacters` comes back truncated with a note giving the full size, so page through with `startLine`/`endLine` instead of retrying blind.
+- **list_workspace_folders_code**: lists every folder open in the window as `1. Name -> path`, the same numbering the `workspace` parameter accepts.
 - **move_file_code**: moves a file or directory through WorkspaceEdit. Params: `sourcePath`, `targetPath`, `overwrite` (default false).
 - **rename_file_code**: renames a file or directory. Params: `filePath`, `newName`, `overwrite` (default false).
 - **copy_file_code**: copies a file. Params: `sourcePath`, `targetPath`, `overwrite` (default false).
@@ -106,10 +130,10 @@ Optional parameters are listed with their defaults.
 - **replace_lines_code**: replaces a line range, validating against the original text. Params: `path`, `startLine`, `endLine`, `content`, `originalCode`.
 
 ### Diagnostics
-- **get_diagnostics_code**: lists errors and warnings. Params: `path` (optional; whole workspace if omitted), `severities` (default [0, 1]), `format` ('text' or 'json'), `includeSource` (default true). Run it after every round of changes.
+- **get_diagnostics_code**: lists errors and warnings. Params: `path` (optional; whole workspace if omitted), `severities` (default [0, 1]), `format` ('text' or 'json'), `includeSource` (default true). Run it after every round of changes. With several folders open, reported paths carry the owning folder's name as a prefix.
 
 ### Symbols
-- **search_symbols_code**: fuzzy search across the workspace. Params: `query`, `maxResults` (default 10).
+- **search_symbols_code**: fuzzy search across every open folder at once (VS Code providers span all roots). Params: `query`, `maxResults` (default 10). Results carry the owning folder's name in their location when several folders are open.
 - **get_symbol_definition_code**: hover data for a symbol: type, docs, source. Params: `path`, `line`, `symbol`.
 - **get_document_symbols_code**: hierarchical outline of a file. Params: `path`, `maxDepth`.
 
@@ -182,18 +206,31 @@ Frameworks auto-detect from `package.json`, `requirements.txt` or `pyproject.tom
 - **inspect_element_code**: markup usages plus every CSS rule styling a selector (.class, #id or tag). Params: `selector`, `path`.
 - **find_unused_css_code**: stylesheet classes and ids nothing references anywhere; quoted strings count as usage, so dynamically composed names rarely false-positive. Params: `path`.
 
+### Workflow
+
+Project tasks, builds, editor snippets and shared shell shortcuts, discovered from files the project already has. Nothing to configure.
+
+- **run_task_code**: lists or runs tasks from package.json scripts, composer.json scripts and Makefile targets, each through its own runner (`npm run`, `composer run-script`, `make`). When one name exists in several sources, qualify it (`make:build`). Params: `task`, `args`, `cwd` (tasks are discovered where you point), `timeout` ms (default 120000). Call it without `task` to list what exists.
+- **build_project_code**: detects the build command (package.json build script, Makefile, tsconfig.json) and runs it with a duration and exit code report. Params: `command` to override detection, `cwd`, `timeout` ms (default 300000).
+- **list_snippets_code**: lists snippets with a body preview, from `.vscode/snippets/*.json`, `.vscode/snippets/*.code-snippets` and the `.vscode/*.code-snippets` files VS Code itself creates; comment lines are tolerated. Params: `prefixFilter`.
+- **run_alias_code**: runs shortcuts from `.mcp-aliases.json` at the workspace root, so a whole team shares one set of commands; values are plain command strings or `{ command, description }`. Params: `name`, `args`, `cwd`, `timeout`.
+
+### Advanced
+- **get_server_info_code**: endpoint, extension and VS Code versions, Node version, platform, uptime, the open workspace folders and per-tool call counts since activation. The counters live in memory only; nothing is sent anywhere. Reports when VS Code runs inside a devcontainer, WSL or SSH remote, where a client on another machine needs the port forwarded.
+- **list_extensions_code**: installed extensions with versions and descriptions. Params: `filter` (case-insensitive substring on id or description), `includeBuiltins` (default false), `missingOnly` (lists the `.vscode/extensions.json` recommendations that are not installed instead).
+
 ## Configuration
 
 * `vscode-mcp-server.port`: server port (default 3000)
 * `vscode-mcp-server.host`: bind address (default 127.0.0.1)
 * `vscode-mcp-server.defaultEnabled`: start the server automatically on launch
-* `vscode-mcp-server.enabledTools`: which of the 15 groups above are active, all on by default. Changing it restarts the server.
+* `vscode-mcp-server.enabledTools`: which of the 17 groups above are active, all on by default. Changing it restarts the server.
 
 Each request gets its own stateless MCP session, so one slow or hung call never blocks the others.
 
 ## Caveats
 
-One workspace at a time, local connections only. Shell execution means a misbehaving client can run commands on your machine: keep the port closed to your network and only connect clients you trust. No authentication yet; the MCP auth spec is still moving.
+Multiple workspace folders are supported; tools pick one through the `workspace` parameter described above. Local connections only. Every VS Code window shares the one server automatically — extra windows join the first one, so there is nothing to configure per window (a foreign program squatting on the port still reports an explicit already-in-use error, and windows on different extension versions refuse to mix). Shell execution means a misbehaving client can run commands on your machine: keep the port closed to your network and only connect clients you trust. No authentication yet; the MCP auth spec is still moving. Inside a devcontainer, WSL or SSH remote the server listens within that environment, so forward the port or connect from a client inside the same remote.
 
 ## Credits and license
 

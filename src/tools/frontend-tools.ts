@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
+import { resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
 const DEFAULT_EXCLUDES = [
 	'**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/*.min.js',
@@ -44,12 +45,6 @@ function globToRegExp(pattern: string): RegExp {
 	return new RegExp(`^${body}$`);
 }
 
-async function getWorkspaceRoot(): Promise<string> {
-	if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-		throw new Error('No workspace folder is open');
-	}
-	return vscode.workspace.workspaceFolders[0].uri.fsPath;
-}
 
 function collectFiles(rootDir: string, excludeRegexes: RegExp[], extensions?: string[]): Array<{ fullPath: string; relativePath: string }> {
 	const files: Array<{ fullPath: string; relativePath: string }> = [];
@@ -131,11 +126,10 @@ const A11Y_RULES: A11yRule[] = [
 async function auditAccessibility(options: {
 	searchPath?: string;
 	exclude?: string[];
+	workspace?: string;
 }): Promise<{ scanned: number; findings: Finding[] }> {
-	const workspaceRoot = await getWorkspaceRoot();
-	const rootDir = options.searchPath
-		? path.isAbsolute(options.searchPath) ? options.searchPath : path.join(workspaceRoot, options.searchPath)
-		: workspaceRoot;
+	const target = resolveRelativeToolPath(options.searchPath ?? '.', options.workspace);
+	const rootDir = target.dir;
 	const excludeRegexes = (options.exclude ?? DEFAULT_EXCLUDES).map(globToRegExp);
 	const files = collectFiles(rootDir, excludeRegexes, MARKUP_EXTENSIONS);
 
@@ -172,7 +166,7 @@ async function auditAccessibility(options: {
 				findings.push({
 					severity: rule.severity,
 					kind: rule.kind,
-					file: file.relativePath,
+					file: `${target.displayPrefix}${file.relativePath}`,
 					line,
 					snippet: m[0].replace(/\s+/g, ' ').trim().slice(0, 120)
 				});
@@ -251,11 +245,9 @@ function loadCssRules(rootDir: string, excludeRegexes: RegExp[]): CssRule[] {
 
 /* ---------------- analyze_css_code ---------------- */
 
-async function analyzeCss(options: { searchPath?: string }): Promise<{ scanned: number; findings: Finding[] }> {
-	const workspaceRoot = await getWorkspaceRoot();
-	const rootDir = options.searchPath
-		? path.isAbsolute(options.searchPath) ? options.searchPath : path.join(workspaceRoot, options.searchPath)
-		: workspaceRoot;
+async function analyzeCss(options: { searchPath?: string; workspace?: string }): Promise<{ scanned: number; findings: Finding[] }> {
+	const target = resolveRelativeToolPath(options.searchPath ?? '.', options.workspace);
+	const rootDir = target.dir;
 	const excludeRegexes = DEFAULT_EXCLUDES.map(globToRegExp);
 
 	const cssFiles = collectFiles(rootDir, excludeRegexes, STYLE_EXTENSIONS);
@@ -330,6 +322,9 @@ async function analyzeCss(options: { searchPath?: string }): Promise<{ scanned: 
 	}
 
 	findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+	for (const finding of findings) {
+		finding.file = `${target.displayBase}${finding.file}`;
+	}
 	return { scanned: cssFiles.length, findings };
 }
 
@@ -338,11 +333,10 @@ async function analyzeCss(options: { searchPath?: string }): Promise<{ scanned: 
 async function inspectElement(options: {
 	selector: string;
 	searchPath?: string;
+	workspace?: string;
 }): Promise<string> {
-	const workspaceRoot = await getWorkspaceRoot();
-	const rootDir = options.searchPath
-		? path.isAbsolute(options.searchPath) ? options.searchPath : path.join(workspaceRoot, options.searchPath)
-		: workspaceRoot;
+	const target = resolveRelativeToolPath(options.searchPath ?? '.', options.workspace);
+	const rootDir = target.dir;
 
 	let kind: 'class' | 'id' | 'tag';
 	let name: string;
@@ -403,7 +397,7 @@ async function inspectElement(options: {
 				}
 			}
 			if (hit && usages.length < 20) {
-				usages.push({ file: file.relativePath, line: i + 1, text: lines[i].trim().slice(0, 120) });
+				usages.push({ file: `${target.displayPrefix}${file.relativePath}`, line: i + 1, text: lines[i].trim().slice(0, 120) });
 			}
 		}
 	}
@@ -434,7 +428,7 @@ async function inspectElement(options: {
 	} else {
 		text += `CSS rules (${cssRules.length}):\n`;
 		for (const r of cssRules.slice(0, 10)) {
-			text += `\t${r.selector}  (${r.file}:${r.line})\n\t    ${r.body.replace(/\s+/g, ' ').trim().slice(0, 200)}\n`;
+			text += `\t${r.selector}  (${target.displayBase}${r.file}:${r.line})\n\t    ${r.body.replace(/\s+/g, ' ').trim().slice(0, 200)}\n`;
 		}
 		if (cssRules.length > 10) {
 			text += `\t... and ${cssRules.length - 10} more\n`;
@@ -445,11 +439,9 @@ async function inspectElement(options: {
 
 /* ---------------- find_unused_css_code ---------------- */
 
-async function findUnusedCss(options: { searchPath?: string }): Promise<string> {
-	const workspaceRoot = await getWorkspaceRoot();
-	const rootDir = options.searchPath
-		? path.isAbsolute(options.searchPath) ? options.searchPath : path.join(workspaceRoot, options.searchPath)
-		: workspaceRoot;
+async function findUnusedCss(options: { searchPath?: string; workspace?: string }): Promise<string> {
+	const target = resolveRelativeToolPath(options.searchPath ?? '.', options.workspace);
+	const rootDir = target.dir;
 	const excludeRegexes = DEFAULT_EXCLUDES.map(globToRegExp);
 
 	interface Def { type: 'class' | 'id'; file: string; line: number }
@@ -511,7 +503,7 @@ async function findUnusedCss(options: { searchPath?: string }): Promise<string> 
 	}
 	let text = `# Unused CSS\n\n${unused.length} of ${defined.size} selector(s) never appear in any markup or script string:\n\n`;
 	for (const u of unused.slice(0, 50)) {
-		text += `- ${u.def.type === 'class' ? '.' : '#'}${u.name} (${u.def.file}:${u.def.line})\n`;
+		text += `- ${u.def.type === 'class' ? '.' : '#'}${u.name} (${target.displayBase}${u.def.file}:${u.def.line})\n`;
 	}
 	if (unused.length > 50) {
 		text += `... and ${unused.length - 50} more\n`;
@@ -526,18 +518,20 @@ export function registerFrontendTools(server: McpServer): void {
 
 WHEN TO USE: before shipping frontend changes, reviewing generated markup, quick WCAG hygiene pass.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
-		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude')
-	}, async ({ path: searchPath, exclude }) => {
-		const result = await auditAccessibility({ searchPath, exclude });
+		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: searchPath, exclude, workspace }) => {
+		const result = await auditAccessibility({ searchPath, exclude, workspace });
 		return { content: [{ type: 'text', text: formatFindings('# Accessibility Audit', result.scanned, result.findings) }] };
 	});
 
 	server.tool('analyze_css_code', `Reports CSS quality issues per stylesheet: selectors defined more than once, properties repeated inside one rule (only the last wins), empty rule blocks, heavy !important use.
 
 WHEN TO USE: cleaning up stylesheets, hunting why a style "doesn't apply", pre-refactor review.`, {
-		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)')
-	}, async ({ path: searchPath }) => {
-		const result = await analyzeCss({ searchPath });
+		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: searchPath, workspace }) => {
+		const result = await analyzeCss({ searchPath, workspace });
 		return { content: [{ type: 'text', text: formatFindings('# CSS Analysis', result.scanned, result.findings) }] };
 	});
 
@@ -545,18 +539,20 @@ WHEN TO USE: cleaning up stylesheets, hunting why a style "doesn't apply", pre-r
 
 WHEN TO USE: answering "where does this class come from / what does it do", impact check before changing a style.`, {
 		selector: z.string().describe('Selector to inspect, e.g. ".btn", "#app" or "nav"'),
-		path: z.string().optional().describe('Subdirectory to search (default: whole workspace)')
-	}, async ({ selector, path: searchPath }) => {
-		const text = await inspectElement({ selector, searchPath });
+		path: z.string().optional().describe('Subdirectory to search (default: whole workspace)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ selector, path: searchPath, workspace }) => {
+		const text = await inspectElement({ selector, searchPath, workspace });
 		return { content: [{ type: 'text', text }] };
 	});
 
 	server.tool('find_unused_css_code', `Lists CSS classes and ids that never appear anywhere in markup or scripts. Quoted strings anywhere count as usage, so dynamically composed names are almost never false positives.
 
 WHEN TO USE: slimming dead stylesheets before a redesign or performance pass.`, {
-		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)')
-	}, async ({ path: searchPath }) => {
-		const text = await findUnusedCss({ searchPath });
+		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
+		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+	}, async ({ path: searchPath, workspace }) => {
+		const text = await findUnusedCss({ searchPath, workspace });
 		return { content: [{ type: 'text', text }] };
 	});
 }

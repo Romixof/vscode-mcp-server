@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { resolveInputPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
 /**
  * Creates a new file in the VS Code workspace using WorkspaceEdit
@@ -15,19 +16,12 @@ export async function createWorkspaceFile(
     workspacePath: string,
     content: string,
     overwrite: boolean = false,
-    ignoreIfExists: boolean = false
+    ignoreIfExists: boolean = false,
+    workspace?: string
 ): Promise<void> {
     console.log(`[createWorkspaceFile] Starting with path: ${workspacePath}, overwrite: ${overwrite}, ignoreIfExists: ${ignoreIfExists}`);
-    
-    if (!vscode.workspace.workspaceFolders) {
-        throw new Error('No workspace folder is open');
-    }
 
-    const workspaceFolder = vscode.workspace.workspaceFolders[0];
-    const workspaceUri = workspaceFolder.uri;
-    
-    // Create URI for the target file
-    const fileUri = vscode.Uri.joinPath(workspaceUri, workspacePath);
+    const fileUri = resolveInputPath(workspacePath, workspace);
     console.log(`[createWorkspaceFile] File URI: ${fileUri.fsPath}`);
 
     try {
@@ -77,19 +71,12 @@ export async function replaceWorkspaceFileLines(
     startLine: number,
     endLine: number,
     content: string,
-    originalCode: string
+    originalCode: string,
+    workspace?: string
 ): Promise<void> {
     console.log(`[replaceWorkspaceFileLines] Starting with path: ${workspacePath}, lines: ${startLine}-${endLine}`);
-    
-    if (!vscode.workspace.workspaceFolders) {
-        throw new Error('No workspace folder is open');
-    }
 
-    const workspaceFolder = vscode.workspace.workspaceFolders[0];
-    const workspaceUri = workspaceFolder.uri;
-    
-    // Create URI for the target file
-    const fileUri = vscode.Uri.joinPath(workspaceUri, workspacePath);
+    const fileUri = resolveInputPath(workspacePath, workspace);
     console.log(`[replaceWorkspaceFileLines] File URI: ${fileUri.fsPath}`);
 
     try {
@@ -166,14 +153,15 @@ export function registerEditTools(server: McpServer): void {
             path: z.string().describe('The path to the file to create'),
             content: z.string().describe('The content to write to the file'),
             overwrite: z.boolean().optional().default(false).describe('Whether to overwrite if the file exists'),
-            ignoreIfExists: z.boolean().optional().default(false).describe('Whether to ignore if the file exists')
+            ignoreIfExists: z.boolean().optional().default(false).describe('Whether to ignore if the file exists'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ path, content, overwrite = false, ignoreIfExists = false }): Promise<CallToolResult> => {
+        async ({ path, content, overwrite = false, ignoreIfExists = false, workspace }): Promise<CallToolResult> => {
             console.log(`[create_file] Tool called with path=${path}, overwrite=${overwrite}, ignoreIfExists=${ignoreIfExists}`);
             
             try {
                 console.log('[create_file] Creating file');
-                await createWorkspaceFile(path, content, overwrite, ignoreIfExists);
+                await createWorkspaceFile(path, content, overwrite, ignoreIfExists, workspace);
                 
                 const result: CallToolResult = {
                     content: [
@@ -209,9 +197,10 @@ export function registerEditTools(server: McpServer): void {
             startLine: z.number().describe('The start line number (1-based, inclusive)'),
             endLine: z.number().describe('The end line number (1-based, inclusive)'),
             content: z.string().describe('The new content to replace the lines with'),
-            originalCode: z.string().describe('The original code for validation - must match exactly')
+            originalCode: z.string().describe('The original code for validation - must match exactly'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ path, startLine, endLine, content, originalCode }): Promise<CallToolResult> => {
+        async ({ path, startLine, endLine, content, originalCode, workspace }): Promise<CallToolResult> => {
             console.log(`[replace_lines_code] Tool called with path=${path}, startLine=${startLine}, endLine=${endLine}`);
             
             // Convert 1-based input to 0-based for VS Code API
@@ -220,7 +209,7 @@ export function registerEditTools(server: McpServer): void {
             
             try {
                 console.log('[replace_lines_code] Replacing lines');
-                await replaceWorkspaceFileLines(path, zeroBasedStartLine, zeroBasedEndLine, content, originalCode);
+                await replaceWorkspaceFileLines(path, zeroBasedStartLine, zeroBasedEndLine, content, originalCode, workspace);
                 
                 const result: CallToolResult = {
                     content: [
