@@ -73,6 +73,16 @@ export class MCPServer {
             this.oauthRouterInstance = createOAuthRouter(this.port, {
                 getAccessToken: () => this.authToken,
                 getLastClientName: () => undefined,
+                loadClients: () => {
+                    const raw = this.extensionContext?.globalState.get<Array<{ client_id: string; redirect_uris: string[]; client_name?: string }>>('vscode-mcp.oauthClients');
+                    return Array.isArray(raw)
+                        ? raw.filter(c => typeof c?.client_id === 'string' && Array.isArray(c.redirect_uris))
+                              .map(c => ({ client_id: c.client_id, redirect_uris: c.redirect_uris, client_name: c.client_name }))
+                        : [];
+                },
+                saveClients: list => {
+                    void this.extensionContext?.globalState.update('vscode-mcp.oauthClients', list);
+                },
             });
         }
         return this.oauthRouterInstance;
@@ -123,7 +133,7 @@ export class MCPServer {
             this as unknown as ClusterHost,
             this.port,
             this.host,
-            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.12.44"
+            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.12.45"
         );
         // Spokes present the shared per-machine secret on cluster calls; both
         // windows read the same globalState so this converges naturally
@@ -154,7 +164,7 @@ export class MCPServer {
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.12.44",
+            version: "0.12.45",
         }, {
             capabilities: {
                 logging: {},
