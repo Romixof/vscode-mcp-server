@@ -234,7 +234,7 @@ Each request gets its own stateless MCP session, so one slow or hung call never 
 
 ## Security
 
-Every call to the endpoint needs a credential. On first start a random token is generated and shown once in a notification (with a copy button); you can retrieve it any time through `get_server_info_code` (the Auth line) or the **MCP Server: Copy access token** command. Clients send it on every request as `Authorization: Bearer <token>` or `X-MCP-Token: <token>` — requests without it get a 401 before any tool executes.
+Every call to the endpoint carries a credential. On first start a random token is generated and shown once in a notification with a copy button; you can retrieve it any time through `get_server_info_code` (the Auth line) or the **MCP Server: Copy access token** command. Clients send it on every request as `Authorization: Bearer ***` or `X-MCP-Token`, and requests without it get a 401 before any tool executes.
 
 Cross-origin browser requests are rejected with 403 outright, so visiting a hostile page cannot silently reach your files even with the port number known.
 
@@ -242,13 +242,13 @@ Three modes under `vscode-mcp-server.auth.mode`:
 
 - `session-token` (default): one random secret per installation, persisted across window reloads.
 - `static-token`: you pin the secret in `auth.staticToken`; handy for scripted setups.
-- `oauth`: MCP OAuth 2.1 for remote clients that require it (Mammouth today). Clients discover `/.well-known/oauth-protected-resource`, register themselves at `/register`, and the authorization shows a VS Code consent dialog before any code is issued. PKCE S256 is mandatory; issued access tokens are this installation's session secret.
+- `oauth`: MCP OAuth 2.1 for remote clients that require it (Mammouth today). Clients discover `/.well-known/oauth-protected-resource` and register themselves at `/register`; the authorization shows a VS Code consent dialog before any code is issued. PKCE S256 is mandatory, and issued access tokens are this installation's session secret.
 
-One honest limit: a token proves whoever holds it may act here — it cannot prove they are an AI.
+One honest limit: a token proves whoever holds it may act here. It cannot prove they are an AI.
 
 ### Reaching the server from outside
 
-The OAuth metadata always announces the origin the request actually arrived through (`Host` / `X-Forwarded-Host` header), so any front door works without configuration:
+The OAuth metadata always announce the origin the request actually arrived through (`Host` / `X-Forwarded-Host` header), so any front door works without configuration:
 
 | Setup | What the user does | What the metadata announce |
 |---|---|---|
@@ -258,9 +258,9 @@ The OAuth metadata always announces the origin the request actually arrived thro
 | cloudflared | `cloudflared tunnel --url http://localhost:3000` | the `trycloudflare.com` URL |
 | ngrok | `ngrok http 3000` | the `ngrok-free.app` URL |
 
-No tunnel-specific setting exists on purpose: run the tunnel, connect through it, and discovery reflects it. For remote clients that POST from a browser context (not server-side), also add the public origin to `vscode-mcp-server.auth.allowedOrigins`; pure server-to-server calls carry no Origin header and pass regardless.
+No tunnel-specific setting exists on purpose: run the tunnel, connect through it, and discovery reflects it. Remote clients that POST from a browser context should also have their public origin added to `vscode-mcp-server.auth.allowedOrigins`; pure server-to-server calls carry no Origin header and pass regardless.
 
-Connecting [Mammouth](https://mammouth.ai): set `auth.mode` to `oauth`, expose the port through any of the tunnels above, then give Mammouth the public URL — it discovers the OAuth endpoints itself. Log into mammouth.ai in the same browser first; their flow bounces through their login page otherwise. Approve the VS Code consent dialog when it appears. When their direct API connection ships, switching to `static-token` is a two-line change.
+Connecting [Mammouth](https://mammouth.ai): set `auth.mode` to `oauth`, expose the port through any of the tunnels above, then give Mammouth the public URL. It discovers the OAuth endpoints itself. Log into mammouth.ai in the same browser first; their flow bounces through their login page otherwise. Approve the VS Code consent dialog when it appears. When their direct API connection ships, switching to `static-token` is a two-line change.
 
 ## Caveats
 

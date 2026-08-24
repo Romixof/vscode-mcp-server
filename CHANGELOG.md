@@ -8,17 +8,17 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
-- Authentication on the MCP endpoint. Every call now needs a credential: a per-session bearer token by default (generated once, shown at activation, always available through `get_server_info_code` and the "MCP Server: Copy access token" command), a static token you pin yourself, or MCP OAuth 2.1 with dynamic client registration and S256 PKCE for remote clients. Requests without a valid credential get a 401 before any tool runs.
-- Origin validation kills browser drive-by: a web page you visit can no longer POST to your local server behind your back — cross-origin requests get a 403 before tokens are even considered. Extra origins can be allowlisted for tunneled clients (`vscode-mcp-server.auth.allowedOrigins`).
+- Authentication on the MCP endpoint. Every call now carries a credential: a per-session bearer token by default, a static token you pin yourself, or MCP OAuth 2.1 with dynamic client registration and S256 PKCE for remote clients. Requests without a valid credential get a 401 before any tool runs.
+- Origin validation. A web page you visit can no longer POST to your local server behind your back: cross-origin requests get a 403 before tokens are even considered. Extra origins can be allowlisted for tunneled clients (`vscode-mcp-server.auth.allowedOrigins`).
 - New setting `vscode-mcp-server.auth.mode` with four values: `session-token` (default), `static-token`, `oauth`, `none`. `none` restores the previous open behavior and is documented as unsafe.
 
 ### Changed
 
-- Clients configured before 0.12.0 must now send the access token with every request: `Authorization: Bearer <token>` or `X-MCP-Token: <token>`. The one-time setup is announced by a notification at activation.
+- Clients configured before 0.12.0 must now send the access token with every request, as `Authorization: Bearer ***` or `X-MCP-Token`. A notification at activation walks through the one-time setup.
 
 ### Security
 
-- Token comparison runs in constant time; the token never appears in shell captures or logs, only in server info (to authenticated callers), the copy command and the activation notification.
+- Token comparison runs in constant time. The token never appears in shell captures or logs; it shows up only in server info (to authenticated callers), the copy command and the activation notification.
 
 ## [0.11.1]
 
