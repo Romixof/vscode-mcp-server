@@ -12,7 +12,7 @@ const DEFAULT_EXCLUDES = [
 
 const MARKUP_EXTENSIONS = ['.html', '.htm', '.jsx', '.tsx', '.vue', '.php'];
 const STYLE_EXTENSIONS = ['.css'];
-// where class/id names can also appear dynamically (classList, querySelector, clsx...)
+
 const TOKEN_EXTENSIONS = [...MARKUP_EXTENSIONS, '.js', '.ts', '.mjs', '.cjs'];
 
 interface Finding {
@@ -45,7 +45,6 @@ function globToRegExp(pattern: string): RegExp {
 	return new RegExp(`^${body}$`);
 }
 
-
 function collectFiles(rootDir: string, excludeRegexes: RegExp[], extensions?: string[]): Array<{ fullPath: string; relativePath: string }> {
 	const files: Array<{ fullPath: string; relativePath: string }> = [];
 	function walk(dir: string): void {
@@ -72,7 +71,6 @@ function collectFiles(rootDir: string, excludeRegexes: RegExp[], extensions?: st
 	return files;
 }
 
-// built at runtime rather than as an escape so no tooling can turn it into a raw byte
 const NUL = String.fromCharCode(0);
 
 function stripHtmlComments(content: string): string {
@@ -96,8 +94,6 @@ function formatFindings(title: string, scanned: number, findings: Finding[]): st
 	}
 	return output;
 }
-
-/* ---------------- audit_accessibility_code ---------------- */
 
 interface A11yRule {
 	kind: string;
@@ -178,8 +174,6 @@ async function auditAccessibility(options: {
 	return { scanned: files.length, findings };
 }
 
-/* ---------------- CSS parsing shared by three tools ---------------- */
-
 interface CssRule {
 	file: string;
 	selector: string;
@@ -211,7 +205,7 @@ function parseCssFile(content: string, file: { fullPath: string; relativePath: s
 				}
 				const closeIdx = Math.max(i + 1, j - 1);
 				rules.push({ file: file.relativePath, selector, body: content.slice(i + 1, closeIdx), line: lineAt(i), fullPath: file.fullPath });
-				// rules nested inside @media/@supports blocks are analysed too
+
 				parseSegment(i + 1, closeIdx);
 				buffer = '';
 				i = j;
@@ -243,8 +237,6 @@ function loadCssRules(rootDir: string, excludeRegexes: RegExp[]): CssRule[] {
 	return rules;
 }
 
-/* ---------------- analyze_css_code ---------------- */
-
 async function analyzeCss(options: { searchPath?: string; workspace?: string }): Promise<{ scanned: number; findings: Finding[] }> {
 	const target = resolveRelativeToolPath(options.searchPath ?? '.', options.workspace);
 	const rootDir = target.dir;
@@ -260,7 +252,6 @@ async function analyzeCss(options: { searchPath?: string; workspace?: string }):
 
 	const findings: Finding[] = [];
 
-	// duplicate selectors and repeated properties inside one rule
 	for (const [file, rules] of rulesByFile) {
 		const seenSelectors = new Map<string, number[]>();
 		for (const rule of rules) {
@@ -327,8 +318,6 @@ async function analyzeCss(options: { searchPath?: string; workspace?: string }):
 	}
 	return { scanned: cssFiles.length, findings };
 }
-
-/* ---------------- inspect_element_code ---------------- */
 
 async function inspectElement(options: {
 	selector: string;
@@ -437,8 +426,6 @@ async function inspectElement(options: {
 	return text;
 }
 
-/* ---------------- find_unused_css_code ---------------- */
-
 async function findUnusedCss(options: { searchPath?: string; workspace?: string }): Promise<string> {
 	const target = resolveRelativeToolPath(options.searchPath ?? '.', options.workspace);
 	const rootDir = target.dir;
@@ -460,8 +447,6 @@ async function findUnusedCss(options: { searchPath?: string; workspace?: string 
 		}
 	}
 
-	// every quoted string in code/markup counts as a possible usage so that
-	// dynamically-built names are reported unused as rarely as possible
 	const usedTokens = new Set<string>();
 	for (const file of collectFiles(rootDir, excludeRegexes, TOKEN_EXTENSIONS)) {
 		let content: string;
@@ -480,7 +465,7 @@ async function findUnusedCss(options: { searchPath?: string; workspace?: string 
 				usedTokens.add(token);
 			}
 		}
-		// template literals too — class names composed dynamically still count
+
 		const tplRe = /`([^`\n]{1,400})`/g;
 		let tm: RegExpExecArray | null;
 		while ((tm = tplRe.exec(content)) !== null) {
@@ -510,8 +495,6 @@ async function findUnusedCss(options: { searchPath?: string; workspace?: string 
 	}
 	return text;
 }
-
-/* ---------------- registration ---------------- */
 
 export function registerFrontendTools(server: McpServer): void {
 	server.tool('audit_accessibility_code', `Audits HTML/JSX/Vue/PHP markup for common accessibility problems: images without alt text, inputs without labels or aria attributes, positive tabindex, clickable div/span with onclick, empty links, html tag without lang.

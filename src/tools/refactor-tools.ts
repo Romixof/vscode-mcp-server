@@ -10,16 +10,15 @@ const DEFAULT_EXCLUDES = [
 	'**/*.map', '**/vendor/**', '**/.next/**', '**/target/**', '**/__pycache__/**'
 ];
 
-// extraction stays limited to languages whose function syntax we emit correctly
 const RENAME_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.php'];
 const EXTRACT_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py'];
 const DUPLICATE_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.php'];
 const ANALYZE_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py'];
 
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
-// line separator for window hashing; chr(1) can never occur in normalized code lines
+
 const SEPARATOR = String.fromCharCode(1);
-// built at runtime rather than as an escape so no tooling can turn it into a raw byte
+
 const NUL = String.fromCharCode(0);
 
 function globToRegExp(pattern: string): RegExp {
@@ -43,7 +42,6 @@ function globToRegExp(pattern: string): RegExp {
 	}
 	return new RegExp(`^${body}$`);
 }
-
 
 function collectFiles(rootDir: string, excludeRegexes: RegExp[]): Array<{ fullPath: string; relativePath: string }> {
 	const files: Array<{ fullPath: string; relativePath: string }> = [];
@@ -77,8 +75,6 @@ function assertIdentifier(name: string, label: string): void {
 	}
 }
 
-/* ---------------- rename_symbol_code ---------------- */
-
 async function renameSymbol(options: {
 	oldName: string;
 	newName: string;
@@ -98,7 +94,6 @@ async function renameSymbol(options: {
 	const files = collectFiles(workspaceRoot, excludeRegexes)
 		.filter(f => RENAME_EXTENSIONS.includes(path.extname(f.fullPath)));
 
-	// custom boundaries instead of \b so names containing $ still match
 	const wordRe = new RegExp(`(?<![A-Za-z0-9_$])${options.oldName}(?![A-Za-z0-9_$])`, 'g');
 	const changed: Array<{ file: string; count: number }> = [];
 	let total = 0;
@@ -126,8 +121,6 @@ async function renameSymbol(options: {
 
 	return { scanned: files.length, changed, total };
 }
-
-/* ---------------- extract_function_code ---------------- */
 
 async function extractFunction(options: {
 	filePath: string;
@@ -165,7 +158,6 @@ async function extractFunction(options: {
 	const dedented = lines.slice(startLine - 1, endLine)
 		.map(l => l.startsWith(baseIndent) ? l.slice(baseIndent.length) : l.replace(/^\s+/, ''));
 
-	// reuse a deeper indent unit already present in the block when there is one
 	const deeperIndent = dedented.map(l => (/^\s+/.exec(l) || [''])[0]).find(s => s.length > 0);
 	const unit = isPython ? (deeperIndent || '    ') : '\t';
 	const indentedBody = dedented.map(l => l.length > 0 ? unit + l : l);
@@ -204,8 +196,6 @@ async function extractFunction(options: {
 	].join('\n');
 }
 
-/* ---------------- find_duplicate_code_code ---------------- */
-
 function normalizeCodeLine(line: string): string | null {
 	if (!line.trim()) {
 		return null;
@@ -228,7 +218,6 @@ async function findDuplicates(options: {
 
 	interface Occurrence { file: string; line: number }
 
-	// normalized lines kept at their original indexes so windows can require contiguity
 	const fileLines = new Map<string, Array<string | null>>();
 	for (const file of collectFiles(rootDir, excludeRegexes)
 		.filter(f => DUPLICATE_EXTENSIONS.includes(path.extname(f.fullPath)))) {
@@ -269,8 +258,6 @@ async function findDuplicates(options: {
 		.filter(([, occ]) => occ.length >= 2)
 		.sort((a, b) => a[1][0].file.localeCompare(b[1][0].file) || a[1][0].line - b[1][0].line);
 
-	// overlapping windows of one longer duplicate collapse into a single group,
-	// grown greedily against the first pair of occurrences
 	const acceptedSpans = new Map<string, Array<[number, number]>>();
 	const groups: Array<{ length: number; locations: Array<{ file: string; line: number }>; snippet: string[] }> = [];
 
@@ -316,8 +303,6 @@ async function findDuplicates(options: {
 	return { scanned: fileLines.size, groups };
 }
 
-/* ---------------- suggest_refactoring_code ---------------- */
-
 interface FuncStat {
 	file: string;
 	line: number;
@@ -340,7 +325,7 @@ function jsFunctionStats(content: string, file: string): FuncStat[] {
 		while ((m = decl.exec(content)) !== null) {
 			const braceIdx = content.indexOf('{', m.index + m[0].length - 1);
 			if (braceIdx === -1) {
-				continue; // expression-bodied arrow, nothing measurable
+				continue;
 			}
 			let depth = 0;
 			let end = -1;
@@ -375,7 +360,6 @@ function jsFunctionStats(content: string, file: string): FuncStat[] {
 	return stats;
 }
 
-// tab counts as 4 columns for nesting estimates
 function indentWidth(line: string): number {
 	let width = 0;
 	for (const ch of line) {
@@ -483,8 +467,6 @@ async function suggestRefactoring(options: {
 	}
 	return { scannedFunctions: all.length, flagged };
 }
-
-/* ---------------- registration ---------------- */
 
 export function registerRefactorTools(server: McpServer): void {
 	server.tool('rename_symbol_code', `Renames a symbol (variable, function, class) across every code file in the workspace using word-boundary matching.

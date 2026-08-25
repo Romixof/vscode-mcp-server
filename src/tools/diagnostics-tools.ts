@@ -4,15 +4,9 @@ import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveInputPath, workspaceDisplayPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
-/**
- * Get diagnostics for a specific file or every open file
- * @param filePath Optional file path to check (relative to the selected workspace)
- * @returns Array of [Uri, Diagnostic[]] tuples
- */
 function getDiagnostics(filePath?: string, workspace?: string): [vscode.Uri, vscode.Diagnostic[]][] {
     console.log(`[getDiagnostics] Starting with filePath: ${filePath || 'all files'}`);
 
-    // If filePath is provided, get diagnostics for that file only
     if (filePath) {
         const fileUri = resolveInputPath(filePath, workspace);
         console.log(`[getDiagnostics] Getting diagnostics for file: ${fileUri.fsPath}`);
@@ -21,16 +15,10 @@ function getDiagnostics(filePath?: string, workspace?: string): [vscode.Uri, vsc
         return diagnostics.length > 0 ? [[fileUri, diagnostics]] : [];
     }
 
-    // Otherwise, get diagnostics for all files
     console.log('[getDiagnostics] Getting diagnostics for all files');
     return vscode.languages.getDiagnostics();
 }
 
-/**
- * Get severity name from DiagnosticSeverity enum
- * @param severity The diagnostic severity level
- * @returns String representation of the severity
- */
 function getSeverityName(severity: vscode.DiagnosticSeverity): string {
     switch (severity) {
         case vscode.DiagnosticSeverity.Error:
@@ -46,23 +34,14 @@ function getSeverityName(severity: vscode.DiagnosticSeverity): string {
     }
 }
 
-/**
- * Format diagnostics for output
- * @param diagnostics Array of diagnostics to format
- * @param severities Array of severity levels to include
- * @param format Format of the output (text or json)
- * @param includeSource Whether to include the diagnostic source
- * @returns Formatted diagnostics as string or object
- */
 function formatDiagnostics(
-    diagnostics: [vscode.Uri, vscode.Diagnostic[]][], 
+    diagnostics: [vscode.Uri, vscode.Diagnostic[]][],
     severities: vscode.DiagnosticSeverity[],
     format: 'text' | 'json' = 'text',
     includeSource: boolean = true
 ): string | object {
     console.log(`[formatDiagnostics] Format: ${format}, Include source: ${includeSource}`);
-    
-    // Filter and transform diagnostics
+
     const result: Array<{
         file: string;
         line: number;
@@ -71,70 +50,62 @@ function formatDiagnostics(
         message: string;
         source?: string;
     }> = [];
-    
+
     let totalIssues = 0;
-    
+
     for (const [uri, fileDiagnostics] of diagnostics) {
         const filePath = workspaceDisplayPath(uri);
-        
+
         for (const diagnostic of fileDiagnostics) {
-            // Skip diagnostics with severity not in the specified list
+
             if (!severities.includes(diagnostic.severity)) {
                 continue;
             }
-            
+
             totalIssues++;
-            
-            // Convert the diagnostic to a structured object
+
             const issue = {
                 file: filePath,
-                line: diagnostic.range.start.line + 1, // Convert to 1-based line number
-                column: diagnostic.range.start.character + 1, // Convert to 1-based column number
+                line: diagnostic.range.start.line + 1,
+                column: diagnostic.range.start.character + 1,
                 severity: getSeverityName(diagnostic.severity),
                 message: diagnostic.message,
             };
-            
-            // Add source if requested
+
             if (includeSource && diagnostic.source) {
                 Object.assign(issue, { source: diagnostic.source });
             }
-            
+
             result.push(issue);
         }
     }
-    
-    // Return formatted result based on requested format
+
     if (format === 'json') {
         return result;
     }
-    
-    // Format as text
+
     if (result.length === 0) {
         return 'No issues found.';
     }
-    
+
     let output = `Found ${totalIssues} issue(s):\n\n`;
-    
+
     for (const issue of result) {
         output += `${issue.severity}: ${issue.file}:${issue.line}:${issue.column}\n`;
         output += `  ${issue.message}\n`;
-        
+
         if (includeSource && issue.source) {
             output += `  Source: ${issue.source}\n`;
         }
-        
+
         output += '\n';
     }
-    
+
     return output;
 }
 
-/**
- * Registers MCP diagnostics-related tools with the server
- * @param server MCP server instance
- */
 export function registerDiagnosticsTools(server: McpServer): void {
-    // Add get_diagnostics tool
+
     server.tool(
         'get_diagnostics_code',
         `CRITICAL: Run this after EVERY series of code changes to check for errors before completing tasks.
@@ -157,16 +128,16 @@ export function registerDiagnosticsTools(server: McpServer): void {
             try {
                 console.log('[get_diagnostics] Getting diagnostics');
                 const diagnostics = getDiagnostics(path, workspace);
-                
+
                 console.log(`[get_diagnostics] Found diagnostics for ${diagnostics.length} files`);
                 const formattedResult = formatDiagnostics(diagnostics, severities, format, includeSource);
-                
+
                 const result: CallToolResult = {
                     content: [
                         {
                             type: 'text',
-                            text: format === 'json' 
-                                ? JSON.stringify(formattedResult, null, 2) 
+                            text: format === 'json'
+                                ? JSON.stringify(formattedResult, null, 2)
                                 : formattedResult as string
                         }
                     ]

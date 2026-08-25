@@ -15,9 +15,6 @@ interface ExtensionSummary {
 	description: string;
 }
 
-/**
- * Lists installed extensions, optionally skipping the built-in vscode.* ones.
- */
 function collectInstalledExtensions(includeBuiltins: boolean): ExtensionSummary[] {
 	return vscode.extensions.all
 		.filter(ext => includeBuiltins || !ext.id.startsWith('vscode.'))
@@ -29,16 +26,11 @@ function collectInstalledExtensions(includeBuiltins: boolean): ExtensionSummary[
 		.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/**
- * Reads the team's recommended extension ids from .vscode/extensions.json.
- * Tolerates comments and missing files.
- */
 function readWorkspaceRecommendations(root: string): string[] {
 	try {
 		const file = path.join(root, '.vscode', 'extensions.json');
 		const raw = fs.readFileSync(file, 'utf-8');
-		// A bloated recommendations file is not worth stalling the extension
-		// host over; checking the buffer avoids a stat/read race on the cap
+
 		if (Buffer.byteLength(raw) > 1024 * 1024) {
 			return [];
 		}
@@ -63,11 +55,6 @@ function formatExtensionList(title: string, extensions: ExtensionSummary[]): str
 	return `${title} (${extensions.length}):\n${lines.join('\n')}`;
 }
 
-/**
- * Registers MCP advanced tools (server introspection and extension inventory)
- * @param server MCP server instance
- * @param endpoint host:port the HTTP server binds, for display purposes
- */
 export function registerAdvancedTools(server: McpServer, endpoint: { host: string; port: number }, clusterInfo?: () => string | undefined, authInfo?: () => string): void {
 	server.tool(
 		'get_server_info_code',

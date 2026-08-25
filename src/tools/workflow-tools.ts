@@ -7,8 +7,6 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { executeShellCommand } from './shell-tools.js';
 import { getWorkspaceRoot, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace.js';
 
-// Discovery and execution must agree on the directory: '' / '.' mean the
-// workspace root, anything else resolves against it
 function resolveWorkingDir(root: string, cwd: string): string {
 	if (!cwd || cwd === '.' || cwd === './') {
 		return root;
@@ -24,7 +22,6 @@ function readJsonFile(filePath: string): any {
 	}
 }
 
-// Snippet files are JSONC in practice, so tolerate whole-line comments before parsing
 function readJsoncFile(filePath: string): any {
 	const raw = fs.readFileSync(filePath, 'utf-8');
 	try {
@@ -126,8 +123,7 @@ function listSnippetFiles(root: string): Array<{ file: string; name: string }> {
 	const vscodeDir = path.join(root, '.vscode');
 	const snippetsDir = path.join(vscodeDir, 'snippets');
 	const found: Array<{ file: string; name: string }> = [];
-	// VS Code's own "Configure Snippets" drops workspace files straight into
-	// .vscode/*.code-snippets; teams also keep a snippets/ subfolder
+
 	for (const [dir, extensions] of [
 		[snippetsDir, ['.json', '.code-snippets']],
 		[vscodeDir, ['.code-snippets']]
@@ -202,11 +198,6 @@ async function runInTerminal(
 	return executeShellCommand(terminal, command, effectiveCwd ?? getWorkspaceRoot(), timeout);
 }
 
-/**
- * Registers MCP workflow tools with the server
- * @param server MCP server instance
- * @param terminal The terminal used to execute tasks, builds and aliases
- */
 export function registerWorkflowTools(server: McpServer, terminal?: vscode.Terminal): void {
 	server.tool(
 		'run_task_code',
@@ -257,8 +248,7 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 			} else if (plain.length === 1) {
 				chosen = plain[0];
 			} else {
-				// npm script names often contain ':' themselves (test:unit), so the
-				// source-qualified form is only tried once the plain name missed
+
 				const prefixed = task.match(/^(npm|composer|make):(.+)$/);
 				if (prefixed) {
 					chosen = tasks.find(t => t.source === prefixed[1] && t.name === prefixed[2]);

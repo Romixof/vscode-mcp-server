@@ -1,14 +1,3 @@
-/**
- * Cluster coordinator: the state machine every VS Code window runs.
- *
- * standalone -> hub     the moment a second window registers (no separate boot
- *                       path; hosting is something that happens to you)
- * standalone -> spoke   the configured port was taken by a verified sibling
- * spoke -> hub          the hub died and this window won the re-bind race
- *
- * The client URL never changes: whatever the role, exactly one window owns the
- * configured port and serves /mcp; everyone else forwards to it.
- */
 import { logger } from '../utils/logger';
 import { displayLabelFor, listWorkspaceFolders } from '../utils/workspace';
 import { setClusterDisplay } from '../utils/workspace';
@@ -33,10 +22,6 @@ import {
 	WindowInfo
 } from './types';
 
-/**
- * Environment-independent UUID shape. The extension host's Node does not
- * guarantee a global webcrypto, so window ids cannot rely on crypto.randomUUID.
- */
 function randomId(): string {
 	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
 		const r = Math.random() * 16 | 0;
@@ -44,15 +29,14 @@ function randomId(): string {
 	});
 }
 
-/** What the coordinator needs from the HTTP server it lives inside. */
 export interface ClusterHost {
-	/** Binds the shared express app; rejects with the underlying error (code EADDRINUSE et al). */
+
 	listenOn(port: number, host: string): Promise<number>;
-	/** Closes whichever listener currently holds the app. */
+
 	closeListener(): Promise<void>;
-	/** Executes a registered tool handler directly (post-zod), bypassing routing. */
+
 	invokeLocally(tool: string, args: Record<string, unknown>): Promise<unknown>;
-	/** True when this window registered the tool (enabledTools differ per window). */
+
 	hasTool(tool: string): boolean;
 }
 
@@ -66,7 +50,7 @@ export interface ClusterStatus {
 interface BroadcastParticipant {
 	windowId: string;
 	windowLabel: string;
-	port: number; // 0 => execute here
+	port: number;
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -97,8 +81,8 @@ export class ClusterCoordinator {
 	readonly windowId = randomId();
 	private state: 'standalone' | 'hub' | 'spoke' = 'standalone';
 	private hub?: ClusterHub;
-	private hubPort?: number;      // while a spoke: where the hub listens
-	private spokePort?: number;    // while a spoke: our own invoke listener
+	private hubPort?: number;
+	private spokePort?: number;
 	private selfLabel: string;
 	private heartbeatTimer?: ReturnType<typeof setInterval>;
 	private heartbeatFailures = 0;
@@ -117,11 +101,7 @@ export class ClusterCoordinator {
 	}
 
 	private extensionVersion: string;
-	/**
-	 * Credential presented on every cluster call. Both windows on one machine
-	 * read the same globalState, so a spoke naturally holds the hub's session
-	 * secret; remote callers over a tunnel have no such copy.
-	 */
+
 	setClusterCredential(getToken: () => string | undefined): void {
 		this.getCredential = getToken;
 	}
@@ -166,11 +146,9 @@ export class ClusterCoordinator {
 		};
 	}
 
-	// --- Routing -------------------------------------------------------------
-
 	private currentView() {
 		if (this.state === 'spoke') {
-			// A spoke never routes: whatever reaches its handlers is already home
+
 			return { folders: [] };
 		}
 		return { folders: this.hub!.view(this.selfFolders(), this.windowId) };
@@ -180,11 +158,6 @@ export class ClusterCoordinator {
 		return resolveRoute(tool, args, this.currentView());
 	}
 
-	/**
-	 * Runs a routed decision: locally, forwarded to one window, or fanned out
-	 * to all of them. `handler` is the untouched tool callback so broadcast can
-	 * include this window's own answer without re-entering the router.
-	 */
 	async dispatchRoute(
 		tool: string,
 		decision: RouteDecision,
@@ -223,7 +196,7 @@ export class ClusterCoordinator {
 			if (aborted) {
 				throw new Error(`Window "${windowLabel}" did not finish within ${Math.round(timeoutMs / 1000)}s.`);
 			}
-			// A refused loopback connect means the process is gone; no grace period
+
 			this.hub?.deregister(windowId);
 			throw new Error(`Window "${windowLabel}" closed before the call completed — retry; its folders are no longer served.`);
 		}
@@ -258,8 +231,6 @@ export class ClusterCoordinator {
 		return { content: [{ type: 'text', text: sections.join('\n\n') }], isError: allFailed };
 	}
 
-	// --- Hub-side endpoints ----------------------------------------------------
-
 	handleIdentity(): Record<string, unknown> {
 		return {
 			role: 'hub',
@@ -281,9 +252,7 @@ export class ClusterCoordinator {
 				}
 			};
 		}
-		// Defense in depth (F1): a registration is only ever a loopback
-		// handshake between VS Code windows. Reject shapes no real join
-		// produces instead of trusting the caller.
+
 		if (!Number.isInteger(req.port) || req.port < 1024 || req.port > 65535) {
 			return { status: 400, body: { ok: false, code: 'INVALID_PORT' } };
 		}
@@ -325,16 +294,13 @@ export class ClusterCoordinator {
 		}
 	}
 
-	// --- Spoke-side endpoints ---------------------------------------------------
-
 	async handleInvoke(body: { tool?: unknown; args?: unknown }): Promise<{ status: number; body: Record<string, unknown> }> {
 		const tool = typeof body.tool === 'string' ? body.tool : undefined;
 		const args = (body.args && typeof body.args === 'object' ? body.args : undefined) as Record<string, unknown> | undefined;
 		if (!tool || !args) {
 			return { status: 400, body: { ok: false, code: 'HANDLER_ERROR', message: 'malformed invoke payload' } };
 		}
-		// A window only registers the tool groups its enabledTools allows, so a
-		// miss here is a routing fact (404), not a crash (500)
+
 		if (!this.host.hasTool(tool)) {
 			return { status: 404, body: { ok: false, code: 'TOOL_NOT_FOUND', message: `Tool ${tool} is not enabled on this window` } };
 		}
@@ -347,26 +313,17 @@ export class ClusterCoordinator {
 		}
 	}
 
-	/** A dying hub told us to take over immediately instead of waiting out the lease. */
 	handleHubShutdown(): void {
 		if (this.state !== 'spoke') {
 			return;
 		}
 		logger.info('[cluster] Hub announced shutdown — starting election');
-		// Fire-and-forget: a failed election (port lost to a foreign process,
-		// rejoin refused) must surface in the log, never as an unhandled
-		// rejection crashing the extension host
+
 		void this.runElection().catch(error => {
 			logger.error(`[cluster] Election after hub shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
 		});
 	}
 
-	// --- Lifecycle ----------------------------------------------------------------
-
-	/**
-	 * Called when binding the configured port failed. Verifies who owns the
-	 * port and either joins as a spoke or rethrows a precise error.
-	 */
 	async joinAfterAddressInUse(originalError: Error): Promise<void> {
 		let identity: { role?: string; protocol?: number; extensionVersion?: string } | undefined;
 		try {
@@ -377,7 +334,7 @@ export class ClusterCoordinator {
 		}
 
 		if (!identity || identity.role !== 'hub' || typeof identity.protocol !== 'number') {
-			// Not ours: keep today's error story verbatim
+
 			throw originalError;
 		}
 		if (identity.protocol !== CLUSTER_PROTOCOL_VERSION || identity.extensionVersion !== this.extensionVersion) {
@@ -389,7 +346,6 @@ export class ClusterCoordinator {
 		await this.becomeSpoke(this.preferredPort);
 	}
 
-	/** Binds an ephemeral loopback listener and registers with the hub, with retries. */
 	private async becomeSpoke(hubPort: number): Promise<void> {
 		this.stopping = false;
 		this.state = 'spoke';
@@ -411,7 +367,7 @@ export class ClusterCoordinator {
 				await new Promise(resolve => setTimeout(resolve, 500));
 			}
 		}
-		// The hub died mid-join: fall into election rather than giving up
+
 		logger.warn(`[cluster] Registration failed repeatedly (${lastError instanceof Error ? lastError.message : lastError}); running election`);
 		await this.runElection();
 	}
@@ -437,7 +393,7 @@ export class ClusterCoordinator {
 			throw new Error(`registration refused (HTTP ${response.status})`);
 		}
 		this.selfLabel = body.assignedName ?? this.selfLabel;
-		// Displays must carry the cluster-assigned labels so paths stay attributable
+
 		setClusterDisplay(true, body.labelOverrides ?? {});
 	}
 
@@ -471,7 +427,7 @@ export class ClusterCoordinator {
 			}, HEARTBEAT_INTERVAL_MS);
 			this.heartbeatFailures = 0;
 			if (response.status === 404) {
-				// Hub restarted and lost us: claim a place again
+
 				await this.registerOnce();
 			}
 		} catch {
@@ -484,7 +440,6 @@ export class ClusterCoordinator {
 		}
 	}
 
-	/** Folder set changed mid-session: push it promptly instead of waiting a beat. */
 	async folderSetChanged(): Promise<void> {
 		if (this.state === 'spoke') {
 			try {
@@ -498,7 +453,7 @@ export class ClusterCoordinator {
 
 	private becomeHub(): void {
 		this.state = 'hub';
-		// Keep prefixes on: this window now speaks for more than itself
+
 		setClusterDisplay(true, {});
 		this.hub!.startSweep(evicted => {
 			for (const rec of evicted) {
@@ -508,15 +463,11 @@ export class ClusterCoordinator {
 		});
 	}
 
-	/**
-	 * The hub is gone. Every orphan jitters, then races for the configured
-	 * port; losers find the winner there and rejoin as spokes.
-	 */
 	private async runElection(): Promise<void> {
 		if (this.stopping || this.state === 'hub') {
 			return;
 		}
-		// Deterministic per-window jitter spreads the contenders without any coordination
+
 		let hash = 0;
 		for (const ch of this.windowId) {
 			hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
@@ -531,7 +482,7 @@ export class ClusterCoordinator {
 		try {
 			await this.host.closeListener();
 		} catch {
-			// Nothing bound; nothing to tear down
+
 		}
 		try {
 			await this.host.listenOn(this.preferredPort, this.preferredHost);
@@ -543,7 +494,7 @@ export class ClusterCoordinator {
 			this.emitState();
 			logger.info(`[cluster] Election won — this window now hosts the cluster on port ${this.preferredPort}`);
 		} catch (bindError) {
-			// Someone else won. Verify it is really our extension, then rejoin.
+
 			try {
 				const response = await fetchWithTimeout(`http://127.0.0.1:${this.preferredPort}${CLUSTER_IDENTITY_PATH}`, {}, IDENTITY_TIMEOUT_MS);
 				const identity = await response.json().catch(() => undefined) as { role?: string; protocol?: number; extensionVersion?: string } | undefined;
@@ -553,7 +504,7 @@ export class ClusterCoordinator {
 					return;
 				}
 			} catch {
-				// fall through to the failure report
+
 			}
 			const detail = bindError instanceof Error ? bindError.message : String(bindError);
 			logger.error(`[cluster] Election lost and rejoin failed: ${detail}`);
@@ -564,7 +515,6 @@ export class ClusterCoordinator {
 		}
 	}
 
-	/** Clean shutdown: goodbye posts first, listeners and timers after. */
 	async stop(): Promise<void> {
 		this.stopping = true;
 		this.stopHeartbeat();
@@ -576,12 +526,11 @@ export class ClusterCoordinator {
 					body: JSON.stringify({ windowId: this.windowId })
 				}, DEREGISTER_TIMEOUT_MS);
 			} catch {
-				// Lease expiry is the safety net
+
 			}
 		}
 		if (this.state === 'hub' && this.hub && this.hub.spokeCount > 0) {
-			// Best-effort heads-up so spokes promote immediately; missed pings
-			// cost them one lease period at most
+
 			await Promise.allSettled(this.hub.getSpokes().map(spoke =>
 				fetchWithTimeout(`http://127.0.0.1:${spoke.port}${CLUSTER_HUB_SHUTDOWN_PATH}`, {
 					method: 'POST',
@@ -595,8 +544,6 @@ export class ClusterCoordinator {
 		this.emitState();
 	}
 
-	// --- Introspection for tools and the status bar ------------------------------
-
 	getSpokes(): WindowInfo[] {
 		return this.hub?.getSpokes() ?? [];
 	}
@@ -605,7 +552,6 @@ export class ClusterCoordinator {
 		return this.state === 'spoke' || (this.state === 'hub' && (this.hub?.spokeCount ?? 0) > 0);
 	}
 
-	/** One line appended to get_server_info_code output; undefined keeps it byte-identical. */
 	clusterInfoLine(): string | undefined {
 		if (this.state === 'spoke') {
 			return `- Cluster: joined as "${this.selfLabel}" — calls are served through http://127.0.0.1:${this.hubPort}/mcp`;
@@ -619,7 +565,6 @@ export class ClusterCoordinator {
 		return undefined;
 	}
 
-	/** Global folder numbering across windows for list_workspace_folders_code; undefined when alone. */
 	clusterFolderListing(): { lines: string[]; windowsFooter: string } | undefined {
 		if (!this.isDistributed() || this.state === 'spoke') {
 			return undefined;

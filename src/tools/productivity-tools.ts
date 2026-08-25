@@ -12,7 +12,6 @@ const DEFAULT_EXCLUDES = [
 	'**/.vscode-mcp/**'
 ];
 
-// single-pass glob translation, same approach as the documentation tools
 function globToRegExp(pattern: string): RegExp {
 	const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
 	let body = '';
@@ -83,7 +82,6 @@ function parseExcludeInclude(exclude?: string[], include?: string[]): { excludeR
 	};
 }
 
-// declarations we consider "exports" for dead-code purposes
 const EXPORT_DECLARATION_PATTERNS: Array<{ regex: RegExp; kind: string }> = [
 	{ regex: /^export\s+(?:default\s+)?(?:async\s+)?function\s*\*?\s+([A-Za-z_$][\w$]*)/, kind: 'function' },
 	{ regex: /^export\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)/, kind: 'variable' },
@@ -324,7 +322,7 @@ function decodeContent(buffer: Buffer, encoding: SupportedEncoding): string {
 		case 'utf-8-bom':
 			return startsWithBytes(buffer, [0xEF, 0xBB, 0xBF]) ? buffer.subarray(3).toString('utf-8') : buffer.toString('utf-8');
 		case 'utf-16le':
-			// files conventionally carry a BOM; strip it before decoding
+
 			return startsWithBytes(buffer, [0xFF, 0xFE]) ? buffer.subarray(2).toString('utf16le') : buffer.toString('utf16le');
 		case 'latin1':
 			return buffer.toString('latin1');

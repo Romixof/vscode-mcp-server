@@ -5,30 +5,18 @@ import { z } from 'zod';
 import { resolveInputPath, listWorkspaceFolders, findOwningFolder, prefixDisplay, displayLabelFor, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
-// Type for file listing results
 export type FileListingResult = Array<{path: string, type: 'file' | 'directory'}>;
 
-// Type for the file listing callback function
 export type FileListingCallback = (path: string, recursive: boolean, workspace?: string) => Promise<FileListingResult>;
 
-// Default maximum character count
 const DEFAULT_MAX_CHARACTERS = 100000;
 
-/**
- * Lists files and directories in the VS Code workspace
- * @param workspacePath The path within the workspace to list files from
- * @param recursive Whether to list files recursively
- * @returns Array of file and directory entries
- */
 export async function listWorkspaceFiles(workspacePath: string, recursive: boolean = false, workspace?: string): Promise<FileListingResult> {
     console.log(`[listWorkspaceFiles] Starting with path: ${workspacePath}, recursive: ${recursive}`);
-    
+
     const targetUri = resolveInputPath(workspacePath, workspace);
     console.log(`[listWorkspaceFiles] Target URI: ${targetUri.fsPath}`);
 
-    // Entries carry the owning folder's name so the emitted paths feed
-    // straight back into every path-based tool; a target outside every open
-    // root gets an absolute prefix because nothing shorter would round-trip
     const owner = findOwningFolder(targetUri);
     const rootPrefix =
         owner && prefixDisplay()
@@ -42,11 +30,10 @@ export async function listWorkspaceFiles(workspacePath: string, recursive: boole
         const result: FileListingResult = [];
 
         for (const [name, type] of entries) {
-            // explicit separator instead of path.join so prefixed listings
-            // stay forward-slash form even on Windows
+
             const entryPath = currentPath ? `${currentPath}/${name}` : name;
             const itemType: 'file' | 'directory' = (type & vscode.FileType.Directory) ? 'directory' : 'file';
-            
+
             result.push({ path: entryPath, type: itemType });
 
             if (recursive && itemType === 'directory') {
@@ -69,96 +56,70 @@ export async function listWorkspaceFiles(workspacePath: string, recursive: boole
     }
 }
 
-
-/**
- * Renaming or moving a root itself would relocate the user's project folder;
- * root-denoting inputs like "." must fail loudly instead.
- */
 function assertNotWorkspaceRoot(uri: vscode.Uri, action: string): void {
 	const target = path.resolve(uri.fsPath);
 	for (const folder of listWorkspaceFolders()) {
 		const root = path.resolve(folder.uri.fsPath);
-		// resolve() folds away '.', './' and trailing separators; the case
-		// fold covers Windows and macOS volumes where "./alpha" names the
-		// same folder as "./Alpha"
+
 		if (target === root || target.toLowerCase() === root.toLowerCase()) {
 			throw new Error(`Refusing to ${action} the workspace root "${folder.name}" itself — pass a path inside it.`);
 		}
 	}
 }
 
-/**
- * Reads a file from the VS Code workspace, truncating oversized text instead of failing
- * @param workspacePath The path within the workspace to the file
- * @param encoding Encoding to convert the file content to a string. Use 'base64' for base64-encoded string
- * @param maxCharacters Maximum character count before truncation (default: 100,000). 0 or less disables the limit
- * @param startLine The start line number (0-based, inclusive). Use -1 to read from the beginning.
- * @param endLine The end line number (0-based, inclusive). Use -1 to read to the end.
- * @returns File content as string (either text-encoded or base64)
- */
 export async function readWorkspaceFile(
-    workspacePath: string, 
-    encoding: string = 'utf-8', 
+    workspacePath: string,
+    encoding: string = 'utf-8',
     maxCharacters: number = DEFAULT_MAX_CHARACTERS,
     startLine: number = -1,
     endLine: number = -1,
     workspace?: string
 ): Promise<string> {
     console.log(`[readWorkspaceFile] Starting with path: ${workspacePath}, encoding: ${encoding}, maxCharacters: ${maxCharacters}, startLine: ${startLine}, endLine: ${endLine}`);
-    
+
     const fileUri = resolveInputPath(workspacePath, workspace);
     console.log(`[readWorkspaceFile] File URI: ${fileUri.fsPath}`);
 
     try {
-        // Read the file content as Uint8Array
+
         const fileContent = await vscode.workspace.fs.readFile(fileUri);
         console.log(`[readWorkspaceFile] File read successfully, size: ${fileContent.byteLength} bytes`);
-        
+
         if (encoding === 'base64') {
-            // Special case for base64 encoding: a cut would break decodability,
-            // so oversized payloads are still refused outright
+
             if (maxCharacters > 0 && fileContent.byteLength > maxCharacters) {
                 throw new Error(`File is ${fileContent.byteLength} bytes, over the ${maxCharacters} limit — base64 cannot be truncated; raise maxCharacters or pass 0 for no limit`);
             }
 
-            // For base64, we cannot extract lines meaningfully, so we ignore startLine and endLine
             if (startLine >= 0 || endLine >= 0) {
                 console.warn(`[readWorkspaceFile] Line numbers specified for base64 encoding, ignoring`);
             }
 
             return Buffer.from(fileContent).toString('base64');
         } else {
-            // Regular text encoding (utf-8, latin1, etc.)
+
             const textDecoder = new TextDecoder(encoding);
             let textContent = textDecoder.decode(fileContent);
 
-            // Extract the requested lines first so a narrow range stays readable
-            // even when the whole file is huge
             if (startLine >= 0 || endLine >= 0) {
-                // Split the content into lines
+
                 const lines = textContent.split('\n');
 
-                // Set effective start and end lines
                 const effectiveStartLine = startLine >= 0 ? startLine : 0;
                 const effectiveEndLine = endLine >= 0 ? Math.min(endLine, lines.length - 1) : lines.length - 1;
 
-                // Validate line numbers
                 if (effectiveStartLine >= lines.length) {
                     throw new Error(`Start line ${effectiveStartLine + 1} is out of range (1-${lines.length})`);
                 }
 
-                // Make sure endLine is not less than startLine
                 if (effectiveEndLine < effectiveStartLine) {
                     throw new Error(`End line ${effectiveEndLine + 1} is less than start line ${effectiveStartLine + 1}`);
                 }
 
-                // Extract the requested lines and join them back together
                 textContent = lines.slice(effectiveStartLine, effectiveEndLine + 1).join('\n');
                 console.log(`[readWorkspaceFile] Returning lines ${effectiveStartLine + 1}-${effectiveEndLine + 1}, length: ${textContent.length} characters`);
             }
 
-            // Oversized content comes back truncated with a note instead of an error,
-            // so callers can still work with large files without guessing sizes
             if (maxCharacters > 0 && textContent.length > maxCharacters) {
                 const note = `\n\n[File truncated: showing characters 1-${maxCharacters} of ${textContent.length}. Raise maxCharacters (0 = no limit) or use startLine/endLine to read specific sections.]`;
                 return textContent.slice(0, maxCharacters) + note;
@@ -172,15 +133,10 @@ export async function readWorkspaceFile(
     }
 }
 
-/**
- * Registers MCP file-related tools with the server
- * @param server MCP server instance
- * @param fileListingCallback Callback function for file listing operations
- */
 export function registerFileTools(
-    server: McpServer, 
+    server: McpServer,
     fileListingCallback: FileListingCallback,
-    // Cluster-wide folder view; undefined keeps single-window output byte-identical
+
     clusterFolders?: () => { lines: string[]; windowsFooter: string } | undefined
 ): void {
     server.tool(
@@ -196,8 +152,7 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
             }
             const cluster = clusterFolders?.();
             if (cluster) {
-                // Several windows share this server: number folders globally
-                // so the indexes match what routing expects on every window
+
                 const text = [
                     `Open workspace folders (${cluster.lines.length}, cluster-wide):`,
                     ...cluster.lines,
@@ -210,15 +165,14 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
         }
     );
 
-    // Add list_files tool
     server.tool(
         'list_files_code',
         `Explores directory structure in VS Code workspace.
 
         WHEN TO USE: Understanding project structure, finding files before read/modify operations.
-        
+
         CRITICAL: NEVER set recursive=true on root directory (.) - output too large. Use recursive only on specific subdirectories.
-        
+
         Returns files and directories at specified path. Start with path='.' to explore root, then dive into specific subdirectories with recursive=true.`,
         {
             path: z.string().describe('The path to list files from'),
@@ -227,7 +181,7 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
         },
         async ({ path, recursive = false, workspace }): Promise<CallToolResult> => {
             console.log(`[list_files] Tool called with path=${path}, recursive=${recursive}`);
-            
+
             if (!fileListingCallback) {
                 console.error('[list_files] File listing callback not set');
                 throw new Error('File listing callback not set');
@@ -237,7 +191,7 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
                 console.log('[list_files] Calling file listing callback');
                 const files = await fileListingCallback(path, recursive, workspace);
                 console.log(`[list_files] Callback returned ${files.length} items`);
-                
+
                 const result: CallToolResult = {
                     content: [
                         {
@@ -255,7 +209,6 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
         }
     );
 
-    // Update read_file tool with line number parameters
     server.tool(
         'read_file_code',
         `Retrieves file contents with size limits and partial reading support.
@@ -276,15 +229,14 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
         },
         async ({ path, encoding = 'utf-8', maxCharacters = DEFAULT_MAX_CHARACTERS, startLine = -1, endLine = -1, workspace }): Promise<CallToolResult> => {
             console.log(`[read_file] Tool called with path=${path}, encoding=${encoding}, maxCharacters=${maxCharacters}, startLine=${startLine}, endLine=${endLine}`);
-            
-            // Convert 1-based input to 0-based for VS Code API
+
             const zeroBasedStartLine = startLine > 0 ? startLine - 1 : startLine;
             const zeroBasedEndLine = endLine > 0 ? endLine - 1 : endLine;
-            
+
             try {
                 console.log('[read_file] Reading file');
                 const content = await readWorkspaceFile(path, encoding, maxCharacters, zeroBasedStartLine, zeroBasedEndLine, workspace);
-                
+
                 const result: CallToolResult = {
                     content: [
                         {
@@ -302,7 +254,6 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
         }
     );
 
-    // Add move_file tool
     server.tool(
         'move_file_code',
         `Moves a file or directory to a new location using VS Code's WorkspaceEdit API.
@@ -328,7 +279,6 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
             try {
                 console.log(`[move_file] Moving from ${sourceUri.fsPath} to ${targetUri.fsPath}`);
 
-                // Use WorkspaceEdit for proper refactoring support
                 const edit = new vscode.WorkspaceEdit();
                 edit.renameFile(sourceUri, targetUri, { overwrite });
 
@@ -356,7 +306,6 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
         }
     );
 
-    // Add rename_file tool
     server.tool(
         'rename_file_code',
         `Renames a file or directory using VS Code's WorkspaceEdit API.
@@ -382,7 +331,6 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
             try {
                 console.log(`[rename_file] Renaming ${fileUri.fsPath} to ${newFileUri.fsPath}`);
 
-                // Use WorkspaceEdit for proper refactoring support
                 const edit = new vscode.WorkspaceEdit();
                 edit.renameFile(fileUri, newFileUri, { overwrite });
 
@@ -410,13 +358,12 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
         }
     );
 
-    // Add copy_file tool
     server.tool(
         'copy_file_code',
         `Copies a file to a new location.
 
         WHEN TO USE: Creating backups, duplicating files for testing, creating template files.
-        
+
         LIMITATION: Only works for files, not directories.`,
         {
             sourcePath: z.string().describe('The path of the file to copy'),
@@ -433,18 +380,17 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
             try {
                 console.log(`[copy_file] Copying from ${sourceUri.fsPath} to ${targetUri.fsPath}`);
 
-                // Check if target already exists
                 let targetExists = false;
                 try {
                     await vscode.workspace.fs.stat(targetUri);
                     targetExists = true;
                 } catch (error) {
-                    // Only ignore FileNotFound errors - rethrow others (permissions, network, etc.)
+
                     if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
-                        // Target doesn't exist, which is fine - continue with copy
+
                         targetExists = false;
                     } else {
-                        // Rethrow unexpected errors (permissions, network issues, etc.)
+
                         throw error;
                     }
                 }
@@ -453,10 +399,8 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
                     throw new Error(`Target file ${targetPath} already exists. Use overwrite=true to overwrite.`);
                 }
 
-                // Read the source file
                 const fileContent = await vscode.workspace.fs.readFile(sourceUri);
 
-                // Write to target file
                 await vscode.workspace.fs.writeFile(targetUri, fileContent);
 
                 console.log('[copy_file] File copy completed successfully');

@@ -1,8 +1,3 @@
-/**
- * The hub's registry of joined windows: pure bookkeeping, no sockets. Label
- * assignment, lease sweeping and the canonical folder view used for routing
- * all live here so they can be exercised without a listener bound.
- */
 import {
 	FolderInfo,
 	LEASE_MS,
@@ -22,17 +17,11 @@ interface SpokeRecord {
 	extensionVersion: string;
 }
 
-/**
- * Lowercases, NFC-normalizes and squashes everything non-alphanumeric so two
- * windows proposing "My Project!" and "my-project" collide visibly instead of
- * silently sharing a name.
- */
 export function slugFolderName(raw: string): string {
 	const slug = raw.normalize('NFC').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24).replace(/-+$/g, '');
 	return slug || 'window';
 }
 
-/** First free `name`, `name-2`, `name-3`, ... against the taken set. */
 function uniquify(proposed: string, taken: Set<string>): string {
 	if (!taken.has(proposed)) {
 		return proposed;
@@ -50,9 +39,9 @@ export class ClusterHub {
 	private sweepTimer?: ReturnType<typeof setInterval>;
 
 	constructor(
-		/** This window's own folders, so spoke labels dedupe against them too. */
+
 		private selfFoldersProvider: () => FolderInfo[],
-		/** This window's own cluster label (its slugified first-folder name). */
+
 		private selfLabel: string
 	) { }
 
@@ -94,10 +83,6 @@ export class ClusterHub {
 		}));
 	}
 
-	/**
-	 * Idempotent upsert keyed by windowId; re-registration (heartbeat with an
-	 * unknown id, folder-set change) flows through here too.
-	 */
 	register(req: RegisterRequest): RegisterResponse {
 		const selfFolders = this.selfFoldersProvider();
 		const takenLabels = new Set<string>([this.selfLabel.toLowerCase()]);
@@ -106,14 +91,14 @@ export class ClusterHub {
 		}
 		for (const rec of this.spokes.values()) {
 			if (rec.windowId === req.windowId) {
-				continue; // re-registration may reclaim its own labels
+				continue;
 			}
 			takenLabels.add(rec.label.toLowerCase());
 			for (const f of rec.folders) {
 				takenLabels.add(f.label.toLowerCase());
 			}
 		}
-		// A window re-registering keeps its previously assigned labels stable
+
 		const previous = this.spokes.get(req.windowId);
 
 		const assignedName = previous?.label ?? uniquify(slugFolderName(req.proposedName), takenLabels);
@@ -142,7 +127,6 @@ export class ClusterHub {
 		return { ok: true, assignedName, leaseMs: LEASE_MS, labelOverrides, windows: this.spokes.size + 1 };
 	}
 
-	/** Refreshes the lease and upserts the folder set; unknown ids are rejected so the spoke re-registers. */
 	heartbeat(windowId: string, port: number, folders: Array<{ name: string; fsPath: string }>): { ok: true; leaseMs: number } | { ok: false; code: 'UNKNOWN_WINDOW' } {
 		const rec = this.spokes.get(windowId);
 		if (!rec) {
@@ -150,7 +134,7 @@ export class ClusterHub {
 		}
 		rec.lastSeen = Date.now();
 		if (JSON.stringify(folders) !== JSON.stringify(rec.folders.map(f => ({ name: f.name, fsPath: f.fsPath })))) {
-			// Folder set changed mid-session; relabel through the same path as registration
+
 			this.register({
 				role: 'spoke',
 				protocol: CLUSTER_PROTOCOL_VERSION,
@@ -170,11 +154,6 @@ export class ClusterHub {
 		this.spokes.delete(windowId);
 	}
 
-	/**
-	 * Snapshot for routing: self folders plus every spoke's, in canonical
-	 * (normalized fsPath, windowId) order so global 1-based numbering is
-	 * identical on every window regardless of join order.
-	 */
 	view(selfFolders: FolderInfo[], selfWindowId: string): RoutedFolder[] {
 		const spokeEntries: RoutedFolder[] = [...this.spokes.values()].flatMap(rec =>
 			rec.folders.map(f => ({

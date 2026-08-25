@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { resolveWorkspaceFolder, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
@@ -20,12 +22,11 @@ async function runShellCommand(command: string, cwd?: string, timeout: number = 
         try {
             workspaceRoot = getWorkspaceRoot();
         } catch {
-            // no folder open: commands run wherever the terminal already sits
+
         }
     }
     try {
-        // executeShellCommand resolves with the real exit code captured via marker
-        // (it only rejects on timeout or read failure)
+
         return await executeShellCommand(sharedTerminal, command, workspaceRoot, timeout);
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -53,13 +54,13 @@ function parseEnvFile(content: string): Map<string, string> {
 
 export function registerDatabaseTools(server: McpServer, terminal?: vscode.Terminal): void {
     sharedTerminal = terminal;
-    // 1. run_sql_query_code - Execute SQL queries
+
     server.tool(
         'run_sql_query_code',
         `Executes SQL queries against local databases (PostgreSQL, MySQL, SQLite).
 
         WHEN TO USE: Querying databases, debugging data issues, running migrations.
-        
+
         Supports: PostgreSQL (psql), MySQL (mysql), SQLite (sqlite3).
         Auto-detects from connection string or uses default local instance.
         Returns structured results with columns and rows.`,
@@ -87,12 +88,12 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                     const conn = connectionString || `postgresql://localhost:5432/${databaseName || 'postgres'}`;
                     const cleanQuery = query.trim().replace(/;+\s*$/, '');
                     const sql = format === 'json'
-                        // aggregate to real JSON — psql has no --pset=format=json
+
                         ? `SELECT COALESCE(json_agg(t), '[]'::json) FROM (${cleanQuery}) AS t`
                         : query;
                     cmd = `psql "${conn}" -c "${sql.replace(/"/g, '\\"')}" ${format === 'json' ? '-t -A' : format === 'csv' ? '--csv' : ''}`;
                 } else if (database === 'mysql' || (!database && (connectionString?.startsWith('mysql://')))) {
-                    // the mysql CLI only accepts flag-style connections, never URLs
+
                     const url = new URL(connectionString || `mysql://localhost:3306/${databaseName || 'mysql'}`);
                     const host = url.hostname || 'localhost';
                     const dbPort = url.port || '3306';
@@ -116,13 +117,12 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         }
     );
 
-    // 2. test_api_endpoint_code - HTTP requests to local APIs
     server.tool(
         'test_api_endpoint_code',
         `Makes HTTP requests to local API endpoints for testing.
 
         WHEN TO USE: Testing REST/GraphQL APIs, webhooks, health checks.
-        
+
         Supports all HTTP methods, headers, body, auth. Returns status, headers, body, timing.
         Follows redirects by default.`,
         {
@@ -190,13 +190,12 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         }
     );
 
-    // 3. check_env_vars_code - Check .env files
     server.tool(
         'check_env_vars_code',
         `Checks .env files for missing, unused, or duplicate variables.
 
         WHEN TO USE: Validating environment config, finding missing secrets, detecting drift.
-        
+
         Compares .env, .env.local, .env.example, .env.*.local against code usage (process.env.VAR).
         Reports: missing in .env, unused in .env, duplicates, differences between files.`,
         {
@@ -226,19 +225,34 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
 
                 let codeVars = new Set<string>();
                 if (checkCodeUsage) {
-                    const exclude = `{${ignorePatterns.map(p => `**/${p}/**`).join(',')}}`;
-                    const files = await vscode.workspace.findFiles(new vscode.RelativePattern(resolveWorkspaceFolder(workspace), '**/*'), exclude);
-                    
-                    for (const file of files.slice(0, 100)) {
+                    const rootUri = resolveWorkspaceFolder(workspace).uri;
+                    const rootDir = rootUri.fsPath;
+                    const skipDirs = new Set(ignorePatterns);
+                    function walk(dir: string, depth: number): void {
+                        if (depth > 12) return;
+                        let entries: fs.Dirent[];
                         try {
-                            const content = Buffer.from(await vscode.workspace.fs.readFile(file)).toString('utf-8');
-                            const matches = content.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g);
-                            for (const match of matches) {
-                                codeVars.add(match[1]);
-                            }
+                            entries = fs.readdirSync(dir, { withFileTypes: true });
                         } catch {
+                            return;
+                        }
+                        for (const entry of entries) {
+                            if (entry.name.startsWith('.') && entry.name !== '.env') continue;
+                            const full = path.join(dir, entry.name);
+                            if (entry.isDirectory()) {
+                                if (!skipDirs.has(entry.name)) walk(full, depth + 1);
+                            } else if (/\.(js|ts|jsx|tsx|py|php|mjs|cjs)$/.test(entry.name)) {
+                                try {
+                                    const content = fs.readFileSync(full, 'utf-8');
+                                    for (const m of content.matchAll(/process\.env\.([A-Z_][A-Z0-9_]*)/g)) {
+                                        codeVars.add(m[1]);
+                                    }
+                                } catch {
+                                }
+                            }
                         }
                     }
+                    walk(rootDir, 0);
                 }
 
                 const results = {
@@ -301,7 +315,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         `Lists open ports and associated processes on the system.
 
         WHEN TO USE: Finding port conflicts, identifying what's running on a port, debugging dev servers.
-        
+
         Works on Windows, macOS, Linux. Shows PID, process name, port, protocol, state.`,
         {
             port: z.number().optional().describe('Specific port to check (optional)'),
@@ -373,7 +387,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         `Restarts common development servers (Vite, Next.js, Webpack, Nodemon, etc.).
 
         WHEN TO USE: Hot reload stuck, config changes not picked up, clearing cache.
-        
+
         Detects running dev servers from package.json scripts or common patterns.
         Kills existing process and restarts with same command.`,
         {

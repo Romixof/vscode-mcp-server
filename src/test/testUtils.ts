@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 
-// This file provides test mocks for the extension
 export class MockMCPServer {
     private port: number;
     private fileListingCallback?: (path: string, recursive: boolean) => Promise<Array<{path: string, type: 'file' | 'directory'}>>;
@@ -14,12 +13,12 @@ export class MockMCPServer {
     }
 
     public async start(): Promise<void> {
-        // Mock implementation
+
         return Promise.resolve();
     }
 
     public async stop(): Promise<void> {
-        // Mock implementation
+
         return Promise.resolve();
     }
 }
@@ -28,7 +27,6 @@ export function getMCPServerMock() {
     return MockMCPServer;
 }
 
-// Create a partial type to allow partial implementation of ExtensionContext
 type PartialExtensionContext = Partial<vscode.ExtensionContext> & {
     subscriptions: { dispose(): any }[];
     workspaceState: vscode.Memento;
@@ -40,10 +38,9 @@ type PartialExtensionContext = Partial<vscode.ExtensionContext> & {
 };
 
 export function createMockContext(): PartialExtensionContext {
-    // Create an event emitter with the correct type for SecretStorageChangeEvent
+
     const secretStorageChangeEmitter = new vscode.EventEmitter<vscode.SecretStorageChangeEvent>();
-    
-    // Create a partial implementation with just the properties we need
+
     const context: PartialExtensionContext = {
         subscriptions: [],
         workspaceState: {
@@ -72,6 +69,6 @@ export function createMockContext(): PartialExtensionContext {
             onDidChange: secretStorageChangeEmitter.event
         }
     };
-    
+
     return context;
 }
