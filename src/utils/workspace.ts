@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
+import { assertInSandbox, SandboxConfig, SandboxViolationError } from './sandbox';
 
 function norm(s: string): string {
 	return s.normalize('NFC').toLowerCase();
@@ -80,26 +82,94 @@ export function findOwningFolder(uri: vscode.Uri): vscode.WorkspaceFolder | unde
 	return matches.reduce((a, b) => (b.uri.fsPath.length > a.uri.fsPath.length ? b : a));
 }
 
-export function resolveInputPath(input: string, ref?: string): vscode.Uri {
+export function resolveInputPath(input: string, ref?: string, toolName = 'unknown'): vscode.Uri {
 	const trimmed = input.trim();
+	let resolved: vscode.Uri;
 	if (path.isAbsolute(trimmed)) {
-		return vscode.Uri.file(trimmed);
-	}
-	const folders = listWorkspaceFolders();
-	if (prefixDisplay()) {
-		const segments = trimmed.split(/[\\/]+/).filter(s => s !== '' && s !== '.');
-		if (segments.length > 0) {
+		resolved = vscode.Uri.file(trimmed);
+	} else {
+		const folders = listWorkspaceFolders();
+		if (prefixDisplay()) {
+			const segments = trimmed.split(/[\\/]+/).filter(s => s !== '' && s !== '.');
+			if (segments.length > 0) {
 
-			const owner = folders.find(
-				f => norm(f.name) === norm(segments[0]) || norm(displayLabelFor(f)) === norm(segments[0])
-			);
-			if (owner) {
-				const rest = segments.slice(1).join('/');
-				return rest ? vscode.Uri.joinPath(owner.uri, rest) : owner.uri;
+				const owner = folders.find(
+					f => norm(f.name) === norm(segments[0]) || norm(displayLabelFor(f)) === norm(segments[0])
+				);
+				if (owner) {
+					const rest = segments.slice(1).join('/');
+					resolved = rest ? vscode.Uri.joinPath(owner.uri, rest) : owner.uri;
+				} else {
+					resolved = vscode.Uri.joinPath(resolveWorkspaceFolder(ref).uri, trimmed);
+				}
+			} else {
+				resolved = vscode.Uri.joinPath(resolveWorkspaceFolder(ref).uri, trimmed);
 			}
+		} else {
+			resolved = vscode.Uri.joinPath(resolveWorkspaceFolder(ref).uri, trimmed);
 		}
 	}
-	return vscode.Uri.joinPath(resolveWorkspaceFolder(ref).uri, trimmed);
+	return assertSandboxed(resolved, toolName);
+}
+
+// --- F-SANDBOX: filesystem confinement ---------------------------------
+// Every file-touching tool resolves its paths through resolveInputPath,
+// so the check lives here: once resolved, the target must sit inside an
+// allowed root or the call is refused before any I/O happens. Symlinks
+// are re-resolved when the target exists on disk so a planted link cannot
+// smuggle reads out of the sandbox.
+
+// F-SANDBOX — the default is the SAFE mode: a fresh process that has not
+// been configured yet must not silently allow full-disk access.
+let sandboxConfigProvider: () => SandboxConfig = () => ({ mode: 'workspace', allowPaths: [] });
+
+/** Extra trusted roots contributed by the cluster (authenticated spokes). */
+let clusterRootsProvider: (() => string[]) | undefined;
+
+export function setClusterRootsProvider(provider: () => string[]): void {
+	clusterRootsProvider = provider;
+}
+
+/** Called by the extension host to wire the current settings. */
+export function setSandboxConfigProvider(provider: () => SandboxConfig): void {
+	sandboxConfigProvider = provider;
+}
+
+export function getSandboxConfig(): SandboxConfig {
+	return sandboxConfigProvider();
+}
+
+/**
+ * Validates a resolved path against the sandbox and returns it unchanged.
+ * Throws on escape attempts. The symlink-aware double resolution runs only
+ * for targets that already exist on disk.
+ */
+export function assertSandboxed(uri: vscode.Uri, toolName: string): vscode.Uri {
+	const cfg = getSandboxConfig();
+	if (cfg.mode === 'full') return uri;
+	const folders = listWorkspaceFolders().map(f => ({ fsPath: f.uri.fsPath }));
+	// Cluster-aware: folders registered by authenticated spokes are trusted
+	// roots too — the hub forwards file ops to them after this check.
+	if (clusterRootsProvider) {
+		for (const r of clusterRootsProvider()) {
+			folders.push({ fsPath: r });
+		}
+	}
+	let real: string | undefined;
+	try {
+		real = fs.realpathSync.native(uri.fsPath);
+	} catch {
+		real = undefined; // does not exist yet — create case
+	}
+	try {
+		assertInSandbox(uri.fsPath, real, cfg, folders, toolName);
+	} catch (e) {
+		if (e instanceof SandboxViolationError) {
+			throw new Error(`Sandbox violation: "${uri.fsPath}" is outside the allowed roots (${cfg.mode} mode). Tool: ${toolName}`);
+		}
+		throw e;
+	}
+	return uri;
 }
 
 export function workspaceDisplayPath(uri: vscode.Uri): string {
