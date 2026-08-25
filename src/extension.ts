@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import { MCPServer, ToolConfiguration } from './server';
 import { listWorkspaceFiles } from './tools/file-tools';
 import { logger } from './utils/logger';
+import { setSandboxConfigProvider } from './utils/workspace';
+import type { SandboxMode } from './utils/sandbox';
 
 export { MCPServer };
 
@@ -233,6 +235,14 @@ export async function activate(context: vscode.ExtensionContext) {
         logger.info(`[activate] Remote environment detected: "${vscode.env.remoteName}" — the server binds this host's localhost only`);
     }
 
+    // F-SANDBOX — wire the filesystem confinement before anything else so
+    // even the very first tool call of this session is sandboxed.
+    setSandboxConfigProvider(() => {
+        const cfg = vscode.workspace.getConfiguration('vscode-mcp-server');
+        const mode = (cfg.get<string>('security.sandbox.mode', 'workspace') || 'workspace') as SandboxMode;
+        const allowPaths = cfg.get<string[]>('security.sandbox.allowPaths', []) ?? [];
+        return { mode, allowPaths, homeDir: process.env.USERPROFILE || process.env.HOME };
+    });
     try {
 
         const config = vscode.workspace.getConfiguration('vscode-mcp-server');

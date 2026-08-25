@@ -74,6 +74,18 @@
           "default": true,
           "description": "Accept requests that carry no Origin header (curl, SDK clients). Browsers always send Origin on cross-site posts, so this does not weaken the drive-by protection."
         },
+        "vscode-mcp-server.security.sandbox.mode": {
+          "type": "string",
+          "enum": ["workspace", "home", "full"],
+          "default": "workspace",
+          "description": "Filesystem confinement for authenticated tools. 'workspace': only folders open in this window plus allowPaths. 'home': the user profile directory. 'full': no restriction (dangerous with remote clients)."
+        },
+        "vscode-mcp-server.security.sandbox.allowPaths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Extra absolute paths allowed when sandbox.mode is 'workspace' (e.g. D:\\Mammouth\\docs). Symlinks pointing outside are still refused."
+        },
         "vscode-mcp-server.enabledTools": {
           "type": "object",
           "default": {

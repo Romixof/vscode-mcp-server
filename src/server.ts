@@ -29,6 +29,7 @@ import { registerCoffeeTools } from './tools/coffee-tools';
 import { EXTENSION_ID } from './tools/advanced-tools';
 import { recordToolCall } from './utils/usage';
 import { logger } from './utils/logger';
+import { setClusterRootsProvider } from './utils/workspace';
 import { ClusterCoordinator, ClusterHost } from './cluster/coordinator';
 import {
 	CLUSTER_DEREGISTER_PATH,
@@ -143,6 +144,9 @@ export class MCPServer {
             if (mode === 'static-token') {return readAuthConfig().staticToken;}
             return this.authToken ?? this.extensionContext?.globalState.get<string>('vscode-mcp.authToken');
         });
+        // F-SANDBOX — cluster folders registered by authenticated spokes are
+        // trusted sandbox roots: the hub routes file ops to them by design.
+        setClusterRootsProvider(() => this.cluster.clusterTrustedFolderPaths());
 
         this.setupRoutes();
     }

@@ -579,4 +579,28 @@ export class ClusterCoordinator {
 		))];
 		return { lines, windowsFooter: windowNames.join(', ') };
 	}
+
+	/**
+	 * F-SANDBOX — absolute roots of every folder in the cluster (hub's own
+	 * plus authenticated spokes'). These are trusted sandbox roots because
+	 * each was registered through the credentialed cluster handshake.
+	 */
+	clusterTrustedFolderPaths(): string[] {
+		try {
+			const out: string[] = [];
+			for (const f of this.selfFolders()) {
+				out.push(f.fsPath);
+			}
+			if (this.hub) {
+				for (const s of (this.hub as unknown as { getSpokes?: () => Array<{ folders: Array<{ fsPath: string }> }> }).getSpokes?.() ?? []) {
+					for (const f of s.folders) {
+						out.push(f.fsPath);
+					}
+				}
+			}
+			return out.filter(p => typeof p === 'string' && p.length > 1);
+		} catch {
+			return [];
+		}
+	}
 }
