@@ -374,7 +374,7 @@ export class MCPServer {
         this.app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
             const message = err instanceof Error ? err.message : 'Internal error';
             logger.error(`[http] Unhandled error on ${_req.method} ${_req.path}: ${message}`);
-            if (res.headersSent) return;
+            if (res.headersSent) {return;}
             res.status(500).json({ ok: false, code: 'INTERNAL_ERROR' });
         });
     }
