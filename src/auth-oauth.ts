@@ -41,12 +41,28 @@ export interface OAuthHub {
 	getAccessToken(): string | undefined;
 	/** Human-readable client name shown on the consent prompt. */
 	getLastClientName(): string | undefined;
+	/**
+	 * Durable store for client registrations. Both are optional: without
+	 * them registrations stay in-memory and remote clients must
+	 * re-register after every window reload.
+	 */
+	loadClients?(): Array<RegisteredClient>;
+	saveClients?(clients: Array<RegisteredClient>): void;
 }
 
 export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 	const clients = new Map<string, RegisteredClient>();
 	const grants = new Map<string, PendingGrant>();
 	let lastClientName: string | undefined;
+
+	// Hydrate registrations from the durable store so remote clients survive
+	// window reloads; their client_id keeps working without re-registering.
+	for (const c of hub.loadClients?.() ?? []) {
+		clients.set(c.client_id, c);
+	}
+	function persistClients(): void {
+		hub.saveClients?.([...clients.values()]);
+	}
 
 	// F3 — resource caps. Both maps are written by unauthenticated requests;
 	// without limits a tunnel attacker grows them at will.
@@ -135,6 +151,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		};
 		pruneOldest(clients, MAX_CLIENTS);
 		clients.set(clientId, client);
+		persistClients();
 		res.status(201).json({
 			client_id: clientId,
 			client_id_issued_at: Math.floor(Date.now() / 1000),
