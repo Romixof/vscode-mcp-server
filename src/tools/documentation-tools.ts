@@ -248,9 +248,7 @@ async function getRustDependencies(workspaceRoot: string): Promise<EcosystemDepe
 	const depSections = ['dependencies', 'dev-dependencies', 'build-dependencies'];
 
 	for (const section of depSections) {
-		// $ anchors end-of-string here (\Z is not a JavaScript escape)
-		// lookahead requires the next section header at line start, so inline arrays like
-		// features = ["derive"] don't truncate the captured body
+
 		const regex = new RegExp(`\\[${section}\\]([\\s\\S]*?)(?=\\n\\[|$)`, 'i');
 		const match = content.match(regex);
 		if (!match) {
@@ -268,7 +266,7 @@ async function getRustDependencies(workspaceRoot: string): Promise<EcosystemDepe
 			const name = parts[0].trim();
 			let version = parts.slice(1).join('=').trim().replace(/^["']|["']$/g, '');
 			if (version.startsWith('{')) {
-				// inline table form: { version = "1.0", features = [...] }
+
 				const versionMatch = version.match(/version\s*=\s*["']([^"']+)["']/);
 				version = versionMatch ? versionMatch[1] : '*';
 			}
@@ -445,8 +443,7 @@ async function getAllDependencies(workspace?: string): Promise<EcosystemDependen
 }
 
 function globToRegExp(pattern: string): RegExp {
-	// single-pass translation: sequential .replace() passes would re-process
-	// the '*' inside already-inserted fragments like '[^/]*'
+
 	const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
 	let body = '';
 	let i = 0;
@@ -468,7 +465,6 @@ function globToRegExp(pattern: string): RegExp {
 	return new RegExp(`^${body}$`);
 }
 
-
 async function findTodoComments(options: TodoOptions): Promise<{ matches: TodoMatch[] | Record<string, TodoMatch[]>; stats: TodoStats }> {
 	const target = resolveRelativeToolPath(options.path ?? '.', options.workspace);
 	const workspaceRoot = target.dir;
@@ -483,7 +479,6 @@ async function findTodoComments(options: TodoOptions): Promise<{ matches: TodoMa
 	];
 	const includePatterns = options.include ?? ['**/*'];
 
-	// no 'g' flag: String.match with a global regex drops capture groups, so match[1] would be undefined
 	const patternRegex = new RegExp(
 		`(${searchPatterns.map(p => caseSensitive ? p : p.toLowerCase()).join('|')})`,
 		caseSensitive ? '' : 'i'
@@ -543,7 +538,7 @@ async function findTodoComments(options: TodoOptions): Promise<{ matches: TodoMa
 						});
 					}
 				} catch {
-					// binary or unreadable file, skip it
+
 				}
 			}
 		}
@@ -591,9 +586,7 @@ async function getFileHistory(options: {
 	format?: string;
 	workspace?: string;
 }): Promise<string> {
-	// Same routing as git blame: the git CLI wants a path relative to the
-	// folder it runs in, or the untouched absolute path when the target sits
-	// outside every open root
+
 	const target = resolveRelativeToolPath(options.path, options.workspace);
 	const workspaceRoot = target.root;
 	const filePath = target.gitPath;
@@ -663,7 +656,7 @@ async function getFileHistory(options: {
 					i++;
 				}
 				commit.stats = { files, insertions, deletions };
-				// step back so the outer loop's i++ lands on the next commit header
+
 				i--;
 			}
 
@@ -724,7 +717,6 @@ async function generateDocstring(options: {
 	let targetLine = options.line ? options.line - 1 : -1;
 	const symbolName = options.symbol;
 
-	// locate the symbol by name when no explicit line was given
 	if (targetLine === -1 && symbolName) {
 		for (let i = 0; i < lines.length; i++) {
 			if (lines[i].includes(symbolName) && (lines[i].includes('function') || lines[i].includes('def ') || lines[i].includes('fn ') || lines[i].includes('func '))) {
@@ -880,7 +872,6 @@ async function generateDocstring(options: {
 		return docstring;
 	}
 
-	// strip an existing doc comment sitting right above the symbol before inserting
 	if (lines[targetLine - 1]?.trim().startsWith('/**') ||
 		lines[targetLine - 1]?.trim().startsWith('"""') ||
 		lines[targetLine - 1]?.trim().startsWith("'''") ||
@@ -889,7 +880,7 @@ async function generateDocstring(options: {
 		let startIdx = targetLine - 1;
 		while (startIdx > 0) {
 			const t = lines[startIdx].trim();
-			// prefix forms match one-line docstrings like """Old docstring."""
+
 			if (!(t.startsWith('*') || t.startsWith('///') || t.startsWith('#') || t.startsWith('"""') || t.startsWith("'''"))) {
 				break;
 			}
@@ -1015,7 +1006,6 @@ async function getProjectContext(options: {
 		}
 	}
 
-	// infer languages from file extensions within the depth window
 	const langExtensions: Record<string, string> = {
 		'.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
 		'.py': 'python', '.rs': 'rust', '.go': 'go', '.php': 'php', '.rb': 'ruby',
@@ -1171,7 +1161,7 @@ Returns unified format with type (prod/dev/peer/optional), ecosystem, and metada
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 	}, async ({ ecosystem = 'all', includeOutdated = false, workspace }) => {
 		try {
-			// module ecosystems use friendlier names than the public enum
+
 			const ecosystemAliases: Record<string, string[]> = {
 				npm: ['node'],
 				pypi: ['python'],

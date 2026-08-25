@@ -63,7 +63,6 @@ function collectFiles(rootDir: string, excludeRegexes: RegExp[]): Array<{ fullPa
 	return files;
 }
 
-// values that look like secrets but are obviously placeholders
 const PLACEHOLDER_RE = /^(x+|y+|\.+|<[^>]+>|\$\{[^}]*\}|your[_-].*|example.*|changeme|dummy|placeholder.*|test.*|xxx+.*)$/i;
 
 interface Finding { severity: 'high' | 'medium' | 'low'; kind: string; file: string; line: number; snippet: string }
@@ -87,12 +86,6 @@ const SECRET_PATTERNS: Array<{ name: string; severity: 'high' | 'medium'; regex:
 	{ name: 'AWS secret in config', severity: 'medium', regex: /aws.{0,30}['"]([0-9a-zA-Z/+]{40})['"]/i, secretGroup: 1 }
 ];
 
-
-/**
- * Resolves a scanner target under the multi-root rules. An explicit path that
- * does not exist throws: silently scanning nothing would read as a clean
- * result.
- */
 async function resolveScanTarget(optionsPath: string | undefined, workspace?: string): Promise<{ dir: string; displayPrefix: string }> {
 	const target = resolveRelativeToolPath(optionsPath ?? '.', workspace);
 	if (optionsPath !== undefined && !fs.existsSync(target.fsPath)) {
@@ -113,7 +106,7 @@ async function findSecrets(options: { path?: string; exclude?: string[]; maxResu
 		try {
 			content = fs.readFileSync(file.fullPath, 'utf-8');
 		} catch {
-			continue; // binary or unreadable
+			continue;
 		}
 		if (content.includes('\u0000')) {
 			continue;
@@ -188,7 +181,7 @@ async function securityScan(options: { path?: string; severity?: 'high' | 'mediu
 		for (let i = 0; i < lines.length; i++) {
 			const lineText = lines[i];
 			if (/^\s*(\/\/|#|\*)/.test(lineText)) {
-				continue; // comments and docstrings are not executable code
+				continue;
 			}
 			for (const rule of SECURITY_RULES) {
 				if (!rule.languages.includes(lang) || severityRank[rule.severity] < minSeverity) {
@@ -289,7 +282,7 @@ Matched values are masked in the output. Obvious placeholders ("your-api-key", "
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 	}, async ({ path: searchPath, exclude, maxResults, workspace }) => {
 		const result = await findSecrets({ path: searchPath, exclude, maxResults, workspace });
-		// snippets hold the masked value only, safe to display
+
 		return { content: [{ type: 'text', text: formatFindings('# Secret Scan', result, true) }] };
 	});
 

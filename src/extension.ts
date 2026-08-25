@@ -4,26 +4,20 @@ import { MCPServer, ToolConfiguration } from './server';
 import { listWorkspaceFiles } from './tools/file-tools';
 import { logger } from './utils/logger';
 
-// Re-export for testing purposes
 export { MCPServer };
 
 let mcpServer: MCPServer | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
 let sharedTerminal: vscode.Terminal | undefined;
-// Server state - disabled by default
+
 let serverEnabled: boolean = false;
 
-// Terminal name constant
 const TERMINAL_NAME = 'MCP Shell Commands';
 
-/**
- * Gets the tool configuration from VS Code settings
- * @returns ToolConfiguration object with all tool enablement settings
- */
 function getToolConfiguration(): ToolConfiguration {
     const config = vscode.workspace.getConfiguration('vscode-mcp-server');
     const enabledTools = config.get<any>('enabledTools') || {};
-    
+
     return {
         file: enabledTools.file ?? true,
         edit: enabledTools.edit ?? true,
@@ -45,8 +39,6 @@ function getToolConfiguration(): ToolConfiguration {
     };
 }
 
-// Common Git Bash install locations probed on Windows so the MCP terminal gets
-// a POSIX shell (PowerShell 5.1 rejects the `&&` chains and heredocs tools emit)
 const GIT_BASH_CANDIDATES = process.platform === 'win32' ? [
     `${process.env.ProgramFiles || 'C:\\Program Files'}\\Git\\bin\\bash.exe`,
     'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
@@ -65,23 +57,16 @@ function findGitBash(): string | undefined {
     return undefined;
 }
 
-/**
- * Gets or creates the shared terminal for the extension
- * @param context The extension context
- * @returns The shared terminal instance
- */
 export function getExtensionTerminal(context: vscode.ExtensionContext): vscode.Terminal {
-    // Check if a terminal with our name already exists
+
     const existingTerminal = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
 
     if (existingTerminal && existingTerminal.exitStatus === undefined) {
-        // Reuse the existing terminal if it's still open
+
         logger.info('[getExtensionTerminal] Reusing existing terminal for shell commands');
         return existingTerminal;
     }
 
-    // On Windows prefer Git Bash explicitly; the default profile is usually
-    // PowerShell 5.1 which cannot run the POSIX command lines the tools emit
     const bashPath = findGitBash();
     if (bashPath) {
         sharedTerminal = vscode.window.createTerminal({ name: TERMINAL_NAME, shellPath: bashPath });
@@ -95,22 +80,18 @@ export function getExtensionTerminal(context: vscode.ExtensionContext): vscode.T
     return sharedTerminal;
 }
 
-// Function to update status bar
 function updateStatusBar(port: number) {
     if (!statusBarItem) {
         return;
     }
 
     if (serverEnabled && mcpServer?.cluster.getRole() === 'spoke') {
-        // Joined window: another window owns the client URL; this one only
-        // serves its folders to the hub through an ephemeral loopback port.
-        // Healthy state, so deliberately no warning background — Off keeps it
+
         statusBarItem.text = `$(server) MCP Server: ${port} (joined)`;
         statusBarItem.tooltip = `Sharing another VS Code window's MCP server at localhost:${port} — tool calls for this window's folders are forwarded there.\nClick to leave the shared server.`;
         statusBarItem.backgroundColor = undefined;
     } else if (serverEnabled) {
-        // Inside a devcontainer/WSL/SSH window the server binds the REMOTE's
-        // localhost, so say so before someone wonders why their client can't connect
+
         const remoteName = vscode.env.remoteName;
         const remoteNote = remoteName ? ` — running inside remote "${remoteName}"` : '';
         statusBarItem.text = `$(server) MCP Server: ${port}`;
@@ -119,19 +100,12 @@ function updateStatusBar(port: number) {
     } else {
         statusBarItem.text = `$(server) MCP Server: Off`;
         statusBarItem.tooltip = `MCP Server is disabled (Click to toggle)`;
-        // Use a subtle color to indicate disabled state
+
         statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
     }
     statusBarItem.show();
 }
 
-/**
- * Builds, wires and starts one server instance. Toggle, autostart and
- * config-restart all funnel through here so cluster wiring (state-change
- * hook, file-listing callback) cannot drift between the three paths.
- * Returns the running server, or undefined after reporting a failed start;
- * the caller decides whether the persisted enabled flag survives that.
- */
 async function startOrJoinServer(
     context: vscode.ExtensionContext,
     options: { resetPersistedOnFailure: boolean }
@@ -151,16 +125,14 @@ async function startOrJoinServer(
             throw error;
         }
     });
-    // Elections and promotions move this window between roles at runtime;
-    // the bar must follow without waiting for a config event
+
     mcpServer.cluster.setOnStateChange(() => updateStatusBar(port));
     mcpServer.setupTools();
 
     try {
         await mcpServer.start();
     } catch (error) {
-        // Nothing is listening; flip the toggle back so the status bar
-        // does not advertise a dead server
+
         mcpServer = undefined;
         serverEnabled = false;
         if (options.resetPersistedOnFailure) {
@@ -173,9 +145,6 @@ async function startOrJoinServer(
         return undefined;
     }
 
-    // First-run announcement of the access credential, with a one-click copy.
-    // Only when this window is the hub — joined windows share another's URL
-    // and never accept external calls themselves.
     if (serverEnabled && mcpServer.authToken && mcpServer.cluster.getRole() !== 'spoke'
         && context.globalState.get<string>('vscode-mcp.authTokenAnnounced') !== mcpServer.authToken) {
         void context.globalState.update('vscode-mcp.authTokenAnnounced', mcpServer.authToken);
@@ -192,24 +161,21 @@ async function startOrJoinServer(
     return mcpServer;
 }
 
-// Function to toggle server state
 async function toggleServerState(context: vscode.ExtensionContext): Promise<void> {
     logger.info(`[toggleServerState] Starting toggle operation - changing from ${serverEnabled} to ${!serverEnabled}`);
-    
+
     serverEnabled = !serverEnabled;
-    
-    // Store state for persistence
+
     context.globalState.update('mcpServerEnabled', serverEnabled);
-    
+
     const config = vscode.workspace.getConfiguration('vscode-mcp-server');
     const port = config.get<number>('port') || 3000;
     const host = config.get<string>('host') || '127.0.0.1';
-    
-    // Update status bar immediately to provide feedback
+
     updateStatusBar(port);
-    
+
     if (serverEnabled) {
-        // Start the server if it was disabled
+
         if (!mcpServer) {
             logger.info(`[toggleServerState] Creating MCP server instance`);
 
@@ -232,9 +198,9 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
             );
         }
     } else {
-        // Stop the server if it was enabled
+
         if (mcpServer) {
-            // Show progress indicator
+
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
                 title: 'Stopping MCP Server',
@@ -242,22 +208,22 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
             }, async (progress) => {
                 logger.info(`[toggleServerState] Stopping server at ${new Date().toISOString()}`);
                 progress.report({ message: 'Closing connections...' });
-                
+
                 const stopTime = Date.now();
                 if (mcpServer) {
                     await mcpServer.stop();
                 }
-                
+
                 const duration = Date.now() - stopTime;
                 logger.info(`[toggleServerState] Server stopped successfully at ${new Date().toISOString()} (took ${duration}ms)`);
-                
+
                 mcpServer = undefined;
             });
-            
+
             vscode.window.showInformationMessage('MCP Server has been disabled');
         }
     }
-    
+
     logger.info(`[toggleServerState] Toggle operation completed`);
 }
 
@@ -268,44 +234,37 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     try {
-        // Get configuration
+
         const config = vscode.workspace.getConfiguration('vscode-mcp-server');
         const defaultEnabled = config.get<boolean>('defaultEnabled') ?? false;
         const port = config.get<number>('port') || 3000;
         const host = config.get<string>('host') || '127.0.0.1';
 
-        // Load saved state or use configured default
         serverEnabled = context.globalState.get('mcpServerEnabled', defaultEnabled);
-        
+
         logger.info(`[activate] Using port ${port} from configuration`);
         logger.info(`[activate] Server enabled: ${serverEnabled}`);
 
-        // Create status bar item
         statusBarItem = vscode.window.createStatusBarItem(
             vscode.StatusBarAlignment.Right,
             100
         );
         statusBarItem.command = 'vscode-mcp-server.toggleServer';
-        
-        // Only start the server if enabled
+
         if (serverEnabled) {
             const started = await startOrJoinServer(context, { resetPersistedOnFailure: false });
             if (started) {
                 logger.info('MCP Server started successfully');
             }
-            // A failed auto-start must not wedge activation: it was reported,
-            // dropped and shown as off inside the helper. The saved enabled
-            // state stays, so the next window load retries alone
+
         } else {
             logger.info('MCP Server is disabled by default');
         }
-        
-        // Update status bar after server state is determined
+
         updateStatusBar(port);
 
-        // Register commands
         const toggleServerCommand = vscode.commands.registerCommand(
-            'vscode-mcp-server.toggleServer', 
+            'vscode-mcp-server.toggleServer',
             () => toggleServerState(context)
         );
 
@@ -334,7 +293,6 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         );
 
-        // Listen for configuration changes to restart server if needed
         const configChangeListener = vscode.workspace.onDidChangeConfiguration(async (event) => {
             const relevant =
                 event.affectsConfiguration('vscode-mcp-server.enabledTools') ||
@@ -348,8 +306,6 @@ export async function activate(context: vscode.ExtensionContext) {
                 await mcpServer.stop();
                 mcpServer = undefined;
 
-                // Full stop/start cycle: a hub port change would otherwise
-                // leave every joined spoke pointing at an abandoned port
                 if (!(await startOrJoinServer(context, { resetPersistedOnFailure: true }))) {
                     return;
                 }
@@ -358,14 +314,10 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         });
 
-        // Folders opened or closed mid-session must reach the hub right away:
-        // until re-registration the router either misses them or forwards
-        // calls for folders this window no longer has
         const workspaceFoldersListener = vscode.workspace.onDidChangeWorkspaceFolders(() => {
             void mcpServer?.cluster.folderSetChanged();
         });
 
-        // Add all disposables to the context subscriptions
         context.subscriptions.push(
             statusBarItem,
             toggleServerCommand,
@@ -387,7 +339,6 @@ export async function deactivate() {
         statusBarItem = undefined;
     }
 
-    // Dispose the shared terminal
     if (sharedTerminal) {
         sharedTerminal.dispose();
         sharedTerminal = undefined;
@@ -396,17 +347,17 @@ export async function deactivate() {
     if (!mcpServer) {
         return;
     }
-    
+
     try {
         logger.info('Stopping MCP Server during extension deactivation');
         await mcpServer.stop();
         logger.info('MCP Server stopped successfully');
     } catch (error) {
         logger.error(`Error stopping MCP Server: ${error instanceof Error ? error.message : String(error)}`);
-        throw error; // Re-throw to ensure VS Code knows about the failure
+        throw error;
     } finally {
         mcpServer = undefined;
-        // Dispose the logger
+
         logger.dispose();
     }
 }

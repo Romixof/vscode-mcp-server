@@ -3,21 +3,6 @@ import * as vscode from 'vscode';
 import { Router, json as expressJson, urlencoded as expressUrlencoded, type Request as ExpressRequest } from 'express';
 import { tokensMatch } from './auth';
 
-/**
- * Minimal MCP OAuth 2.1 authorization server, scoped to what a local tool
- * server actually needs: dynamic client registration, authorization-code flow
- * with S256 PKCE, bearer tokens that ARE the session secret. No refresh
- * rotation — the token lives as long as the window does.
- *
- * Endpoints (all mounted under this router):
- *   GET  /.well-known/oauth-protected-resource
- *   GET  /.well-known/oauth-authorization-server
- *   POST /register          (dynamic client registration)
- *   GET  /authorize         (consent page → code)
- *   POST /token             (code + PKCE verifier → access token)
- *   POST /revoke            (accepted, best-effort)
- */
-
 interface RegisteredClient {
 	client_id: string;
 	client_secret?: string;
@@ -29,7 +14,7 @@ interface PendingGrant {
 	clientId: string;
 	redirectUri: string;
 	codeChallenge: string;
-	code?: string;          // set once the user approves
+	code?: string;
 	expiresAt: number;
 	usedCode?: boolean;
 }
@@ -37,15 +22,11 @@ interface PendingGrant {
 const AUTH_CODE_TTL_MS = 5 * 60 * 1000;
 
 export interface OAuthHub {
-	/** The access token issued through the flow: the session secret itself. */
+
 	getAccessToken(): string | undefined;
-	/** Human-readable client name shown on the consent prompt. */
+
 	getLastClientName(): string | undefined;
-	/**
-	 * Durable store for client registrations. Both are optional: without
-	 * them registrations stay in-memory and remote clients must
-	 * re-register after every window reload.
-	 */
+
 	loadClients?(): Array<RegisteredClient>;
 	saveClients?(clients: Array<RegisteredClient>): void;
 }
@@ -55,8 +36,6 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 	const grants = new Map<string, PendingGrant>();
 	let lastClientName: string | undefined;
 
-	// Hydrate registrations from the durable store so remote clients survive
-	// window reloads; their client_id keeps working without re-registering.
 	for (const c of hub.loadClients?.() ?? []) {
 		clients.set(c.client_id, c);
 	}
@@ -64,12 +43,9 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		hub.saveClients?.([...clients.values()]);
 	}
 
-	// F3 — resource caps. Both maps are written by unauthenticated requests;
-	// without limits a tunnel attacker grows them at will.
 	const MAX_CLIENTS = 200;
 	const MAX_PENDING_GRANTS = 50;
-	// A grant that never reaches /token (ignored consent dialog) must not sit
-	// in the map forever; the sweep reaps expired and orphaned entries.
+
 	setInterval(() => {
 		const now = Date.now();
 		for (const [id, g] of grants) {
@@ -85,13 +61,6 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		}
 	}
 
-	// Public origin for metadata and redirects: when the request arrives
-	// through a tunnel (Tailscale Funnel, cloudflared…) the Host header is the
-	// public name — announcing http://127.0.0.1 would make remote token
-	// exchanges impossible. Direct local requests keep the loopback form.
-	// F4 — the reflected value must at least look like a DNS hostname; a
-	// request can otherwise smuggle arbitrary strings (or URLs) into the
-	// issuer other clients may follow.
 	function isPlausibleHostname(host: string): boolean {
 		return /^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?(:\d{1,5})?$/.test(host)
 			&& !host.includes('..');
@@ -101,7 +70,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		if (typeof host === 'string'
 			&& !host.includes('127.0.0.1')
 			&& !host.startsWith('localhost')
-			&& !host.startsWith('[') // literal IPv6 loopback forms stay local
+			&& !host.startsWith('[')
 			&& isPlausibleHostname(host)) {
 			return host.startsWith('http') ? host : `https://${host}`;
 		}
@@ -110,9 +79,12 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 
 	const router = Router();
 
-	// ---------- metadata ----------
 	router.get('/.well-known/oauth-protected-resource', (req, res) => {
 		const origin = publicOrigin(req);
+		// F16 — metadata must never be cached: a shared cache keyed without
+		// the Host could serve one origin's discovery document to another.
+		res.setHeader('Cache-Control', 'no-store');
+		res.setHeader('Vary', 'Host, X-Forwarded-Host');
 		res.json({
 			resource: origin,
 			authorization_servers: [origin],
@@ -123,6 +95,8 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 
 	router.get('/.well-known/oauth-authorization-server', (req, res) => {
 		const origin = publicOrigin(req);
+		res.setHeader('Cache-Control', 'no-store');
+		res.setHeader('Vary', 'Host, X-Forwarded-Host');
 		res.json({
 			issuer: origin,
 			registration_endpoint: `${origin}/register`,
@@ -137,8 +111,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		});
 	});
 
-	// ---------- dynamic client registration ----------
-	router.post('/register', (req: ExpressRequest, res) => {
+	router.post('/register', expressJson(), (req: ExpressRequest, res) => {
 		const redirectUris = req.body?.redirect_uris;
 		if (!Array.isArray(redirectUris) || redirect_uris_invalid(redirectUris)) {
 			return res.status(400).json({ error: 'invalid_redirect_uri' });
@@ -163,7 +136,6 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		});
 	});
 
-	// ---------- authorize (consent) ----------
 	router.get('/authorize', async (req, res) => {
 		const { response_type, client_id, redirect_uri, code_challenge, code_challenge_method, state } = req.query as Record<string, string | undefined>;
 		if (response_type !== 'code') {
@@ -176,9 +148,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		if (!code_challenge || code_challenge_method !== 'S256') {
 			return res.status(400).json({ error: 'PKCE S256 is required', error_code: 'invalid_request' });
 		}
-		// RFC 7636: a verifier is 43-128 base64url chars, so its S256
-		// challenge is exactly 43. Rejecting anything else keeps degenerate
-		// challenges (empty-string hash, single char) out of the grants map.
+
 		if (!/^[A-Za-z0-9_-]{43}$/.test(code_challenge)) {
 			return res.status(400).json({ error: 'invalid_code_challenge', error_description: 'code_challenge must be 43 base64url chars (S256 of a valid verifier)' });
 		}
@@ -192,14 +162,47 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		});
 		lastClientName = client.client_name ?? client.client_id;
 
-		// Native VS Code consent: buttons ride an information message. The
-		// grant resolves when the user answers; denial clears it.
-		const answer = await vscode.window.showInformationMessage(
-			`MCP authorization request`,
-			{ modal: true, detail: `"${lastClientName}" wants to call tools in this VS Code window (files, terminal, git…).\n\nRedirect: ${redirect_uri}` },
-			'Allow',
-			'Deny'
-		);
+		// Requester context: known-client recognition plus the network door
+		// and origin the request came through.
+		const KNOWN: Array<[RegExp, string]> = [
+			[/mammouth\.ai$/i, 'Mammouth'],
+			[/claude\.ai$|anthropic\.com$/i, 'Claude'],
+			[/chatgpt\.com$|openai\.com$/i, 'ChatGPT'],
+			[/cursor\.(com|sh)$/i, 'Cursor'],
+			[/codeium\.com$/i, 'Codeium'],
+			[/gemini\.google\.com$|deepmind\.com$/i, 'Gemini'],
+		];
+		let cbHost = 'unknown';
+		try {
+			cbHost = new URL(redirect_uri).hostname;
+		} catch { /* keep unknown */ }
+		const known = KNOWN.find(([re]) => re.test(cbHost));
+		const label = (client.client_name ?? '').trim() || known?.[1] || cbHost;
+		const via = typeof req.headers.host === 'string' ? req.headers.host : `127.0.0.1:${selfPort}`;
+		const ip = req.socket.remoteAddress?.replace('::ffff:', '') ?? 'unknown';
+		const local = ip === '127.0.0.1' || ip === '::1';
+		lastClientName = label;
+
+		// Consent card with a hard timeout (F-INJ1): an ignored dialog must
+		// resolve as a denial instead of leaving the request — and the
+		// grant — hanging forever.
+		const CONSENT_TIMEOUT_MS = 5 * 60 * 1000;
+		const answer = await new Promise<string | undefined>(resolve => {
+			let settled = false;
+			const done = (v: string | undefined) => {
+				if (!settled) { settled = true; resolve(v); }
+			};
+			const timer = setTimeout(() => done('Deny'), CONSENT_TIMEOUT_MS);
+			void vscode.window.showInformationMessage(
+				`MCP authorization — ${label}`,
+				{ modal: true, detail: `Client: ${label}${known ? ` (${known[1]})` : ''}\nCallback: ${redirect_uri}\nThrough: ${via}\nOrigin: ${ip}${local ? ' (this machine)' : ' (EXTERNAL)'}\n\n"Allow" hands this window's tools to the requester.` },
+				'Allow',
+				'Deny'
+			).then(choice => {
+				clearTimeout(timer);
+				done(choice);
+			});
+		});
 		const grant = grants.get(grantId);
 		grants.delete(grantId);
 		if (!grant || answer !== 'Allow') {
@@ -209,15 +212,11 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		const code = crypto.randomBytes(24).toString('base64url');
 		grant.code = code;
 		pruneOldest(grants, MAX_PENDING_GRANTS);
-		grants.set(code, grant); // re-key by code for the token exchange
+		grants.set(code, grant);
 		const sep = redirect_uri.includes('?') ? '&' : '?';
 		res.redirect(302, `${redirect_uri}${sep}code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ''}`);
 	});
 
-	// Landing the client hits after the consent redirect when its app does
-	// not own the callback path (Mammouth's callback is its chat root, so a
-	// bare redirect looks like "connection canceled"). This page closes the
-	// loop visibly: success banner + the code, then auto-close.
 	router.get('/oauth/done', (req, res) => {
 		const ok = req.query.code || !req.query.error;
 		res.status(200).send(`<!doctype html>
@@ -235,7 +234,6 @@ ${ok
 </body></html>`);
 	});
 
-	// ---------- token exchange ----------
 	router.post('/token', expressUrlencoded({ extended: false }), async (req, res) => {
 		const { grant_type, code, client_id, code_verifier, redirect_uri } = req.body as Record<string, string | undefined>;
 		if (grant_type !== 'authorization_code') {
@@ -248,9 +246,7 @@ ${ok
 		if (client_id !== grant.clientId || redirect_uri !== grant.redirectUri) {
 			return res.status(400).json({ error: 'invalid_grant' });
 		}
-		// PKCE S256: SHA-256(verifier) base64url must equal the challenge.
-		// A missing or malformed verifier is refused outright (RFC 7636 shape)
-		// so the empty-string hash can never satisfy a grant.
+
 		if (typeof code_verifier !== 'string' || !/^[A-Za-z0-9-._~]{43,128}$/.test(code_verifier)) {
 				return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
 		}
@@ -271,17 +267,28 @@ ${ok
 		});
 	});
 
-	// ---------- revoke (best-effort no-op: tokens die with the window) ----------
 	router.post('/revoke', expressUrlencoded({ extended: false }), (_req, res) => {
 		res.status(200).end();
 	});
 
-	// The consent prompt reads the human name for the log/tooltip
 	void lastClientName;
 
 	return router;
 }
 
 function redirect_uris_invalid(uris: unknown[]): boolean {
-	return uris.some(u => typeof u !== 'string' || !(u.startsWith('https://') || u.startsWith('http://127.0.0.1') || u.startsWith('http://localhost')));
+	return uris.some(u => {
+		if (typeof u !== 'string') return true;
+		if (!(u.startsWith('https://') || u.startsWith('http://127.0.0.1') || u.startsWith('http://localhost'))) return true;
+		// F13 — reject userinfo credentials smuggled into the authority:
+		// https://user@evil.com/cb passes a naive startsWith check.
+		try {
+			const parsed = new URL(u);
+			if (parsed.username || parsed.password) return true;
+			if (u.includes('@')) return true;
+		} catch {
+			return true;
+		}
+		return false;
+	});
 }

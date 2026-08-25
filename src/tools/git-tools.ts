@@ -17,8 +17,7 @@ async function runGitCommand(command: string, cwd?: string): Promise<{ output: s
 	const terminal = getTerminal();
 	const workspaceRoot = cwd || getWorkspaceRoot();
 	try {
-		// executeShellCommand resolves with the command's real exit code (captured
-		// via marker) and only rejects on timeout or read failure
+
 		return await executeShellCommand(terminal, command, workspaceRoot, 30000);
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
@@ -26,8 +25,6 @@ async function runGitCommand(command: string, cwd?: string): Promise<{ output: s
 	}
 }
 
-// single-quote for the shell so $/backticks stay literal and a trailing
-// backslash can't swallow the closing quote (which used to hang the terminal)
 function shellSingleQuote(value: string): string {
 	return `'${value.replace(/'/g, `'\\''`)}'`;
 }

@@ -42,7 +42,7 @@ function collectSizes(rootDir: string, subDir: string): { files: FileSize[]; tot
 				try {
 					files.push({ path: path.relative(base, fullPath).replace(/\\/g, '/'), size: fs.statSync(fullPath).size });
 				} catch {
-					// raced deletion, skip
+
 				}
 			}
 		}
@@ -91,7 +91,7 @@ function directorySize(dir: string): number {
 			try {
 				total += fs.statSync(fullPath).size;
 			} catch {
-				// ignore
+
 			}
 		}
 	}
@@ -124,7 +124,7 @@ async function performanceReport(workspace?: string): Promise<string> {
 				try {
 					totalBytes += fs.statSync(fullPath).size;
 				} catch {
-					// ignore
+
 				}
 			}
 		}
@@ -141,7 +141,7 @@ async function performanceReport(workspace?: string): Promise<string> {
 		const packages: Array<{ name: string; size: number }> = [];
 		for (const name of fs.readdirSync(nodeModules)) {
 			if (name.startsWith('@')) {
-				// scoped packages: measure each inner package separately
+
 				const scopeDir = path.join(nodeModules, name);
 				for (const inner of fs.readdirSync(scopeDir)) {
 					packages.push({ name: `${name}/${inner}`, size: directorySize(path.join(scopeDir, inner)) });

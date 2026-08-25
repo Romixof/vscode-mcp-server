@@ -28,8 +28,7 @@ async function detectTestFramework(workspace?: string): Promise<{ framework: str
 		hasPytest = content.toString().includes('pytest');
 	} catch { }
 	if (!hasPytest) {
-		// checked independently of requirements.txt — pytest may only be declared
-		// in pyproject.toml ([project.optional-dependencies], [dependency-groups])
+
 		const pyprojectUri = vscode.Uri.joinPath(workspaceUri, 'pyproject.toml');
 		try {
 			const content = await vscode.workspace.fs.readFile(pyprojectUri);
@@ -54,8 +53,7 @@ async function detectTestFramework(workspace?: string): Promise<{ framework: str
 async function detectFormatter(filePath: string, workspace?: string): Promise<{ formatter: string; command: string }> {
 	const ext = path.extname(filePath).toLowerCase();
 	const workspaceUri = resolveWorkspaceFolder(workspace).uri;
-	// language-specific formatters first — prettier can't parse .py/.rs/.go
-	// and would otherwise win whenever any prettier config exists in the repo
+
 	switch (ext) {
 		case '.py': {
 			try {
@@ -96,8 +94,7 @@ async function detectFormatter(filePath: string, workspace?: string): Promise<{ 
 
 async function detectLinter(filePath?: string, workspace?: string): Promise<{ linter: string; command: string; fixFlag: string }> {
 	const workspaceUri = resolveWorkspaceFolder(workspace).uri;
-	// Python targets resolve to a Python linter even when an eslint config
-	// exists elsewhere in the repo (mixed monorepos) — eslint can't parse .py
+
 	const isPythonTarget = !!filePath && filePath.toLowerCase().endsWith('.py');
 	if (!isPythonTarget) {
 		const eslintConfigs = ['.eslintrc', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml', 'eslint.config.js'];
@@ -165,8 +162,7 @@ Returns stdout/stderr with pass/fail summary.`, {
 			}
 			let command = detected.command;
 			if (pattern) {
-				// quoted for every framework — patterns with spaces otherwise split
-				// into unrelated filters (playwright/cypress/mocha)
+
 				command += ` "${pattern}"`;
 			}
 			if (args) {
@@ -213,7 +209,7 @@ Supports: vitest, jest, pytest (with pytest-cov), mocha (with c8/nyc).`, {
 			}
 			let command = `${detected.command} ${detected.coverageFlag}`;
 			if (detected.framework === 'mocha') {
-				// mocha has no native coverage — wrap in c8 or no report is produced
+
 				command = `npx c8 ${command}`;
 			}
 			if (detected.framework === 'vitest') {
@@ -277,8 +273,7 @@ Returns formatted content or success confirmation.`, {
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 	}, async ({ path: filePath, formatter = 'auto', checkOnly = false, workspace }) => {
 		try {
-			// multi-root rules apply; the resolved absolute path feeds the
-			// formatter CLI so it works whatever folder the terminal sits in
+
 			const target = resolveRelativeToolPath(filePath, workspace);
 			const fileUri = vscode.Uri.file(target.fsPath);
 			try {
@@ -324,8 +319,7 @@ Returns formatted content or success confirmation.`, {
 				} catch { }
 			}
 			const changed = originalContent !== newContent;
-			// cap the before/after excerpt — dumping two full copies of a large file
-			// floods the model context and buries real changes
+
 			const MAX_EXCERPT_LINES = 100;
 			let excerpt = '';
 			if (changed && !checkOnly) {
@@ -409,8 +403,7 @@ Shows unstaged changes by default. Use staged=true for staged changes.`, {
 				command = 'git -c color.ui=never ' + command.replace('git ', '');
 			}
 			if (filePath) {
-				// git wants a path relative to the folder it runs in, or the
-				// untouched absolute path for a target outside every root
+
 				const target = resolveRelativeToolPath(filePath, workspace);
 				cwd = target.root;
 				command += ` "${target.gitPath}"`;

@@ -7,26 +7,18 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveInputPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { logger } from '../utils/logger';
 
-/**
- * generate_ics_code — reads a .md/.txt/.docx/.pdf file from the workspace,
- * extracts dated events (French and English date formats plus holiday /
- * school keywords) and writes a standards-compliant RFC 5545 .ics file that
- * Google Calendar, Outlook, Obsidian and Apple Calendar can all import.
- */
-
 interface ExtractedEvent {
 	year: number;
-	month: number;   // 1-based
+	month: number;
 	day: number;
 	endYear?: number;
 	endMonth?: number;
-	endDay?: number;  // inclusive last day, for ranges
+	endDay?: number;
 	allDay: boolean;
 	title: string;
 	sourceLine: string;
 }
 
-// French month names (with common abbreviations)
 const MONTHS_FR: Array<[RegExp, number]> = [
 	[/^(janvier|janv\.?)$/i, 1], [/^(février|fevrier|févr\.?|fevr\.?)$/i, 2],
 	[/^(mars|mar\.?)$/i, 3], [/^(avril|avr\.?)$/i, 4],
@@ -42,7 +34,6 @@ const MONTHS_EN: Array<[RegExp, number]> = [
 	[/^oct(ober)?\.?$/i, 10], [/^nov(ember)?\.?$/i, 11], [/^dec(ember)?\.?$/i, 12],
 ];
 
-/** Event keywords that raise confidence a line really is a calendar event. */
 const KEYWORDS = [
 	'congé', 'congés', 'vacances', 'vacance', 'holiday', 'holidays', 'exam',
 	'examen', 'examens', 'rentree', 'rentrée', 'stage', 'réunion', 'reunion',
@@ -66,12 +57,10 @@ function hasEventKeyword(line: string): boolean {
 	return KEYWORDS.some(k => lower.includes(k));
 }
 
-/** Pull every plausible event out of one line of text. */
 function extractEventsFromLine(line: string, fallbackYear: number): ExtractedEvent[] {
 	const events: ExtractedEvent[] = [];
 	const keywordBonus = hasEventKeyword(line);
 
-	// Pattern 1: "du [samedi] 15 juillet [2026] au [lundi] 22 août [2026]"
 	const DAY_FR = '(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)';
 	const rangeFR = line.match(
 		new RegExp(`\\b(?:du\\s+|depuis\\s+)?(?:${DAY_FR}\\s+)?(\\d{1,2})\\s*(?:er)?\\s+(?:de\\s+)?([A-Za-zàâäéèêëîïôöùûüç]+)(?:\\s+(\\d{4}))?\\s+au\\s+(?:${DAY_FR}\\s+)?(\\d{1,2})\\s*(?:er)?\\s+(?:de\\s+)?([A-Za-zàâäéèêëîïôöùûüç]+)(?:\\s+(\\d{4}))?\\b`, 'i')
@@ -93,7 +82,6 @@ function extractEventsFromLine(line: string, fallbackYear: number): ExtractedEve
 		}
 	}
 
-	// Pattern 2: "15/07/2026", "15-07-2026", "2026-07-15", "15.07.26"
 	const numericMatches = [...line.matchAll(/\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})\b/g)];
 	for (const m of numericMatches) {
 		let day = parseInt(m[1]);
@@ -101,10 +89,10 @@ function extractEventsFromLine(line: string, fallbackYear: number): ExtractedEve
 		let year = parseInt(m[3]);
 		if (m[3].length === 2) year += 2000;
 		if (year > parseInt(m[1]) && parseInt(m[1]) <= 31 && parseInt(m[2]) >= 1 && parseInt(m[1]) <= 12) {
-			// ISO-looking YYYY-MM-DD was actually matched reversed; swap
+
 			const d = day; const mo = month;
 			year = parseInt(m[3].length === 4 ? m[3] : `20${m[3]}`);
-			// keep as-is
+
 		}
 		if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 2000 && year <= 2100) {
 			events.push({
@@ -115,7 +103,6 @@ function extractEventsFromLine(line: string, fallbackYear: number): ExtractedEve
 		}
 	}
 
-	// Pattern 3: "le 15 juillet", "15 juillet 2026", "July 15th", "on 3 March 2027"
 	const namedMatches = [...line.matchAll(
 		/\b(?:(?:le|la|au|on|the)\s+)?(\d{1,2})(?:er|st|nd|rd|th)?\s+(?:de\s+)?([A-Za-zàâäéèêëîïôöùûüç]+)(?:\s+(\d{4}))?\b|\b([A-Za-zàâäéèêëîïôöùûüç]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/gi
 	)];
@@ -128,7 +115,7 @@ function extractEventsFromLine(line: string, fallbackYear: number): ExtractedEve
 		}
 		const month = monthFromName(monthWord);
 		if (month && day >= 1 && day <= 31 && year >= 2000 && year <= 2100) {
-			// avoid duplicating what pattern 1 or 2 already caught
+
 			const dup = events.some(e => e.year === year && e.month === month && e.day === day);
 			if (!dup) {
 				events.push({ year, month, day, allDay: true, title: line.trim().slice(0, 120), sourceLine: line.trim() });
@@ -139,14 +126,13 @@ function extractEventsFromLine(line: string, fallbackYear: number): ExtractedEve
 	return events;
 }
 
-/** Read text content out of any supported file type. */
 async function readFileText(fullPath: string): Promise<string> {
 	const ext = path.extname(fullPath).toLowerCase();
 	if (ext === '.docx') {
-		// DOCX is a zip of XML; extract word/document.xml with Node's zlib
+
 		const { execSync } = await import('child_process');
 		try {
-			// unzip is available on most systems (Git Bash ships it)
+
 			const xml = execSync(`unzip -p "${fullPath.replace(/"/g, '\\"')}" word/document.xml`, { maxBuffer: 50 * 1024 * 1024 }).toString('utf-8');
 			return xml
 				.replace(/<\/w:p>/g, '\n')
@@ -164,7 +150,7 @@ async function readFileText(fullPath: string): Promise<string> {
 			throw new Error('PDF extraction needs pdftotext (poppler-utils) installed');
 		}
 	}
-	// md / txt / anything else: read raw
+
 	return fs.readFileSync(fullPath, 'utf-8');
 }
 
@@ -182,7 +168,7 @@ function addDays(year: number, month: number, day: number, days: number): { y: n
 }
 
 function foldIcsLine(line: string): string {
-	// RFC 5545 §3.1: lines longer than 75 octets must be folded
+
 	const out: string[] = [];
 	let rest = line;
 	while (rest.length > 74) {
@@ -212,7 +198,7 @@ function buildIcs(events: ExtractedEvent[], calendarName: string, sourceFile: st
 		lines.push(`DTSTAMP:${stamp}`);
 		const start = icsDate(ev.year, ev.month, ev.day);
 		if (ev.endDay) {
-			// DTEND in ICS all-day events is EXCLUSIVE, so add one day
+
 			const endPlus = addDays(ev.endYear ?? ev.year, ev.endMonth ?? ev.endMonth ?? ev.month, ev.endDay, 1);
 			lines.push(`DTSTART;VALUE=DATE:${start}`);
 			lines.push(`DTEND;VALUE=DATE:${icsDate(endPlus.y, endPlus.m, endPlus.d)}`);
@@ -281,7 +267,6 @@ export function registerCalendarTools(server: McpServer): void {
 					return { content: [{ type: 'text', text: `No dated events found in ${filePath}${effectiveRequire ? ' (keyword filter active — try requireKeyword=false)' : ''}. Supported: French/English month names, dd/mm/yyyy, yyyy-mm-dd.` }] };
 				}
 
-				// sort chronologically
 				allEvents.sort((a, b) => (a.year * 10000 + a.month * 100 + a.day) - (b.year * 10000 + b.month * 100 + b.day));
 
 				const sourceBase = path.basename(filePath, path.extname(filePath));

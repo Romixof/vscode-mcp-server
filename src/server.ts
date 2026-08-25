@@ -62,11 +62,11 @@ export interface ToolConfiguration {
 export class MCPServer {
     private app: express.Application;
     private httpServer?: Server;
-    /** Access credential required on /mcp (mode-dependent). Undefined = open. */
+
     public authToken?: string;
-    /** Set by the extension so session tokens persist in globalState. */
+
     public extensionContext?: vscode.ExtensionContext;
-    /** OAuth endpoints, created lazily on first use in oauth mode. */
+
     private oauthRouterInstance?: ReturnType<typeof createOAuthRouter>;
 
     private get oauthRouter() {
@@ -93,10 +93,9 @@ export class MCPServer {
     private fileListingCallback?: FileListingCallback;
     private terminal?: vscode.Terminal;
     private toolConfig: ToolConfiguration;
-    // Post-zod tool callbacks of the most recent registration; the /invoke
-    // endpoint dispatches through this map instead of rebuilding a session
+
     private invokeHandlers = new Map<string, (args: unknown, extra: unknown) => unknown>();
-    // Multi-window cluster state machine; every window runs one
+
     public readonly cluster: ClusterCoordinator;
 
     public setFileListingCallback(callback: FileListingCallback) {
@@ -127,17 +126,17 @@ export class MCPServer {
             advanced: true
         };
         this.app = express();
-        this.app.use(express.json());
+        // NOTE: express.json() is intentionally NOT mounted here. The body
+        // parser runs per-route below the auth gates, so a malformed payload
+        // can never produce an error before the credential check (F12).
 
-        // Cluster coordinator needs a ClusterHost; we implement it below
         this.cluster = new ClusterCoordinator(
             this as unknown as ClusterHost,
             this.port,
             this.host,
-            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.12.50"
+            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.12.51"
         );
-        // Spokes present the shared per-machine secret on cluster calls; both
-        // windows read the same globalState so this converges naturally
+
         this.cluster.setClusterCredential(() => {
             const mode = readAuthConfig().mode;
             if (mode === 'none') {return undefined;}
@@ -156,16 +155,13 @@ export class MCPServer {
             return;
         }
 
-        // dry run so a broken tool module surfaces at startup instead of on the first request
         void this.buildSessionServer().close();
     }
 
-    // One fresh server + tool registry per HTTP request (stateless MCP): a hung
-    // tool call can no longer block or corrupt anyone else's request
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.12.50",
+            version: "0.12.51",
         }, {
             capabilities: {
                 logging: {},
@@ -187,14 +183,12 @@ export class MCPServer {
             throw new Error('File listing callback not set');
         }
 
-        // Count calls locally (feeds get_server_info_code). The callback is
-        // always the last argument of server.tool(), whatever the overload.
         const originalTool = server.tool.bind(server);
         server.tool = ((name: string, ...args: unknown[]) => {
             const last = args.length - 1;
             if (typeof args[last] === 'function') {
                 const handler = args[last] as (...cbArgs: unknown[]) => unknown;
-                // Store handler for /invoke dispatch; latest registration wins
+
                 this.invokeHandlers.set(name, handler);
                 args[last] = (...cbArgs: unknown[]) => {
                     recordToolCall(name);
@@ -246,35 +240,19 @@ export class MCPServer {
             }
         }
 
-        // Not tied to any enabledTools setting: the bar stays open
         registerCoffeeTools(server);
     }
 
     private setupRoutes(): void {
-        // --- Auth gates (Phase 12.1) ---
-        // Origin first: a hostile page gets 403 before it learns anything
-        // about tokens. Bearer second: no valid credential, no tool runs.
-        // BOTH gates cover every route: /mcp, /invoke and the cluster
-        // control plane. A public tunnel exposes all of them, so a request
-        // without a credential must never reach a tool — local cluster
-        // spokes authenticate with the shared session token too.
+
         const authCfg = () => readAuthConfig();
         this.app.use(originGuard(authCfg, this.port));
-        // Credential enforcement. Public surface (no secret needed):
-        //   - OAuth discovery and handshake endpoints
-        //   - /__mcp_cluster/identity (read-only)
-        // Everything else — /mcp, /invoke, heartbeat, deregister,
-        // hub-shutdown and now REGISTER — requires the session credential.
-        // A joining window reads the shared per-machine secret from
-        // globalState before it registers, so legitimate spokes always
-        // have it; remote attackers over the tunnel never do (F1).
+
         const PUBLIC_PATHS = new Set([
             '/register', '/authorize', '/token', '/revoke',
             CLUSTER_IDENTITY_PATH
         ]);
-        // Cluster control plane first: state-changing routes accept the
-        // X-MCP-Cluster proof from local spokes OR a full bearer; everything
-        // else falls through to the plain bearer gate.
+
         const expectedToken = () => {
             const mode = authCfg().mode;
             if (mode === 'static-token') {return authCfg().staticToken;}
@@ -295,12 +273,11 @@ export class MCPServer {
                 const bearer = extractToken(req.headers as Record<string, string | string[] | undefined>);
                 if (bearer && tokensMatch(bearer, expected)) {return next();}
                 res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server"');
-                return res.status(401).json({ error: 'invalid_token', error_description: 'cluster control plane requires the session credential (X-MCP-Cluster or Authorization: Bearer)' });
+                return res.status(401).json({ error: 'invalid_token' });
             }
             bearerAuth(expectedToken)(req, res, next);
         });
-        // OAuth endpoints mount before the bearer gate so discovery,
-        // registration, authorize and token stay reachable pre-auth (per spec)
+
         this.app.use((req, res, next) => {
             if (authCfg().mode === 'oauth') {
                 return this.oauthRouter(req, res, next);
@@ -308,11 +285,7 @@ export class MCPServer {
             next();
         });
 
-        // Stateless mode, one session per request: every POST gets its own
-        // transport and tool registry, disposed once the response is out. The
-        // old shared transport serialized everything, so a single hung tool
-        // call starved every later request until clients went "Not connected".
-        this.app.post('/mcp', async (req, res) => {
+        this.app.post('/mcp', express.json(), async (req, res) => {
             logger.info(`Request received: ${req.method} ${req.url}`);
             let transport: StreamableHTTPServerTransport | undefined;
             let sessionServer: McpServer | undefined;
@@ -352,8 +325,6 @@ export class MCPServer {
             }
         });
 
-        // Unsupported methods get a bare 405 per the MCP spec — a JSON-RPC error
-        // body here is what clients surface as "-32000 Connection closed"
         const methodNotAllowed: express.RequestHandler = (req, res) => {
             logger.info(`Received ${req.method} MCP request`);
             res.setHeader('Allow', 'POST');
@@ -364,7 +335,6 @@ export class MCPServer {
         this.app.get('/mcp/sse', methodNotAllowed);
         this.app.delete('/mcp', methodNotAllowed);
 
-        // Handle OPTIONS requests for CORS
         this.app.options('/mcp', (req, res) => {
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -372,45 +342,35 @@ export class MCPServer {
             res.status(204).end();
         });
 
-        // --- Cluster control plane ---
-        // Identity endpoint: tells joining windows this is a hub they can join
         this.app.get(CLUSTER_IDENTITY_PATH, (req, res) => {
             res.json(this.cluster.handleIdentity());
         });
 
-        // Registration endpoint: spokes POST their folders to the hub
         this.app.post(CLUSTER_REGISTER_PATH, express.json(), (req, res) => {
             const result = this.cluster.handleRegister(req.body);
             res.status(result.status).json(result.body);
         });
 
-        // Heartbeat endpoint: spokes refresh their lease
         this.app.post(CLUSTER_HEARTBEAT_PATH, express.json(), (req, res) => {
             const result = this.cluster.handleHeartbeat(req.body.windowId, req.body.port, req.body.folders);
             res.status(result.status).json(result.body);
         });
 
-        // Deregister endpoint: spoke says goodbye
         this.app.post(CLUSTER_DEREGISTER_PATH, express.json(), (req, res) => {
             this.cluster.handleDeregister(req.body.windowId);
             res.json({ ok: true });
         });
 
-        // Hub shutdown broadcast: hub tells spokes to start election
         this.app.post(CLUSTER_HUB_SHUTDOWN_PATH, (req, res) => {
             this.cluster.handleHubShutdown();
             res.json({ ok: true });
         });
 
-        // Invocation endpoint: hub forwards tool calls to spokes
         this.app.post(INVOKE_PATH, express.json(), async (req, res) => {
             const result = await this.cluster.handleInvoke(req.body);
             res.status(result.status).json(result.body);
         });
 
-        // F11 — last-resort error handler. Without this, Express answers an
-        // unexpected throw with an HTML page carrying the full stack trace
-        // (absolute install paths included) to whoever triggered it.
         this.app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
             const message = err instanceof Error ? err.message : 'Internal error';
             logger.error(`[http] Unhandled error on ${_req.method} ${_req.path}: ${message}`);
@@ -419,16 +379,12 @@ export class MCPServer {
         });
     }
 
-    // --- ClusterHost implementation ---
-
-    /** Binds the shared express app; rejects with the underlying error (code EADDRINUSE et al). */
     async listenOn(port: number, host: string): Promise<number> {
         return new Promise((resolve, reject) => {
             const server = this.app.listen(port, host, () => {
                 const addr = server.address();
                 const boundPort = typeof addr === 'object' && addr ? addr.port : port;
-                // Remember the socket so stop()/closeListener() can reach it:
-                // a spoke's ephemeral listener is bound here, never in start()
+
                 this.httpServer = server;
                 logger.info(`[ClusterHost.listenOn] Bound to ${host}:${boundPort}`);
                 resolve(boundPort);
@@ -439,7 +395,6 @@ export class MCPServer {
         });
     }
 
-    /** Closes whichever listener currently holds the app. */
     async closeListener(): Promise<void> {
         if (this.httpServer) {
             const server = this.httpServer;
@@ -456,7 +411,6 @@ export class MCPServer {
         }
     }
 
-    /** Executes a registered tool handler directly (post-zod), bypassing routing. */
     async invokeLocally(tool: string, args: Record<string, unknown>): Promise<unknown> {
         const handler = this.invokeHandlers.get(tool);
         if (!handler) {
@@ -465,10 +419,8 @@ export class MCPServer {
         return handler(args, {});
     }
 
-    /** True when this window registered the tool (enabledTools differ per window). */
     hasTool(tool: string): boolean {
-        // Registrations happen during setupTools(); before that nothing is
-        // served, which is exactly what the caller needs to know
+
         return this.invokeHandlers.has(tool);
     }
 
@@ -477,8 +429,6 @@ export class MCPServer {
             logger.info('[MCPServer.start] Starting MCP server');
             const startTime = Date.now();
 
-            // Session-token mode: create once, persist across window reloads.
-            // OAuth mode also needs the secret — issued tokens ARE this value.
             const authMode = readAuthConfig().mode;
             if (authMode === 'session-token' || authMode === 'oauth') {
                 if (!this.authToken) {
@@ -493,12 +443,11 @@ export class MCPServer {
                 this.authToken = undefined;
             }
 
-            // Start HTTP server
             logger.info('[MCPServer.start] Starting HTTP server');
             const httpServerStartTime = Date.now();
 
             return new Promise((resolve, reject) => {
-                // Bind to localhost only for security
+
                 this.httpServer = this.app.listen(this.port, this.host, () => {
                     const httpStartTime = Date.now() - httpServerStartTime;
                     logger.info(`[MCPServer.start] HTTP Server started (took ${httpStartTime}ms)`);
@@ -509,9 +458,7 @@ export class MCPServer {
 
                     resolve();
                 });
-                // A taken port surfaces as an 'error' event, not an exception:
-                // without this listener the startup promise never settles and
-                // the window sits half-started with no explanation
+
                 this.httpServer.once('error', async (error: Error & { code?: string }) => {
                     const detail = error.code === 'EADDRINUSE'
                         ? `port ${this.port} is already in use — another VS Code window may already be serving MCP there; give this window its own vscode-mcp-server.port`
@@ -519,8 +466,7 @@ export class MCPServer {
                     logger.error(`[MCPServer.start] HTTP Server failed to listen: ${detail}`);
                     if (error.code === 'EADDRINUSE') {
                         try {
-                            // On success this swapped this.httpServer to the
-                            // spoke's ephemeral listener via listenOn()
+
                             await this.cluster.joinAfterAddressInUse(error);
                             logger.info('[MCPServer.start] Successfully joined as spoke');
                             resolve();
@@ -545,13 +491,13 @@ export class MCPServer {
         const stopStartTime = Date.now();
 
         try {
-            // Close HTTP server with timeout
+
             if (this.httpServer) {
                 logger.info('[MCPServer.stop] Closing HTTP server (with timeout)');
                 const httpServerCloseStart = Date.now();
 
                 await Promise.race([
-                    // Normal close operation
+
                     new Promise<void>((resolve, reject) => {
                         this.httpServer!.close((err) => {
                             const httpCloseTime = Date.now() - httpServerCloseStart;
@@ -565,23 +511,16 @@ export class MCPServer {
                         });
                     }),
 
-                    // Timeout fallback
                     new Promise<void>((resolve) => {
                         setTimeout(() => {
                             logger.warn(`[MCPServer.stop] HTTP server close timed out after ${forceTimeout}ms - forcing close`);
-                            // We resolve anyway to continue with the shutdown process
+
                             resolve();
                         }, forceTimeout);
                     })
                 ]);
             }
 
-            // Per-request sessions tear themselves down through their own
-            // res 'close' handlers as the sockets die with the server
-
-            // Cluster goodbye (deregister / hub-shutdown fan-out) runs after
-            // the listener is down so a spoke that promotes instantly never
-            // races our still-open port
             await this.cluster.stop();
 
             const totalStopTime = Date.now() - stopStartTime;

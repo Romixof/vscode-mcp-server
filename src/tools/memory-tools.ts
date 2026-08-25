@@ -9,8 +9,7 @@ const MAMMOUTH_DIR = path.join(os.homedir(), 'Mammouth');
 const GLOBAL_MEMORY_FILE = path.join(MAMMOUTH_DIR, 'MEMORY.md');
 
 function getProjectMemoryPath(ref?: string): string | undefined {
-	// undefined (rather than a thrown error) means no folder is open and lets each
-	// tool print its own guidance; a bad ref still fails loudly with "Unknown workspace"
+
 	if (listWorkspaceFolders().length === 0) {
 		return undefined;
 	}
@@ -66,7 +65,7 @@ function findSectionEnd(content: string, sectionHeader: string, sectionLevel?: n
 		const level = headerMatch[1].length;
 		const title = headerMatch[2].trim();
 		if (!inSection) {
-			// anchor only on a header at the expected level so ### Détails never captures ## Détails writes
+
 			if (title === sectionHeader && (sectionLevel === undefined || level === sectionLevel)) {
 				inSection = true;
 				foundLevel = level;
@@ -133,7 +132,7 @@ function removeEntryFromSection(content: string, sectionHeader: string, entryToR
 		}
 		result.push(line);
 	}
-	// collapse blank runs left behind by a removal
+
 	return result.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n+$/, '\n');
 }
 

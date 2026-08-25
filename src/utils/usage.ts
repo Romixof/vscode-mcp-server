@@ -1,6 +1,3 @@
-// Local-only usage counters. Nothing here leaves the machine — the numbers
-// back the get_server_info_code report so users can see which tools their
-// coding agents actually lean on.
 const startedAt = Date.now();
 const callCounts = new Map<string, number>();
 
