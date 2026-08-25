@@ -134,7 +134,7 @@ export class MCPServer {
             this as unknown as ClusterHost,
             this.port,
             this.host,
-            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.12.51"
+            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.12.52"
         );
 
         this.cluster.setClusterCredential(() => {
@@ -161,7 +161,7 @@ export class MCPServer {
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.12.51",
+            version: "0.12.52",
         }, {
             capabilities: {
                 logging: {},
@@ -263,15 +263,24 @@ export class MCPServer {
         this.app.use((req, res, next) => {
             if (authCfg().mode === 'none') {return next();}
             if (req.path.startsWith('/.well-known/') || PUBLIC_PATHS.has(req.path)) {return next();}
+            const presented = extractToken(req.headers as Record<string, string | string[] | undefined>);
+            // F-REV — a derived OAuth token is accepted when it matches a
+            // registered client and that client has not been revoked. The
+            // raw session secret stays valid for local/trusted clients.
+            if (presented && authCfg().mode === 'oauth' && this.oauthRouterInstance) {
+                const verdict = (this.oauthRouterInstance as unknown as { verifyDerivedToken(t: string): 'ok' | 'revoked' | 'unknown' }).verifyDerivedToken(presented);
+                if (verdict === 'ok') {return next();}
+                if (verdict === 'revoked') {
+                    res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server", error="invalid_token"');
+                    return res.status(401).json({ error: 'invalid_token', error_description: 'token revoked' });
+                }
+            }
             if (clusterRoutes.includes(req.path)) {
                 const expected = expectedToken();
                 if (!expected) {return next();}
-                const presented = req.headers['x-mcp-cluster'];
-                if (typeof presented === 'string' && presented && tokensMatch(presented, expected)) {
-                    return next();
-                }
-                const bearer = extractToken(req.headers as Record<string, string | string[] | undefined>);
-                if (bearer && tokensMatch(bearer, expected)) {return next();}
+                const clusterHdr = req.headers['x-mcp-cluster'];
+                if (typeof clusterHdr === 'string' && clusterHdr && tokensMatch(clusterHdr, expected)) {return next();}
+                if (presented && tokensMatch(presented, expected)) {return next();}
                 res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server"');
                 return res.status(401).json({ error: 'invalid_token' });
             }

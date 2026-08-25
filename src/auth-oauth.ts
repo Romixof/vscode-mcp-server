@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { Router, json as expressJson, urlencoded as expressUrlencoded, type Request as ExpressRequest } from 'express';
 import { tokensMatch } from './auth';
+import { logger } from './utils/logger';
 
 interface RegisteredClient {
 	client_id: string;
@@ -29,6 +30,26 @@ export interface OAuthHub {
 
 	loadClients?(): Array<RegisteredClient>;
 	saveClients?(clients: Array<RegisteredClient>): void;
+}
+
+/**
+ * F-REV — derived access tokens. The session secret is never handed out
+ * through OAuth; each client gets an HMAC of it keyed by its client_id.
+ * Revocation (per client or global) then actually cuts access without
+ * touching the master credential other clients rely on.
+ */
+const revokedClients = new Set<string>();
+
+export function deriveAccessToken(secret: string, clientId: string): string {
+	return crypto.createHmac('sha256', secret).update(`oauth:${clientId}`).digest('base64url');
+}
+
+export function isClientRevoked(clientId: string): boolean {
+	return revokedClients.has(clientId);
+}
+
+export function revokeClient(clientId: string): void {
+	revokedClients.add(clientId);
 }
 
 export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
@@ -275,24 +296,56 @@ ${ok
 		}
 		grant.usedCode = true;
 		grants.delete(code as string);
-		const accessToken = hub.getAccessToken();
-		if (!accessToken) {
+		const secret = hub.getAccessToken();
+		if (!secret) {
 			return res.status(503).json({ error: 'server_not_ready' });
 		}
+		if (isClientRevoked(client_id as string)) {
+			return res.status(400).json({ error: 'invalid_grant', error_description: 'client is revoked' });
+		}
 		res.json({
-			access_token: accessToken,
+			access_token: deriveAccessToken(secret, client_id as string),
 			token_type: 'Bearer',
 			scope: 'mcp',
 		});
 	});
 
-	router.post('/revoke', expressUrlencoded({ extended: false }), (_req, res) => {
+	router.post('/revoke', expressUrlencoded({ extended: false }), (req, res) => {
+		const token = typeof req.body?.token === 'string' ? req.body.token : '';
+		const secret = hub.getAccessToken();
+		if (secret && token) {
+			for (const clientId of clients.keys()) {
+				const derived = deriveAccessToken(secret, clientId);
+				if (tokensMatch(token, derived)) {
+					revokeClient(clientId);
+					logger.info(`[oauth] access revoked for client ${clientId}`);
+					break;
+				}
+			}
+		}
 		res.status(200).end();
 	});
 
 	void lastClientName;
 
-	return router;
+	return Object.assign(router, {
+		/**
+		 * F-REV — validates a presented bearer token against derived client
+		 * tokens. Returns 'ok' (known, non-revoked client), 'revoked', or
+		 * 'unknown' when the token matches no registered client.
+		 */
+		verifyDerivedToken(token: string): 'ok' | 'revoked' | 'unknown' {
+			const secret = hub.getAccessToken();
+			if (!secret) {return 'unknown';}
+			for (const clientId of clients.keys()) {
+				const derived = deriveAccessToken(secret, clientId);
+				if (tokensMatch(token, derived)) {
+					return isClientRevoked(clientId) ? 'revoked' : 'ok';
+				}
+			}
+			return 'unknown';
+		},
+	});
 }
 
 function redirect_uris_invalid(uris: unknown[]): boolean {
