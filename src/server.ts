@@ -30,6 +30,11 @@ import { EXTENSION_ID } from './tools/advanced-tools';
 import { recordToolCall } from './utils/usage';
 import { logger } from './utils/logger';
 import { setClusterRootsProvider } from './utils/workspace';
+import type { Scope } from './auth/scopes';
+import { runWithScopes, checkToolAccess, currentScopes } from './auth/toolgate';
+import { ALL_SCOPES as LOCAL_ALL_SCOPES, scopeAllows as scopeAllowsCached } from './auth/scopes';
+import { appendAudit } from './auth/audit';
+import { checkShellCommand } from './auth/shellguard';
 import { ClusterCoordinator, ClusterHost } from './cluster/coordinator';
 import {
 	CLUSTER_DEREGISTER_PATH,
@@ -132,7 +137,7 @@ export class MCPServer {
             this as unknown as ClusterHost,
             this.port,
             this.host,
-            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.13.1"
+            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.14.0"
         );
 
         this.cluster.setClusterCredential(() => {
@@ -161,7 +166,7 @@ export class MCPServer {
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.13.1",
+            version: "0.14.0",
         }, {
             capabilities: {
                 logging: {},
@@ -241,6 +246,31 @@ export class MCPServer {
         }
 
         registerCoffeeTools(server);
+        this.enforceScopesOn(server);
+    }
+
+    /**
+     * F-SCOPE — wraps every registered tool handler with a scope check.
+     * Runs inside the AsyncLocalStorage context established by the auth
+     * middleware, so the granted scopes travel with the request.
+     */
+    private enforceScopesOn(server: McpServer): void {
+        const registrations = (server as unknown as { _registeredTools?: Record<string, { handler: (args: unknown, extra: unknown) => Promise<unknown> }> })._registeredTools;
+        if (!registrations) {
+            return;
+        }
+        for (const name of Object.keys(registrations)) {
+            const entry = registrations[name];
+            const original = entry.handler.bind(entry);
+            entry.handler = async (args: unknown, extra: unknown) => {
+                const { scopes, client } = currentScopes();
+                if (!scopeAllowsCached(scopes, name)) {
+                    return checkToolAccess(name, scopes, client) as unknown as ReturnType<typeof original>;
+                }
+                appendAudit({ kind: 'tool_call', client, detail: name });
+                return original(args, extra);
+            };
+        }
     }
 
     private setupRoutes(): void {
@@ -266,9 +296,12 @@ export class MCPServer {
             const presented = extractToken(req.headers as Record<string, string | string[] | undefined>);
 
             if (presented && authCfg().mode === 'oauth' && this.oauthRouterInstance) {
-                const verdict = (this.oauthRouterInstance as unknown as { verifyDerivedToken(t: string): 'ok' | 'revoked' | 'unknown' }).verifyDerivedToken(presented);
-                if (verdict === 'ok') {return next();}
-                if (verdict === 'revoked') {
+                const verdict = (this.oauthRouterInstance as unknown as { verifyDerivedToken(t: string): { verdict: 'ok' | 'revoked' | 'unknown'; scopes: Scope[]; client?: string } }).verifyDerivedToken(presented);
+                if (verdict.verdict === 'ok') {
+                    runWithScopes(verdict.scopes, verdict.client ?? 'oauth-client', next);
+                    return;
+                }
+                if (verdict.verdict === 'revoked') {
                     res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server", error="invalid_token"');
                     return res.status(401).json({ error: 'invalid_token', error_description: 'token revoked' });
                 }
@@ -282,7 +315,7 @@ export class MCPServer {
                 res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server"');
                 return res.status(401).json({ error: 'invalid_token' });
             }
-            bearerAuth(expectedToken)(req, res, next);
+            bearerAuth(expectedToken)(req, res, () => runWithScopes(LOCAL_ALL_SCOPES, 'local-session', next));
         });
 
         this.app.use((req, res, next) => {

@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { executeShellCommand } from './shell-tools';
+import { getRecentAudit } from '../auth/audit';
 
 const DEFAULT_EXCLUDES = [
 	'**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/*.min.js',
@@ -270,6 +271,23 @@ function parseNpmAudit(json: string): { counts: Record<string, number>; advisori
 
 export function registerSecurityTools(server: McpServer, terminal?: vscode.Terminal): void {
 	sharedTerminal = terminal;
+
+	server.tool('get_audit_log_code', `Reads the security audit log: recent tool calls, denied tools, blocked shell commands, sandbox violations, consent grants and token revocations.
+
+WHEN TO USE: to review what connected clients did on this machine, or to investigate suspicious activity.`, {
+		limit: z.number().int().min(1).max(500).optional().default(50).describe('Maximum entries to return'),
+		kind: z.enum(['tool_call', 'tool_denied', 'shell_blocked', 'sandbox_violation', 'consent_granted', 'consent_denied', 'token_revoked']).optional().describe('Filter by event kind')
+	}, async ({ limit = 50, kind }) => {
+		const events = getRecentAudit(limit, kind ? { kind } : undefined);
+		if (events.length === 0) {
+			return { content: [{ type: 'text' as const, text: 'Audit log is empty for this filter.' }] };
+		}
+		const lines = events.map(e => {
+			const t = new Date(e.ts).toISOString().replace('T', ' ').slice(0, 19);
+			return `${t}  [${e.kind}]  ${e.client}: ${e.detail}`;
+		});
+		return { content: [{ type: 'text' as const, text: `Audit log (${events.length} entries, newest first):\n\n${lines.join('\n')}` }] };
+	});
 
 	server.tool('find_secrets_code', `Scans the workspace for hardcoded secrets: AWS keys, GitHub/Slack tokens, Google API keys, Stripe live keys, private key blocks, JWTs and generic credential assignments.
 
