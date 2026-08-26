@@ -110,7 +110,6 @@ Auto-stages all changes by default. Use amend=true to modify last commit.`, {
 			}
 			let commitMessage = message;
 			if (!commitMessage && !amend) {
-				// name-status so generateCommitMessage can classify added/deleted/modified per file
 				const diff = await runGitCommand('git diff --cached --name-status', cwd);
 				commitMessage = generateCommitMessage(diff.output);
 			}
@@ -253,8 +252,6 @@ Supports line ranges. Returns author, commit hash, date, and line content.`, {
 					if (currentEntry.sha) {
 						blameEntries.push(currentEntry);
 					}
-					// field 3 of the header is the real final line number, which
-					// matters when -L restricts the range (counting blocks renumbers)
 					const headerMatch = line.match(/^[0-9a-f]{40}\s+\d+\s+(\d+)/);
 					currentEntry = { sha: line.substring(0, 40), lineNumber: headerMatch ? parseInt(headerMatch[1], 10) : 0 };
 				} else if (line.startsWith('\t')) {
@@ -299,7 +296,6 @@ Shows conflicted files and the actual conflict sections (<<<<<<< HEAD ... >>>>>>
 	}, async ({ workspace }) => {
 		try {
 			const cwd = getWorkspaceRoot(workspace);
-			// diff-filter=U covers every unmerged state (UU, AA, DD, AU, UA, DU, UD)
 			const diffCheck = await runGitCommand('git diff --name-only --diff-filter=U', cwd);
 			let conflictedFiles = diffCheck.output.split('\n').map(l => l.trim()).filter(l => l && !l.includes(' '));
 			if (conflictedFiles.length === 0) {

@@ -112,25 +112,14 @@ export function resolveInputPath(input: string, ref?: string, toolName = 'unknow
 	return assertSandboxed(resolved, toolName);
 }
 
-// --- F-SANDBOX: filesystem confinement ---------------------------------
-// Every file-touching tool resolves its paths through resolveInputPath,
-// so the check lives here: once resolved, the target must sit inside an
-// allowed root or the call is refused before any I/O happens. Symlinks
-// are re-resolved when the target exists on disk so a planted link cannot
-// smuggle reads out of the sandbox.
-
-// F-SANDBOX — the default is the SAFE mode: a fresh process that has not
-// been configured yet must not silently allow full-disk access.
 let sandboxConfigProvider: () => SandboxConfig = () => ({ mode: 'workspace', allowPaths: [] });
 
-/** Extra trusted roots contributed by the cluster (authenticated spokes). */
 let clusterRootsProvider: (() => string[]) | undefined;
 
 export function setClusterRootsProvider(provider: () => string[]): void {
 	clusterRootsProvider = provider;
 }
 
-/** Called by the extension host to wire the current settings. */
 export function setSandboxConfigProvider(provider: () => SandboxConfig): void {
 	sandboxConfigProvider = provider;
 }
@@ -139,17 +128,11 @@ export function getSandboxConfig(): SandboxConfig {
 	return sandboxConfigProvider();
 }
 
-/**
- * Validates a resolved path against the sandbox and returns it unchanged.
- * Throws on escape attempts. The symlink-aware double resolution runs only
- * for targets that already exist on disk.
- */
 export function assertSandboxed(uri: vscode.Uri, toolName: string): vscode.Uri {
 	const cfg = getSandboxConfig();
 	if (cfg.mode === 'full') return uri;
 	const folders = listWorkspaceFolders().map(f => ({ fsPath: f.uri.fsPath }));
-	// Cluster-aware: folders registered by authenticated spokes are trusted
-	// roots too — the hub forwards file ops to them after this check.
+
 	if (clusterRootsProvider) {
 		for (const r of clusterRootsProvider()) {
 			folders.push({ fsPath: r });
@@ -159,7 +142,7 @@ export function assertSandboxed(uri: vscode.Uri, toolName: string): vscode.Uri {
 	try {
 		real = fs.realpathSync.native(uri.fsPath);
 	} catch {
-		real = undefined; // does not exist yet — create case
+		real = undefined; 
 	}
 	try {
 		assertInSandbox(uri.fsPath, real, cfg, folders, toolName);

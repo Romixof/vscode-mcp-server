@@ -127,15 +127,12 @@ export class MCPServer {
             advanced: true
         };
         this.app = express();
-        // NOTE: express.json() is intentionally NOT mounted here. The body
-        // parser runs per-route below the auth gates, so a malformed payload
-        // can never produce an error before the credential check (F12).
 
         this.cluster = new ClusterCoordinator(
             this as unknown as ClusterHost,
             this.port,
             this.host,
-            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.13.0"
+            () => vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? "0.13.1"
         );
 
         this.cluster.setClusterCredential(() => {
@@ -144,8 +141,7 @@ export class MCPServer {
             if (mode === 'static-token') {return readAuthConfig().staticToken;}
             return this.authToken ?? this.extensionContext?.globalState.get<string>('vscode-mcp.authToken');
         });
-        // F-SANDBOX — cluster folders registered by authenticated spokes are
-        // trusted sandbox roots: the hub routes file ops to them by design.
+
         setClusterRootsProvider(() => this.cluster.clusterTrustedFolderPaths());
 
         this.setupRoutes();
@@ -165,7 +161,7 @@ export class MCPServer {
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.13.0",
+            version: "0.13.1",
         }, {
             capabilities: {
                 logging: {},
@@ -268,9 +264,7 @@ export class MCPServer {
             if (authCfg().mode === 'none') {return next();}
             if (req.path.startsWith('/.well-known/') || PUBLIC_PATHS.has(req.path)) {return next();}
             const presented = extractToken(req.headers as Record<string, string | string[] | undefined>);
-            // F-REV — a derived OAuth token is accepted when it matches a
-            // registered client and that client has not been revoked. The
-            // raw session secret stays valid for local/trusted clients.
+
             if (presented && authCfg().mode === 'oauth' && this.oauthRouterInstance) {
                 const verdict = (this.oauthRouterInstance as unknown as { verifyDerivedToken(t: string): 'ok' | 'revoked' | 'unknown' }).verifyDerivedToken(presented);
                 if (verdict === 'ok') {return next();}

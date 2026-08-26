@@ -32,12 +32,6 @@ export interface OAuthHub {
 	saveClients?(clients: Array<RegisteredClient>): void;
 }
 
-/**
- * F-REV — derived access tokens. The session secret is never handed out
- * through OAuth; each client gets an HMAC of it keyed by its client_id.
- * Revocation (per client or global) then actually cuts access without
- * touching the master credential other clients rely on.
- */
 const revokedClients = new Set<string>();
 
 export function deriveAccessToken(secret: string, clientId: string): string {
@@ -102,8 +96,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 
 	router.get('/.well-known/oauth-protected-resource', (req, res) => {
 		const origin = publicOrigin(req);
-		// F16 — metadata must never be cached: a shared cache keyed without
-		// the Host could serve one origin's discovery document to another.
+
 		res.setHeader('Cache-Control', 'no-store');
 		res.setHeader('Vary', 'Host, X-Forwarded-Host');
 		res.json({
@@ -183,8 +176,6 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		});
 		lastClientName = client.client_name ?? client.client_id;
 
-		// Requester context: known-client recognition plus the network door
-		// and origin the request came through.
 		const KNOWN: Array<[RegExp, string]> = [
 			[/mammouth\.ai$/i, 'Mammouth'],
 			[/claude\.ai$|anthropic\.com$/i, 'Claude'],
@@ -196,7 +187,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		let cbHost = 'unknown';
 		try {
 			cbHost = new URL(redirect_uri).hostname;
-		} catch { /* keep unknown */ }
+		} catch {  }
 		const known = KNOWN.find(([re]) => re.test(cbHost));
 		const label = (client.client_name ?? '').trim() || known?.[1] || cbHost;
 		const via = typeof req.headers.host === 'string' ? req.headers.host : `127.0.0.1:${selfPort}`;
@@ -204,9 +195,6 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		const local = ip === '127.0.0.1' || ip === '::1';
 		lastClientName = label;
 
-		// Consent card with a hard timeout (F-INJ1): an ignored dialog must
-		// resolve as a denial instead of leaving the request — and the
-		// grant — hanging forever.
 		const CONSENT_TIMEOUT_MS = 5 * 60 * 1000;
 		const answer = await new Promise<string | undefined>(resolve => {
 			let settled = false;
@@ -329,11 +317,6 @@ ${ok
 	void lastClientName;
 
 	return Object.assign(router, {
-		/**
-		 * F-REV — validates a presented bearer token against derived client
-		 * tokens. Returns 'ok' (known, non-revoked client), 'revoked', or
-		 * 'unknown' when the token matches no registered client.
-		 */
 		verifyDerivedToken(token: string): 'ok' | 'revoked' | 'unknown' {
 			const secret = hub.getAccessToken();
 			if (!secret) {return 'unknown';}
@@ -351,9 +334,9 @@ ${ok
 function redirect_uris_invalid(uris: unknown[]): boolean {
 	return uris.some(u => {
 		if (typeof u !== 'string') return true;
-		if (!(u.startsWith('https://') || u.startsWith('http://127.0.0.1') || u.startsWith('http://localhost'))) return true;
-		// F13 — reject userinfo credentials smuggled into the authority:
-		// https://user@evil.com/cb passes a naive startsWith check.
+		const okScheme = u.startsWith('https://') || u.startsWith('http://127.0.0.1') || u.startsWith('http://localhost');
+		if (!okScheme) return true;
+
 		try {
 			const parsed = new URL(u);
 			if (parsed.username || parsed.password) return true;

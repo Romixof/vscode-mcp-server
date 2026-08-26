@@ -309,7 +309,6 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         }
     );
 
-    // 4. get_open_ports_code - List open ports and processes
     server.tool(
         'get_open_ports_code',
         `Lists open ports and associated processes on the system.
@@ -331,7 +330,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                 try {
                     portCwd = getWorkspaceRoot(workspace);
                 } catch {
-                    // port listing does not need a workspace; run from the terminal's cwd
+                    
                 }
 
                 if (isWindows) {
@@ -381,7 +380,6 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         }
     );
 
-    // 5. restart_dev_server_code - Restart dev servers
     server.tool(
         'restart_dev_server_code',
         `Restarts common development servers (Vite, Next.js, Webpack, Nodemon, etc.).
@@ -431,7 +429,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                 const shellKind = await resolveShellKind(sharedTerminal);
 
                 if (port) {
-                    // kill syntax depends on the shell actually hosting the command
+                    
                     const killCmd = shellKind === 'bash'
                         ? `lsof -ti:${port} | xargs kill -9 2>/dev/null || true`
                         : `Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }`;

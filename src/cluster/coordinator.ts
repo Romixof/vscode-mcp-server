@@ -580,11 +580,6 @@ export class ClusterCoordinator {
 		return { lines, windowsFooter: windowNames.join(', ') };
 	}
 
-	/**
-	 * F-SANDBOX — absolute roots of every folder in the cluster (hub's own
-	 * plus authenticated spokes'). These are trusted sandbox roots because
-	 * each was registered through the credentialed cluster handshake.
-	 */
 	clusterTrustedFolderPaths(): string[] {
 		try {
 			const out: string[] = [];
