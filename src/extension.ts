@@ -5,6 +5,7 @@ import { listWorkspaceFiles } from './tools/file-tools';
 import { logger } from './utils/logger';
 import { setSandboxConfigProvider } from './utils/workspace';
 import type { SandboxMode } from './utils/sandbox';
+import { initAudit } from './auth/audit';
 
 export { MCPServer };
 
@@ -241,6 +242,10 @@ export async function activate(context: vscode.ExtensionContext) {
         const allowPaths = cfg.get<string[]>('security.sandbox.allowPaths', []) ?? [];
         return { mode, allowPaths, homeDir: process.env.USERPROFILE || process.env.HOME };
     });
+    initAudit(
+        () => context.globalState.get<import('./auth/audit').AuditEvent[]>('audit.log', []),
+        events => context.globalState.update('audit.log', events)
+    );
     try {
 
         const config = vscode.workspace.getConfiguration('vscode-mcp-server');

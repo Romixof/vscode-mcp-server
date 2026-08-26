@@ -3,12 +3,16 @@ import * as vscode from 'vscode';
 import { Router, json as expressJson, urlencoded as expressUrlencoded, type Request as ExpressRequest } from 'express';
 import { tokensMatch } from './auth';
 import { logger } from './utils/logger';
+import { intersectScopes, PRESETS, Scope, scopeDescription } from './auth/scopes';
+import { appendAudit } from './auth/audit';
 
 interface RegisteredClient {
 	client_id: string;
 	client_secret?: string;
 	redirect_uris: string[];
 	client_name?: string;
+	requestedScopes?: string;
+	grantedScopes?: Scope[];
 }
 
 interface PendingGrant {
@@ -135,6 +139,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 			client_id: clientId,
 			redirect_uris: redirectUris as string[],
 			client_name: typeof req.body?.client_name === 'string' ? req.body.client_name : undefined,
+			requestedScopes: typeof req.body?.scope === 'string' ? req.body.scope : undefined
 		};
 		pruneOldest(clients, MAX_CLIENTS);
 		clients.set(clientId, client);
@@ -204,8 +209,10 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 			const timer = setTimeout(() => done('Deny'), CONSENT_TIMEOUT_MS);
 			void vscode.window.showInformationMessage(
 				`MCP authorization — ${label}`,
-				{ modal: true, detail: `Client: ${label}${known ? ` (${known[1]})` : ''}\nCallback: ${redirect_uri}\nThrough: ${via}\nOrigin: ${ip}${local ? ' (this machine)' : ' (EXTERNAL)'}\n\n"Allow" hands this window's tools to the requester.` },
-				'Allow',
+				{ modal: true, detail: `Client: ${label}${known ? ` (${known[1]})` : ''}\nCallback: ${redirect_uri}\nThrough: ${via}\nOrigin: ${ip}${local ? ' (this machine)' : ' (EXTERNAL)'}\n\nAccess level:\n- Read only: view files only\n- Standard: read + edit files + run commands in the sandbox\n- Full access: everything except administration` },
+				'Read only',
+				'Standard',
+				'Full access',
 				'Deny'
 			).then(choice => {
 				clearTimeout(timer);
@@ -214,10 +221,26 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		});
 		const grant = grants.get(grantId);
 		grants.delete(grantId);
-		if (!grant || answer !== 'Allow') {
+		const presetName = answer === 'Read only' ? 'read-only'
+			: answer === 'Standard' ? 'standard'
+			: answer === 'Full access' ? 'full' : undefined;
+		if (!grant || !presetName) {
+			if (presetName === undefined && answer !== 'Deny') {
+				appendAudit({ kind: 'consent_denied', client: label, detail: 'timeout or dismissed' });
+			} else {
+				appendAudit({ kind: 'consent_denied', client: label, detail: `preset=${answer}` });
+			}
 			const sep = redirect_uri.includes('?') ? '&' : '?';
 			return res.redirect(302, `${redirect_uri}${sep}error=access_denied${state ? `&state=${encodeURIComponent(state)}` : ''}`);
 		}
+		const grantedScopes = intersectScopes(client.requestedScopes, PRESETS[presetName]);
+		client.grantedScopes = grantedScopes;
+		persistClients();
+		appendAudit({
+			kind: 'consent_granted',
+			client: label,
+			detail: `preset=${presetName} scopes=[${grantedScopes.join(',')}] origin=${ip}`
+		});
 		const code = crypto.randomBytes(24).toString('base64url');
 		grant.code = code;
 		pruneOldest(grants, MAX_PENDING_GRANTS);
@@ -291,10 +314,13 @@ ${ok
 		if (isClientRevoked(client_id as string)) {
 			return res.status(400).json({ error: 'invalid_grant', error_description: 'client is revoked' });
 		}
+		const tokenClient = clients.get(grant.clientId);
+		const grantedScopes = tokenClient?.grantedScopes ?? ['fs:read'];
+		const scopeKey = `${grant.clientId}|${grantedScopes.join(',')}`;
 		res.json({
-			access_token: deriveAccessToken(secret, client_id as string),
+			access_token: deriveAccessToken(secret, scopeKey),
 			token_type: 'Bearer',
-			scope: 'mcp',
+			scope: grantedScopes.join(' '),
 		});
 	});
 
@@ -303,10 +329,11 @@ ${ok
 		const secret = hub.getAccessToken();
 		if (secret && token) {
 			for (const clientId of clients.keys()) {
-				const derived = deriveAccessToken(secret, clientId);
+				const scopes = clients.get(clientId)?.grantedScopes ?? [];
+				const derived = deriveAccessToken(secret, `${clientId}|${scopes.join(',')}`);
 				if (tokensMatch(token, derived)) {
 					revokeClient(clientId);
-					logger.info(`[oauth] access revoked for client ${clientId}`);
+					appendAudit({ kind: 'token_revoked', client: clientId, detail: `scopes=[${scopes.join(',')}]` });
 					break;
 				}
 			}
@@ -317,16 +344,19 @@ ${ok
 	void lastClientName;
 
 	return Object.assign(router, {
-		verifyDerivedToken(token: string): 'ok' | 'revoked' | 'unknown' {
+		verifyDerivedToken(token: string): { verdict: 'ok' | 'revoked' | 'unknown'; scopes: Scope[]; client?: string } {
 			const secret = hub.getAccessToken();
-			if (!secret) {return 'unknown';}
-			for (const clientId of clients.keys()) {
-				const derived = deriveAccessToken(secret, clientId);
+			if (!secret) {return { verdict: 'unknown', scopes: [] };}
+			for (const [clientId, client] of clients) {
+				const scopes = client.grantedScopes ?? [];
+				const derived = deriveAccessToken(secret, `${clientId}|${scopes.join(',')}`);
 				if (tokensMatch(token, derived)) {
-					return isClientRevoked(clientId) ? 'revoked' : 'ok';
+					return isClientRevoked(clientId)
+						? { verdict: 'revoked', scopes: [], client: clientId }
+						: { verdict: 'ok', scopes, client: clientId };
 				}
 			}
-			return 'unknown';
+			return { verdict: 'unknown', scopes: [] };
 		},
 	});
 }

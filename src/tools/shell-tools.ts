@@ -5,6 +5,9 @@ import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveWorkspaceFolder, resolveInputPath, listWorkspaceFolders, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { logger } from '../utils/logger';
+import { checkShellCommand } from '../auth/shellguard';
+import { appendAudit } from '../auth/audit';
+import { currentScopes } from '../auth/toolgate';
 
 export type ShellKind = 'bash' | 'powershell';
 
@@ -416,6 +419,22 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
                     if (hit) {
                         fullCwd = resolveInputPath(cwd).fsPath;
                     }
+                }
+
+                const verdict = checkShellCommand(command);
+                if (!verdict.allowed) {
+                    appendAudit({
+                        kind: 'shell_blocked',
+                        client: currentScopes().client,
+                        detail: `rule=${verdict.rule} cmd=${command.slice(0, 120)}`
+                    });
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `Blocked by shell policy: "${verdict.rule}". This command pattern is not allowed on this machine.`
+                        }],
+                        isError: true
+                    } as unknown as CallToolResult;
                 }
 
                 const { output, exitCode } = await executeShellCommand(terminal, command, fullCwd, timeout);
