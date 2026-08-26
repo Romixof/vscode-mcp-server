@@ -401,6 +401,21 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
         },
         async ({ command, cwd, timeout = 10000, workspace }): Promise<CallToolResult> => {
             try {
+                const verdict = checkShellCommand(command);
+                if (!verdict.allowed) {
+                    appendAudit({
+                        kind: 'shell_blocked',
+                        client: currentScopes().client,
+                        detail: `rule=${verdict.rule} cmd=${command.slice(0, 120)}`
+                    });
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `Blocked by shell policy: "${verdict.rule}". This command pattern is not allowed on this machine.`
+                        }],
+                        isError: true
+                    } as unknown as CallToolResult;
+                }
                 if (!terminal) {
                     throw new Error('Terminal not available');
                 }
@@ -419,22 +434,6 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
                     if (hit) {
                         fullCwd = resolveInputPath(cwd).fsPath;
                     }
-                }
-
-                const verdict = checkShellCommand(command);
-                if (!verdict.allowed) {
-                    appendAudit({
-                        kind: 'shell_blocked',
-                        client: currentScopes().client,
-                        detail: `rule=${verdict.rule} cmd=${command.slice(0, 120)}`
-                    });
-                    return {
-                        content: [{
-                            type: 'text',
-                            text: `Blocked by shell policy: "${verdict.rule}". This command pattern is not allowed on this machine.`
-                        }],
-                        isError: true
-                    } as unknown as CallToolResult;
                 }
 
                 const { output, exitCode } = await executeShellCommand(terminal, command, fullCwd, timeout);
