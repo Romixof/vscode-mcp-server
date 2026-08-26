@@ -1,26 +1,12 @@
 import * as path from 'path';
 
-/**
- * F-SANDBOX — filesystem confinement for every authenticated tool call.
- *
- * Design goals:
- *  1. Uncontournable: the check lives in resolveSandboxedPath, which every
- *     file-touching tool already funnels through. A tool that bypasses it
- *     would have to stop using the shared workspace utils entirely.
- *  2. Symlink-proof: the final accessed path is resolved with realpath
- *     semantics before comparison, so a symlink planted inside the
- *     workspace pointing at C:\Windows cannot smuggle reads out.
- *  3. Explicit over silent: a blocked access returns a typed error that
- *     names the sandbox root, instead of a generic ENOENT.
- */
-
 export type SandboxMode = 'workspace' | 'home' | 'full';
 
 export interface SandboxConfig {
 	mode: SandboxMode;
-	/** Extra roots allowed in workspace mode (absolute paths). */
+	
 	allowPaths: string[];
-	/** Home directory for 'home' mode. */
+	
 	homeDir?: string;
 }
 
@@ -35,7 +21,6 @@ export class SandboxViolationError extends Error {
 	}
 }
 
-/** Normalize to a comparison key: absolute, forward slashes, no trailing sep. */
 function normalizeForCompare(p: string): string {
 	return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
@@ -47,10 +32,6 @@ function isSubpath(root: string, target: string): boolean {
 	return t === r || t.startsWith(r + '/');
 }
 
-/**
- * Compute the list of allowed roots from config + open workspace folders.
- * Called fresh on every check so settings changes apply immediately.
- */
 export function computeAllowedRoots(
 	config: SandboxConfig,
 	workspaceFolders: Array<{ fsPath: string }>
@@ -58,7 +39,7 @@ export function computeAllowedRoots(
 	const roots: string[] = [];
 	switch (config.mode) {
 		case 'full':
-			return []; // empty = everything allowed
+			return []; 
 		case 'home':
 			if (config.homeDir) roots.push(config.homeDir);
 			break;
@@ -72,7 +53,7 @@ export function computeAllowedRoots(
 			}
 			break;
 	}
-	// dedupe + keep only truthy
+	
 	const seen = new Set<string>();
 	return roots.filter(r => {
 		if (!r) return false;
@@ -83,16 +64,6 @@ export function computeAllowedRoots(
 	});
 }
 
-/**
- * Validate that targetPath is inside one of the allowed roots.
- *
- * realTarget: the realpath-resolved version of the target if it exists on
- * disk (symlinks resolved). Callers should pass undefined for files that do
- * not exist yet (create_file); existing-file checks use the resolved form so
- * a symlink escape cannot slip through.
- *
- * Throws SandboxViolationError when outside every root.
- */
 export function assertInSandbox(
 	targetPath: string,
 	realTarget: string | undefined,
@@ -101,7 +72,7 @@ export function assertInSandbox(
 	toolName: string
 ): void {
 	const roots = computeAllowedRoots(config, workspaceFolders);
-	if (roots.length === 0) return; // full mode
+	if (roots.length === 0) return; 
 
 	const candidates = [targetPath];
 	if (realTarget && realTarget !== targetPath) candidates.push(realTarget);
@@ -117,10 +88,6 @@ export function assertInSandbox(
 	}
 }
 
-/**
- * Convenience wrapper used by tools: resolves, checks, and returns the
- * validated absolute path. The error message never leaks other roots.
- */
 export function enforceSandbox(
 	resolvedUriFsPath: string,
 	opts: {

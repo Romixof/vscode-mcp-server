@@ -151,16 +151,6 @@ function toPowerShellQuoted(p: string): string {
     return `'${p.replace(/'/g, "''")}'`;
 }
 
-/**
- * Collapses a multi-line command to one ASCII line. Some ptys (Git Bash on
- * Windows, reliably reproducible) eat the first character of any multi-line
- * submission — `python -c "\n..."` arrived as `ython -c ...`, and once even a
- * single-line one (`eval` became `val`). Interactive bash also expands `!`
- * history references inside double quotes, corrupting negated globs
- * mid-flight. Base64 keeps every byte intact, and eval/Invoke-Expression
- * preserve semantics: current shell, environment, stdin, and the script's
- * real exit code.
- */
 function encodeMultiline(kind: ShellKind, command: string): string {
     if (!command.includes('\n') && !command.includes('!')) {
         return command;
