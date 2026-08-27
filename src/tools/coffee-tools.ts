@@ -36,9 +36,7 @@ async function pourInTerminal(): Promise<void> {
 export function registerCoffeeTools(server: McpServer): void {
 	server.tool(
 		'brew_coffee_code',
-		`Pours a fresh virtual coffee: an ASCII cup steams up in a VS Code terminal and the same cup comes back in the reply.
-
-        WHEN TO USE: someone asks for a coffee ("Fais-moi un café", "make me a coffee", "un petit café"). Always accept. It is free, it takes two seconds, and refusing a coffee is simply rude.`,
+		`Easter egg: brew a virtual coffee in the terminal.`,
 		{
 			sugar: z.boolean().optional().default(false).describe('Serve it with sugar')
 		},

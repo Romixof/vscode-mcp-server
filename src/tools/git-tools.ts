@@ -84,11 +84,7 @@ function assertValidBranchName(name: string): string {
 }
 
 export function registerGitTools(server: McpServer): void {
-	server.tool('commit_changes_code', `Commits changes with auto-generated conventional commit message based on diff.
-
-WHEN TO USE: Quick commits without writing messages manually. Uses diff summary to generate conventional commit (feat:/fix:/docs:/chore:/test:).
-
-Auto-stages all changes by default. Use amend=true to modify last commit.`, {
+	server.tool('commit_changes_code', `Commit changes (conventional message).`, {
 		message: z.string().optional().describe('Custom commit message (optional, auto-generated from diff if omitted)'),
 		addAll: z.boolean().optional().default(true).describe('Stage all changes before commit (git add -A)'),
 		amend: z.boolean().optional().default(false).describe('Amend the previous commit instead of creating new one'),
@@ -138,11 +134,7 @@ Auto-stages all changes by default. Use amend=true to modify last commit.`, {
 		}
 	});
 
-	server.tool('create_branch_code', `Creates, switches, or lists Git branches.
-
-WHEN TO USE: Starting new features, hotfixes, or reviewing branch structure.
-
-Creates branch from current HEAD by default. Use 'from' to specify source. Set checkout=false to create without switching.`, {
+	server.tool('create_branch_code', `Create/switch/list git branches.`, {
 		name: z.string().describe('Branch name (will be slugified)'),
 		from: z.string().optional().describe('Source branch/commit/tag (default: current HEAD)'),
 		checkout: z.boolean().optional().default(true).describe('Switch to the new branch after creation'),
@@ -210,11 +202,7 @@ Creates branch from current HEAD by default. Use 'from' to specify source. Set c
 		}
 	});
 
-	server.tool('get_blame_code', `Shows git blame (line-by-line authorship) for a file or line range.
-
-WHEN TO USE: Understanding who wrote/changed specific code, finding when bugs were introduced.
-
-Supports line ranges. Returns author, commit hash, date, and line content.`, {
+	server.tool('get_blame_code', `Git blame for a file.`, {
 		path: z.string().describe('File path relative to its workspace root; with multiple folders open, "FolderName/path" targets another folder'),
 		startLine: z.number().optional().describe('Start line number (1-based, inclusive)'),
 		endLine: z.number().optional().describe('End line number (1-based, inclusive)'),
@@ -287,11 +275,7 @@ Supports line ranges. Returns author, commit hash, date, and line content.`, {
 		}
 	});
 
-	server.tool('list_conflicts_code', `Lists all files with merge conflicts and shows conflict markers.
-
-WHEN TO USE: After failed merge/rebase, before resolving conflicts.
-
-Shows conflicted files and the actual conflict sections (<<<<<<< HEAD ... >>>>>>> branch).`, {
+	server.tool('list_conflicts_code', `List merge conflicts.`, {
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 	}, async ({ workspace }) => {
 		try {
@@ -336,11 +320,7 @@ Shows conflicted files and the actual conflict sections (<<<<<<< HEAD ... >>>>>>
 		}
 	});
 
-	server.tool('stash_changes_code', `Manages git stash: push, pop, list, drop, apply, show.
-
-WHEN TO USE: Temporarily saving work-in-progress, switching branches cleanly, recovering stashed changes.
-
-Default action: push with auto-generated WIP message.`, {
+	server.tool('stash_changes_code', `Git stash push/pop/list.`, {
 		action: z.enum(['push', 'pop', 'list', 'drop', 'apply', 'show']).optional().default('push').describe('Stash action to perform'),
 		message: z.string().optional().describe('Custom stash message (for push)'),
 		index: z.number().int().min(0).optional().default(0).describe('Stash index (for pop/drop/apply/show, 0=latest)'),

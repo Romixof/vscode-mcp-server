@@ -469,11 +469,7 @@ async function suggestRefactoring(options: {
 }
 
 export function registerRefactorTools(server: McpServer): void {
-	server.tool('rename_symbol_code', `Renames a symbol (variable, function, class) across every code file in the workspace using word-boundary matching.
-
-WHEN TO USE: safe textual rename when the editor's built-in rename cannot be driven remotely.
-
-Pass dryRun=true first to preview how many occurrences change per file. Partial words are never touched (renaming "count" leaves "totalCount" alone).`, {
+	server.tool('rename_symbol_code', `Rename symbol across files.`, {
 		oldName: z.string().describe('Current identifier name'),
 		newName: z.string().describe('New identifier name'),
 		dryRun: z.boolean().optional().default(false).describe('Preview the rename without writing files'),
@@ -494,11 +490,7 @@ Pass dryRun=true first to preview how many occurrences change per file. Partial 
 		return { content: [{ type: 'text', text }] };
 	});
 
-	server.tool('extract_function_code', `Extracts a line range from a file into a new function and replaces the range with a call to it.
-
-WHEN TO USE: splitting up a long function once you have decided which lines belong together and which variables they need.
-
-You supply the parameter names explicitly — locals are not analysed, so review that the result compiles afterwards. Works on JavaScript/TypeScript and Python files.`, {
+	server.tool('extract_function_code', `Extract lines into a new function.`, {
 		path: z.string().describe('File to edit'),
 		startLine: z.number().int().min(1).describe('First line to extract (1-based)'),
 		endLine: z.number().int().min(1).describe('Last line to extract (inclusive)'),
@@ -510,11 +502,7 @@ You supply the parameter names explicitly — locals are not analysed, so review
 		return { content: [{ type: 'text', text }] };
 	});
 
-	server.tool('find_duplicate_code_code', `Finds repeated code blocks across the workspace: normalised sliding windows of consecutive lines are hashed, and blocks appearing two or more times are reported with all their locations.
-
-WHEN TO USE: before refactoring, hunting copy-pasted logic, deciding what deserves extraction into a shared helper.
-
-Comment-only and empty lines never break or join a block.`, {
+	server.tool('find_duplicate_code_code', `Find duplicate code blocks.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		minLines: z.number().int().min(3).max(50).optional().default(5).describe('Block size in consecutive code lines (default 5)'),
 		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude'),
@@ -535,9 +523,7 @@ Comment-only and empty lines never break or join a block.`, {
 		return { content: [{ type: 'text', text }] };
 	});
 
-	server.tool('suggest_refactoring_code', `Flags functions worth refactoring with concrete numbers: body length, parameter count, approximate cyclomatic complexity, nesting depth. Heuristic static analysis, nothing is executed.
-
-WHEN TO USE: deciding where to start cleaning up a file or module, reviewing AI-generated code that grew too big.`, {
+	server.tool('suggest_refactoring_code', `Flag functions needing refactor.`, {
 		path: z.string().optional().describe('File or subdirectory to analyse (default: whole workspace)'),
 		maxLines: z.number().int().min(10).optional().default(80).describe('Flag functions longer than this many lines'),
 		maxParams: z.number().int().min(1).optional().default(4).describe('Flag functions with more than this many parameters'),

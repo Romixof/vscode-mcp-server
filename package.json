@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
   "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -197,6 +197,10 @@
       {
         "command": "vscode-mcp-server.copyAuthToken",
         "title": "MCP Server: Copy access token"
+      },
+      {
+        "command": "vscode-mcp-server.openDashboard",
+        "title": "MCP Server: Open Dashboard"
       }
     ]
   },

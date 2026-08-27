@@ -57,13 +57,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
 
     server.tool(
         'run_sql_query_code',
-        `Executes SQL queries against local databases (PostgreSQL, MySQL, SQLite).
-
-        WHEN TO USE: Querying databases, debugging data issues, running migrations.
-
-        Supports: PostgreSQL (psql), MySQL (mysql), SQLite (sqlite3).
-        Auto-detects from connection string or uses default local instance.
-        Returns structured results with columns and rows.`,
+        `Run SQL against local DB (postgres/mysql/sqlite).`,
         {
             query: z.string().describe('SQL query to execute'),
             database: z.enum(['postgresql', 'mysql', 'sqlite']).optional().describe('Database type (auto-detected if omitted)'),
@@ -119,12 +113,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
 
     server.tool(
         'test_api_endpoint_code',
-        `Makes HTTP requests to local API endpoints for testing.
-
-        WHEN TO USE: Testing REST/GraphQL APIs, webhooks, health checks.
-
-        Supports all HTTP methods, headers, body, auth. Returns status, headers, body, timing.
-        Follows redirects by default.`,
+        `HTTP request to a local API endpoint.`,
         {
             url: z.string().describe('API endpoint URL (e.g., http://localhost:3000/api/users)'),
             method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']).optional().default('GET').describe('HTTP method'),
@@ -192,12 +181,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
 
     server.tool(
         'check_env_vars_code',
-        `Checks .env files for missing, unused, or duplicate variables.
-
-        WHEN TO USE: Validating environment config, finding missing secrets, detecting drift.
-
-        Compares .env, .env.local, .env.example, .env.*.local against code usage (process.env.VAR).
-        Reports: missing in .env, unused in .env, duplicates, differences between files.`,
+        `Audit .env files for missing/duplicate vars.`,
         {
             checkCodeUsage: z.boolean().optional().default(true).describe('Scan code for process.env.VAR references'),
             envFiles: z.array(z.string()).optional().default(['.env', '.env.local', '.env.example']).describe('Env files to check (relative to workspace)'),
@@ -311,11 +295,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
 
     server.tool(
         'get_open_ports_code',
-        `Lists open ports and associated processes on the system.
-
-        WHEN TO USE: Finding port conflicts, identifying what's running on a port, debugging dev servers.
-
-        Works on Windows, macOS, Linux. Shows PID, process name, port, protocol, state.`,
+        `List open ports and owning processes.`,
         {
             port: z.number().optional().describe('Specific port to check (optional)'),
             protocol: z.enum(['tcp', 'udp', 'all']).optional().default('all').describe('Protocol filter'),
@@ -382,12 +362,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
 
     server.tool(
         'restart_dev_server_code',
-        `Restarts common development servers (Vite, Next.js, Webpack, Nodemon, etc.).
-
-        WHEN TO USE: Hot reload stuck, config changes not picked up, clearing cache.
-
-        Detects running dev servers from package.json scripts or common patterns.
-        Kills existing process and restarts with same command.`,
+        `Restart dev server (vite/next/webpack).`,
         {
             script: z.string().optional().describe('npm script name to run (e.g., "dev", "start")'),
             command: z.string().optional().describe('Custom command to run (overrides script)'),
