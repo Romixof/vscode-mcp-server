@@ -272,9 +272,7 @@ function parseNpmAudit(json: string): { counts: Record<string, number>; advisori
 export function registerSecurityTools(server: McpServer, terminal?: vscode.Terminal): void {
 	sharedTerminal = terminal;
 
-	server.tool('get_audit_log_code', `Reads the security audit log: recent tool calls, denied tools, blocked shell commands, sandbox violations, consent grants and token revocations.
-
-WHEN TO USE: to review what connected clients did on this machine, or to investigate suspicious activity.`, {
+	server.tool('get_audit_log_code', `Read security audit log (admin only).`, {
 		limit: z.number().int().min(1).max(500).optional().default(50).describe('Maximum entries to return'),
 		kind: z.enum(['tool_call', 'tool_denied', 'shell_blocked', 'sandbox_violation', 'consent_granted', 'consent_denied', 'token_revoked']).optional().describe('Filter by event kind')
 	}, async ({ limit = 50, kind }) => {
@@ -289,11 +287,7 @@ WHEN TO USE: to review what connected clients did on this machine, or to investi
 		return { content: [{ type: 'text' as const, text: `Audit log (${events.length} entries, newest first):\n\n${lines.join('\n')}` }] };
 	});
 
-	server.tool('find_secrets_code', `Scans the workspace for hardcoded secrets: AWS keys, GitHub/Slack tokens, Google API keys, Stripe live keys, private key blocks, JWTs and generic credential assignments.
-
-WHEN TO USE: before committing or publishing, verifying that no credentials leaked into source or config files.
-
-Matched values are masked in the output. Obvious placeholders ("your-api-key", "xxxx") are ignored.`, {
+	server.tool('find_secrets_code', `Scan for hardcoded secrets/keys.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude'),
 		maxResults: z.number().int().min(1).max(500).optional().default(50).describe('Maximum findings to report'),
@@ -304,9 +298,7 @@ Matched values are masked in the output. Obvious placeholders ("your-api-key", "
 		return { content: [{ type: 'text', text: formatFindings('# Secret Scan', result, true) }] };
 	});
 
-	server.tool('security_scan_code', `Scans source code for risky constructs: eval/new Function, innerHTML sinks, shell-injection-prone exec calls with interpolated input, disabled TLS verification, yaml.load without a safe Loader, pickle deserialization, shell=True subprocesses, SQL built by string concatenation.
-
-WHEN TO USE: security review before a release, auditing AI-generated code, checking legacy modules.`, {
+	server.tool('security_scan_code', `Scan for risky code patterns.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		severity: z.enum(['high', 'medium', 'low']).optional().describe('Minimum severity to report'),
 		maxResults: z.number().int().min(1).max(500).optional().default(100).describe('Maximum findings to report'),
@@ -316,9 +308,7 @@ WHEN TO USE: security review before a release, auditing AI-generated code, check
 		return { content: [{ type: 'text', text: formatFindings('# Security Scan', result, true) }] };
 	});
 
-	server.tool('check_dependencies_vulnerabilities_code', `Runs npm audit against the workspace package-lock.json and reports known vulnerabilities per dependency with severities and patched versions.
-
-WHEN TO USE: dependency review during releases, triaging CI audit failures. Requires network access to the npm registry.`, {
+	server.tool('check_dependencies_vulnerabilities_code', `Run npm audit for vulnerabilities.`, {
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 	}, async ({ workspace }) => {
 		const workspaceRoot = await getWorkspaceRoot(workspace);

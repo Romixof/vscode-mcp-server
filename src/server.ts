@@ -10,6 +10,7 @@ import { Request, Response } from 'express';
 import { registerFileTools, FileListingCallback } from './tools/file-tools';
 import { registerEditTools } from './tools/edit-tools';
 import { registerShellTools } from './tools/shell-tools';
+import { Dashboard, estimateTokens } from './dashboard';
 import { registerDiagnosticsTools } from './tools/diagnostics-tools';
 import { registerSymbolTools } from './tools/symbol-tools';
 import { registerMemoryTools } from './tools/memory-tools';
@@ -74,6 +75,7 @@ export class MCPServer {
     public extensionContext?: vscode.ExtensionContext;
 
     private oauthRouterInstance?: ReturnType<typeof createOAuthRouter>;
+    private dashboard?: Dashboard;
 
     private get oauthRouter() {
         if (!this.oauthRouterInstance) {
@@ -264,14 +266,25 @@ export class MCPServer {
             const original = entry.handler.bind(entry);
             entry.handler = async (args: unknown, extra: unknown) => {
                 const { scopes, client } = currentScopes();
+                const started = Date.now();
                 if (!scopeAllowsCached(scopes, name)) {
+                    this.dashboard?.recordToolCall(name, client, 0, 0, true);
                     return checkToolAccess(name, scopes, client) as unknown as ReturnType<typeof original>;
                 }
                 appendAudit({ kind: 'tool_call', client, detail: name });
-                return original(args, extra);
+                try {
+                    const result = await original(args, extra);
+                    this.dashboard?.recordToolCall(name, client, Date.now() - started, estimateTokens(result), false);
+                    return result;
+                } catch (e) {
+                    this.dashboard?.recordToolCall(name, client, Date.now() - started, 0, false);
+                    throw e;
+                }
             };
         }
     }
+
+    attachDashboard(d: Dashboard): void { this.dashboard = d; }
 
     private setupRoutes(): void {
 

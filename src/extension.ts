@@ -6,6 +6,7 @@ import { logger } from './utils/logger';
 import { setSandboxConfigProvider } from './utils/workspace';
 import type { SandboxMode } from './utils/sandbox';
 import { initAudit } from './auth/audit';
+import { Dashboard, setDashboardRef } from './dashboard';
 
 export { MCPServer };
 
@@ -292,6 +293,11 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         );
 
+        const dashboard = new Dashboard();
+        const openDashboardCommand = vscode.commands.registerCommand('vscode-mcp-server.openDashboard', () => dashboard.show(context));
+        setDashboardRef(dashboard);
+        if (mcpServer) mcpServer.attachDashboard(dashboard);
+
         const copyAuthTokenCommand = vscode.commands.registerCommand(
             'vscode-mcp-server.copyAuthToken',
             async () => {
@@ -335,6 +341,7 @@ export async function activate(context: vscode.ExtensionContext) {
             statusBarItem,
             toggleServerCommand,
             showServerInfoCommand,
+            openDashboardCommand,
             copyAuthTokenCommand,
             configChangeListener,
             workspaceFoldersListener,

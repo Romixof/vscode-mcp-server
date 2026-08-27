@@ -340,12 +340,7 @@ export function registerSymbolTools(server: McpServer): void {
 
     server.tool(
         'search_symbols_code',
-        `Searches for symbols (functions, classes, variables) across workspace using fuzzy matching.
-
-        WHEN TO USE: Finding function/class definitions, exploring project structure, locating specific elements.
-
-        Search: Supports partial terms (e.g., 'createW' matches 'createWorkspaceFile'). Returns location and container info.
-        Limit results to avoid overwhelming output - increase maxResults only if needed.`,
+        `Search symbols (functions/classes). Supports limit.`,
         {
             query: z.string().describe('The search query for symbol names'),
             maxResults: z.number().optional().default(10).describe('Maximum number of results to return (default: 10)')
@@ -398,12 +393,7 @@ export function registerSymbolTools(server: McpServer): void {
 
     server.tool(
         'get_symbol_definition_code',
-        `Gets definition information for a symbol using hover data (type, docs, source).
-
-        WHEN TO USE: Understanding what a symbol represents, checking function signatures, quick API reference.
-        USE search_symbols_code instead for: finding symbols by name across the project.
-
-        Requires exact symbol name and line number. If symbol not found on line, returns clear message.`,
+        `Get symbol definition (hover data).`,
         {
             path: z.string().describe('The path to the file containing the symbol'),
             line: z.number().describe('The line number of the symbol (1-based)'),
@@ -486,18 +476,14 @@ export function registerSymbolTools(server: McpServer): void {
 
     server.tool(
         'get_document_symbols_code',
-        `Gets complete symbol outline for a file showing hierarchical structure and line numbers.
-
-        WHEN TO USE: Understanding file structure, getting overview of all symbols, finding symbol positions. This tool should be be preferred over reading the file using read_file_code when only an overview of the file is needed.
-        USE search_symbols_code instead for: finding specific symbols by name across the project.
-
-        Shows classes, functions, methods, variables with line ranges. Use maxDepth for large files to avoid deep nesting.`,
+        `Get file symbol outline. Supports maxItems.`,
         {
             path: z.string().describe('The path to the file to analyze (relative to workspace)'),
             maxDepth: z.number().optional().describe('Maximum nesting depth to display (optional)'),
+            maxItems: z.number().optional().default(100).describe('Max symbols to return (1-300, default 100)'),
             workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ path, maxDepth, workspace }): Promise<CallToolResult> => {
+        async ({ path, maxDepth, maxItems = 100, workspace }): Promise<CallToolResult> => {
             logger.info(`[get_document_symbols_code] Tool called with path="${path}", maxDepth=${maxDepth}`);
 
             try {
@@ -517,14 +503,17 @@ export function registerSymbolTools(server: McpServer): void {
                 if (result.symbols.length === 0) {
                     resultText = `No symbols found in file: ${path}`;
                 } else {
-                    resultText = `Document symbols for ${path} (${result.total} total symbols):\n\n`;
+                    const capped = Math.min(Math.max(maxItems, 1), 300);
+                    const slice = result.symbols.slice(0, capped);
+                    const more = result.symbols.length > capped;
+                    resultText = `Document symbols for ${path} (${result.total} total${more ? `, showing ${capped}` : ''}):\n\n`;
 
                     const kindSummary = Object.entries(result.totalByKind)
                         .map(([kind, count]) => `${count} ${kind}${count !== 1 ? 's' : ''}`)
                         .join(', ');
                     resultText += `Summary: ${kindSummary}\n\n`;
 
-                    for (const symbol of result.symbols) {
+                    for (const symbol of slice) {
                         const indent = '  '.repeat(symbol.depth);
                         resultText += `${indent}${symbol.name} (${symbol.kind})`;
 
@@ -540,6 +529,7 @@ export function registerSymbolTools(server: McpServer): void {
 
                         resultText += '\n\n';
                     }
+                    if (more) resultText += `[Truncated: ${result.symbols.length - capped} more symbols. Raise maxItems (max 300).]\n`;
                 }
 
                 const callResult: CallToolResult = {

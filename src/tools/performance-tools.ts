@@ -195,9 +195,7 @@ async function profileCommand(command: string, runs: number, workspace?: string)
 export function registerPerformanceTools(server: McpServer, terminal?: vscode.Terminal): void {
 	sharedTerminal = terminal;
 
-	server.tool('analyze_bundle_code', `Analyzes the size of a build output directory: total bytes, per-file sizes and the largest files with their share of the bundle.
-
-WHEN TO USE: after a build, spotting bloated assets before shipping, comparing bundler configuration changes.`, {
+	server.tool('analyze_bundle_code', `Analyze build output size.`, {
 		dir: z.string().optional().default('dist').describe('Directory to analyze, relative to the workspace root'),
 		top: z.number().int().min(1).max(50).optional().default(15).describe('How many of the largest files to list'),
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
@@ -206,18 +204,14 @@ WHEN TO USE: after a build, spotting bloated assets before shipping, comparing b
 		return { content: [{ type: 'text', text: result }] };
 	});
 
-	server.tool('get_performance_report_code', `Reports the MCP server's own footprint (uptime, RSS/heap memory, Node version) plus workspace weight: file count, total size and the heaviest installed npm packages.
-
-WHEN TO USE: checking what an agent session is costing in memory, finding dependency bloat.`, {
+	server.tool('get_performance_report_code', `MCP server performance report.`, {
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 	}, async ({ workspace }) => {
 		const result = await performanceReport(workspace);
 		return { content: [{ type: 'text', text: result }] };
 	});
 
-	server.tool('profile_command_code', `Runs a shell command one or more times through the extension terminal and reports wall-clock timing statistics alongside the command's output.
-
-WHEN TO USE: measuring how long a build/test/bundle step really takes, comparing toolchain changes with repeatable numbers.`, {
+	server.tool('profile_command_code', `Profile a shell command.`, {
 		command: z.string().describe('Shell command to measure'),
 		runs: z.number().int().min(1).max(10).optional().default(1).describe('Number of runs (best/worst/mean are reported)'),
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)

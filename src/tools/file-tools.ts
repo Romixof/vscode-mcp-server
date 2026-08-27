@@ -141,9 +141,7 @@ export function registerFileTools(
 ): void {
     server.tool(
         'list_workspace_folders_code',
-        `Lists every root folder open in the window with its 1-based index and name.
-
-WHEN TO USE: multi-root workspaces. The names and indices returned here are the values accepted by the optional "workspace" parameter of path-based tools.`,
+        `List workspace root folders.`,
         {},
         async (): Promise<CallToolResult> => {
             const folders = listWorkspaceFolders();
@@ -167,19 +165,15 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
 
     server.tool(
         'list_files_code',
-        `Explores directory structure in VS Code workspace.
-
-        WHEN TO USE: Understanding project structure, finding files before read/modify operations.
-
-        CRITICAL: NEVER set recursive=true on root directory (.) - output too large. Use recursive only on specific subdirectories.
-
-        Returns files and directories at specified path. Start with path='.' to explore root, then dive into specific subdirectories with recursive=true.`,
+        `List files in a directory. Supports pagination.`,
         {
             path: z.string().describe('The path to list files from'),
             recursive: z.boolean().optional().default(false).describe('Whether to list files recursively'),
+            limit: z.number().optional().default(100).describe('Max entries to return (1-500, default 100)'),
+            offset: z.number().optional().default(0).describe('Skip this many entries (pagination offset)'),
             workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ path, recursive = false, workspace }): Promise<CallToolResult> => {
+        async ({ path, recursive = false, limit = 100, offset = 0, workspace }): Promise<CallToolResult> => {
             console.log(`[list_files] Tool called with path=${path}, recursive=${recursive}`);
 
             if (!fileListingCallback) {
@@ -189,14 +183,22 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
 
             try {
                 console.log('[list_files] Calling file listing callback');
-                const files = await fileListingCallback(path, recursive, workspace);
+                const raw = await fileListingCallback(path, recursive, workspace) as unknown as FileListingResult | { files: FileListingResult };
+                const files: FileListingResult = Array.isArray(raw) ? raw : (raw as { files: FileListingResult }).files ?? (raw as unknown as FileListingResult);
                 console.log(`[list_files] Callback returned ${files.length} items`);
+                const total = files.length;
+                const capped = Math.min(Math.max(limit, 1), 500);
+                const slice = files.slice(offset, offset + capped);
+                const more = offset + slice.length < total;
+                const payload = !more && offset === 0 && total <= capped
+                    ? JSON.stringify(files, null, 2)
+                    : JSON.stringify({ files: slice, total, offset, limit: capped, hasMore: more }, null, 2);
 
                 const result: CallToolResult = {
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(files, null, 2)
+                            text: payload
                         }
                     ]
                 };
@@ -211,14 +213,7 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
 
     server.tool(
         'read_file_code',
-        `Retrieves file contents with size limits and partial reading support.
-
-        WHEN TO USE: Reading code, config files, analyzing implementations.
-
-        Encoding: Text encodings (utf-8, latin1, etc.) for text files, 'base64' for base64-encoded string.
-        Line numbers: Use startLine/endLine (1-based) for large files to read specific sections only.
-
-        Files larger than maxCharacters are returned truncated, with a note at the end giving the full size — page through with startLine/endLine instead of retrying with a bigger limit.`,
+        `Read a file. Supports maxLines/offset.`,
         {
             path: z.string().describe('The path to the file to read'),
             encoding: z.string().optional().default('utf-8').describe('Encoding to convert the file content to a string. Use "base64" for base64-encoded string'),
@@ -256,13 +251,7 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
 
     server.tool(
         'move_file_code',
-        `Moves a file or directory to a new location using VS Code's WorkspaceEdit API.
-
-        WHEN TO USE: Reorganizing project structure, moving files between directories.
-
-        This operation uses VS Code's refactoring capabilities to ensure imports and references are updated correctly.
-
-        IMPORTANT: This will update all references to the moved file in the workspace.`,
+        `Move a file or directory.`,
         {
             sourcePath: z.string().describe('The current path of the file or directory to move'),
             targetPath: z.string().describe('The new path where the file or directory should be moved to'),
@@ -308,13 +297,7 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
 
     server.tool(
         'rename_file_code',
-        `Renames a file or directory using VS Code's WorkspaceEdit API.
-
-        WHEN TO USE: Renaming files to follow naming conventions, refactoring code.
-
-        This operation uses VS Code's refactoring capabilities to ensure imports and references are updated correctly.
-
-        IMPORTANT: This will update all references to the renamed file in the workspace.`,
+        `Rename a file or directory.`,
         {
             filePath: z.string().describe('The current path of the file or directory to rename'),
             newName: z.string().describe('The new name for the file or directory'),
@@ -360,11 +343,7 @@ WHEN TO USE: multi-root workspaces. The names and indices returned here are the 
 
     server.tool(
         'copy_file_code',
-        `Copies a file to a new location.
-
-        WHEN TO USE: Creating backups, duplicating files for testing, creating template files.
-
-        LIMITATION: Only works for files, not directories.`,
+        `Copy a file.`,
         {
             sourcePath: z.string().describe('The path of the file to copy'),
             targetPath: z.string().describe('The path where the copy should be created'),

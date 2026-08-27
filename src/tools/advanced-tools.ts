@@ -58,11 +58,7 @@ function formatExtensionList(title: string, extensions: ExtensionSummary[]): str
 export function registerAdvancedTools(server: McpServer, endpoint: { host: string; port: number }, clusterInfo?: () => string | undefined, authInfo?: () => string): void {
 	server.tool(
 		'get_server_info_code',
-		`Reports this MCP server's own status: extension/VS Code/Node versions, platform, remote environment (devcontainer / WSL / SSH), open workspace folders, uptime, and how many times each tool has been called since activation.
-
-        WHEN TO USE: Debugging connectivity ("is it running? where?"), checking which remote the client must reach, reviewing what an agent session has been doing.
-
-        All counters are local to your machine; nothing is sent anywhere.`,
+		`Server status: versions, uptime, cluster role.`,
 		{},
 		async (): Promise<CallToolResult> => {
 			const folders = listWorkspaceFolders();
@@ -96,9 +92,7 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
 
 	server.tool(
 		'list_extensions_code',
-		`Lists installed VS Code extensions with versions, or the workspace's recommended extensions that are not installed yet (.vscode/extensions.json vs reality).
-
-        WHEN TO USE: Reproducing a teammate's setup, checking whether a helper extension is available before relying on its commands, onboarding reviews.`,
+		`List installed VS Code extensions.`,
 		{
 			filter: z.string().optional().default('').describe('Only show extensions whose id or description contains this text (case-insensitive)'),
 			includeBuiltins: z.boolean().optional().default(false).describe('Include the built-in vscode.* extensions'),

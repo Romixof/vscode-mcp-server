@@ -110,13 +110,7 @@ export function registerEditTools(server: McpServer): void {
 
     server.tool(
         'create_file_code',
-        `Creates new files or completely rewrites existing files.
-
-        WHEN TO USE: New files, large modifications (>10 lines), complete file rewrites.
-        USE replace_lines_code instead for: small edits ≤10 lines where you have exact original content.
-
-        File handling: Use overwrite=true to replace existing files, ignoreIfExists=true to skip if file exists.
-        Always check with list_files_code first unless you specifically want to overwrite.`,
+        `Create or overwrite a file.`,
         {
             path: z.string().describe('The path to the file to create'),
             content: z.string().describe('The content to write to the file'),
@@ -150,15 +144,7 @@ export function registerEditTools(server: McpServer): void {
 
     server.tool(
         'replace_lines_code',
-        `Replaces specific lines in existing files with exact content validation.
-
-        WHEN TO USE: Modifications ≤10 lines where you have exact original text, or inserts of any size.
-        USE create_file_code instead for: new files, large modifications (>10 lines, hard to match exact content), or when original text is uncertain.
-
-        CRITICAL: originalCode parameter must match current file content exactly or tool fails.
-        If tool fails: run read_file_code on target lines to get current content, then retry.
-
-        Parameters use 1-based line numbers. Always verify line numbers with read_file_code if unsure.`,
+        `Replace lines in a file (exact match).`,
         {
             path: z.string().describe('The path to the file to modify'),
             startLine: z.number().describe('The start line number (1-based, inclusive)'),
