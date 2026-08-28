@@ -338,6 +338,16 @@ ${ok
 					appendAudit({ kind: 'token_revoked', client: clientId, detail: `scopes=[${scopes.join(',')}]` });
 					break;
 				}
+				let revoked = false;
+				for (const preset of Object.values(PRESETS)) {
+					const alt = deriveAccessToken(secret, `${clientId}|${preset.join(',')}`);
+					if (tokensMatch(token, alt)) {
+						revokeClient(clientId);
+						appendAudit({ kind: 'token_revoked', client: clientId, detail: `scopes=[${preset.join(',')}]` });
+						revoked = true; break;
+					}
+				}
+				if (revoked) break;
 			}
 		}
 		res.status(200).end();
@@ -357,6 +367,14 @@ ${ok
 					return isClientRevoked(clientId)
 						? { verdict: 'revoked', scopes: [], client: clientId }
 						: { verdict: 'ok', scopes, client: clientId };
+				}
+				for (const preset of Object.values(PRESETS)) {
+					const alt = deriveAccessToken(secret, `${clientId}|${preset.join(',')}`);
+					if (tokensMatch(token, alt)) {
+						return isClientRevoked(clientId)
+							? { verdict: 'revoked', scopes: [], client: clientId }
+							: { verdict: 'ok', scopes: preset as Scope[], client: clientId };
+					}
 				}
 			}
 			return { verdict: 'unknown', scopes: [] };

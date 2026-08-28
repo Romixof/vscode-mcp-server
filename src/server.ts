@@ -83,10 +83,10 @@ export class MCPServer {
                 getAccessToken: () => this.authToken,
                 getLastClientName: () => undefined,
                 loadClients: () => {
-                    const raw = this.extensionContext?.globalState.get<Array<{ client_id: string; redirect_uris: string[]; client_name?: string }>>('vscode-mcp.oauthClients');
+                    const raw = this.extensionContext?.globalState.get<Array<{ client_id: string; redirect_uris: string[]; client_name?: string; requestedScopes?: string; grantedScopes?: string[] }>>('vscode-mcp.oauthClients');
                     return Array.isArray(raw)
                         ? raw.filter(c => typeof c?.client_id === 'string' && Array.isArray(c.redirect_uris))
-                              .map(c => ({ client_id: c.client_id, redirect_uris: c.redirect_uris, client_name: c.client_name }))
+                              .map(c => ({ client_id: c.client_id, redirect_uris: c.redirect_uris, client_name: c.client_name, requestedScopes: c.requestedScopes, grantedScopes: c.grantedScopes as unknown as import('./auth/scopes').Scope[] }))
                         : [];
                 },
                 saveClients: list => {
@@ -168,7 +168,7 @@ export class MCPServer {
     private buildSessionServer(): McpServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
-            version: "0.14.0",
+            version: "0.14.7",
         }, {
             capabilities: {
                 logging: {},
