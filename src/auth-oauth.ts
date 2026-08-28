@@ -56,6 +56,7 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 	let lastClientName: string | undefined;
 
 	for (const c of hub.loadClients?.() ?? []) {
+		if (!c.grantedScopes) c.grantedScopes = intersectScopes(c.requestedScopes, PRESETS['standard']);
 		clients.set(c.client_id, c);
 	}
 	function persistClients(): void {
@@ -329,9 +330,10 @@ ${ok
 		const secret = hub.getAccessToken();
 		if (secret && token) {
 			for (const clientId of clients.keys()) {
-				const scopes = clients.get(clientId)?.grantedScopes ?? [];
+				const scopes = clients.get(clientId)?.grantedScopes ?? intersectScopes(clients.get(clientId)?.requestedScopes, PRESETS['standard']);
 				const derived = deriveAccessToken(secret, `${clientId}|${scopes.join(',')}`);
-				if (tokensMatch(token, derived)) {
+				const legacy = deriveAccessToken(secret, clientId);
+				if (tokensMatch(token, derived) || tokensMatch(token, legacy)) {
 					revokeClient(clientId);
 					appendAudit({ kind: 'token_revoked', client: clientId, detail: `scopes=[${scopes.join(',')}]` });
 					break;
@@ -348,9 +350,10 @@ ${ok
 			const secret = hub.getAccessToken();
 			if (!secret) {return { verdict: 'unknown', scopes: [] };}
 			for (const [clientId, client] of clients) {
-				const scopes = client.grantedScopes ?? [];
+				const scopes = client.grantedScopes ?? intersectScopes(client.requestedScopes, PRESETS['standard']);
 				const derived = deriveAccessToken(secret, `${clientId}|${scopes.join(',')}`);
-				if (tokensMatch(token, derived)) {
+				const legacy = deriveAccessToken(secret, clientId);
+				if (tokensMatch(token, derived) || tokensMatch(token, legacy)) {
 					return isClientRevoked(clientId)
 						? { verdict: 'revoked', scopes: [], client: clientId }
 						: { verdict: 'ok', scopes, client: clientId };
