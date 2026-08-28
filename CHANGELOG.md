@@ -3,6 +3,49 @@
 All notable changes to the "vscode-mcp-server" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+## [0.14.7] - 2026-08-28
+### Fixed
+- `server.ts` discarded `grantedScopes` when loading `vscode-mcp.oauthClients` from `globalState`, so a Mammouth client authorized as Full was verified as Standard and rejected with 401 `mcp_needs_auth`. Scopes now persist and restore correctly.
+- `auth-oauth.ts` `verifyDerivedToken` and `/revoke` try the stored scopes, the legacy token (`HMAC(secret, clientId)`), and every preset. Installations broken by the 0.14.0 scope change recover without re-authorizing.
+- Hardcoded `0.14.0` version in the MCP session server updated to the package version.
+
+## [0.14.6] - 2026-08-28
+### Fixed
+- Restored full `WHEN TO USE` descriptions for all 64 tools. 0.14.1 had cut them to ~33 chars average and the agent looped over `list_files`/`read_file` instead of calling `execute_shell` to run WeasyPrint.
+
+### Changed
+- Kept pagination for large results: `list_files_code` now takes `limit` (1-500, default 100) and `offset`; `get_document_symbols_code` takes `maxItems` (1-300). Both return `{files, total, hasMore}` or a truncated banner instead of dumping everything.
+
+## [0.14.5] - 2026-08-28
+### Fixed
+- First attempt at the same reload bug: migrated clients without `grantedScopes` to `standard` and accepted legacy tokens in `/revoke` and `verifyDerivedToken`. Superseded by 0.14.7 which persists scopes correctly.
+
+## [0.14.4] - 2026-08-28
+### Added
+- Dashboard: 60-minute sparkline, per-tool avg/p95 latency, slowest-tools list, live search and tool/denied-only filters, burst alert on 4 denied in 8, per-client Revoke button, Blocked shell/sandbox panels, audit log (last 40) with Export JSON, and sandbox mode/host/port footer.
+
+## [0.14.3] - 2026-08-28
+### Changed
+- Dashboard redesigned to a minimal native VS Code panel: `var(--vscode-editor-background)` background, 1px borders, three stat cards, Clients/Top-tools tables, plain tape. Removed the instrument-lab theme that broke readability.
+
+## [0.14.1] - 2026-08-28
+### Added
+- Dashboard webview `vscode-mcp-server.openDashboard` with live tool feed, token estimate (`chars/4`), and cluster info.
+- Token-efficiency (partially reverted in 0.14.6): added `limit`/`offset` and `maxItems` pagination. Description shortening from this version was reverted.
+
+## [0.14.0] - 2026-08-26
+### Added
+- Scope presets `read-only` / `standard` / `full` mapped to 64 tools (`SCOPE_TOOLS`), `AsyncLocalStorage` per-request gate, `runWithScopes`/`checkToolAccess`.
+- Shell guard: NFKC + invisible-char normalisation, base64-decode, split on `&&;|` before blocklist, checked before terminal dispatch.
+- Audit log: FIFO 500 entries in `globalState`, `get_audit_log_code` (admin only).
+
+## [0.13.1] - 2026-08-26
+### Changed
+- Stripped `//` and `/* */` comments from 7 `src/*.ts` files. Three `/**` remain inside string literals that generate docstrings.
+
+## [0.13.0] - 2026-08-26
+### Added
+- Filesystem sandbox (`src/utils/sandbox.ts`, `src/utils/workspace.ts` `assertSandboxed` with `realpathSync` symlink check). Default mode `workspace` (fail-closed), `clusterRootsProvider` for hub/spoke windows, `resolveInputPath` in file tools.
 
 ## [0.12.42]
 
@@ -14,7 +57,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Changed
 
-- Clients configured before 0.12.0 must now send the access token with every request, as `Authorization: Bearer ***` or `X-MCP-Token`. A notification at activation walks through the one-time setup.
+- Clients configured before 0.12.0 must now send the access token with every request, as `Authorization: Bearer *** or `X-MCP-Token`. A notification at activation walks through the one-time setup.
 
 ### Security
 
