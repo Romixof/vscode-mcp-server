@@ -201,7 +201,12 @@ async function runInTerminal(
 export function registerWorkflowTools(server: McpServer, terminal?: vscode.Terminal): void {
 	server.tool(
 		'run_task_code',
-		`Run a project task (npm script etc).`,
+		`Runs project tasks discovered from package.json scripts, composer.json scripts or Makefile targets.
+
+        WHEN TO USE: Executing the project's own scripts without remembering the underlying command.
+
+        Call without a task to list everything available, then pass the task name. Extra CLI arguments go in args.
+        When the same name exists in several sources, qualify it with its source prefix (npm:, composer:, make:), e.g. "make:build".`,
 		{
 			task: z.string().optional().default('').describe('Task name to run, e.g. "build" or "make:build" when ambiguous. Omit or leave empty to list available tasks'),
 			args: z.string().optional().default('').describe('Extra command-line arguments appended to the task command'),
@@ -265,7 +270,11 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 
 	server.tool(
 		'build_project_code',
-		`Run project build command.`,
+		`Detects and runs the project's build command.
+
+        WHEN TO USE: Building/compiling before shipping or verifying changes compile.
+
+        Detection order: package.json "build" script, "compile" script, Makefile, tsconfig.json. Pass an explicit command to override detection.`,
 		{
 			command: z.string().optional().default('').describe('Explicit build command. Omit to auto-detect'),
 			cwd: z.string().optional().default('.').describe('Working directory whose package.json/Makefile/tsconfig.json is used (defaults to workspace root)'),
@@ -301,7 +310,9 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 
 	server.tool(
 		'list_snippets_code',
-		`List VS Code snippets.`,
+		`Lists the VS Code snippets defined in the workspace: .vscode/snippets/*.json, *.code-snippets, plus the .vscode/*.code-snippets files VS Code itself creates.
+
+        WHEN TO USE: Discovering existing snippet prefixes before creating new ones, or reviewing what shortcuts the team shares.`,
 		{
 			prefixFilter: z.string().optional().default('').describe('Only show snippets whose prefix contains this text (case-insensitive)'),
 			workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
@@ -329,7 +340,11 @@ export function registerWorkflowTools(server: McpServer, terminal?: vscode.Termi
 
 	server.tool(
 		'run_alias_code',
-		`Run a shell alias from .mcp-aliases.json.`,
+		`Runs a shell alias defined by the team in .mcp-aliases.json at the workspace root.
+
+        WHEN TO USE: Executing shared shortcuts (dev, lint, deploy...) without typing the full command.
+
+        File format: { "dev": { "command": "npm run dev --host", "description": "Start dev server" }, "lint": "eslint ." }. Values can be a plain command string or an object with command and description. Call without a name to list aliases.`,
 		{
 			name: z.string().optional().default('').describe('Alias name to run. Omit or leave empty to list available aliases'),
 			args: z.string().optional().default('').describe('Extra arguments appended to the alias command'),

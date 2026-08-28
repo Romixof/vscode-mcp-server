@@ -133,7 +133,12 @@ async function detectLinter(filePath?: string, workspace?: string): Promise<{ li
 }
 
 export function registerTestTools(server: McpServer): void {
-	server.tool('run_tests_code', `Run tests (auto-detects framework).`, {
+	server.tool('run_tests_code', `Runs tests using the detected test framework (vitest, jest, pytest, mocha, playwright, cypress).
+
+WHEN TO USE: Running test suites, validating changes, CI simulation.
+
+Auto-detects framework from package.json/requirements.txt. Supports filtering by file/pattern.
+Returns stdout/stderr with pass/fail summary.`, {
 		pattern: z.string().optional().describe('Optional test file pattern or path to run specific tests'),
 		framework: z.enum(['auto', 'vitest', 'jest', 'pytest', 'mocha', 'playwright', 'cypress']).optional().default('auto').describe('Force specific framework (default: auto-detect)'),
 		args: z.string().optional().describe('Additional arguments to pass to the test command'),
@@ -178,7 +183,12 @@ export function registerTestTools(server: McpServer): void {
 		}
 	});
 
-	server.tool('get_test_coverage_code', `Generate test coverage report.`, {
+	server.tool('get_test_coverage_code', `Generates test coverage report for the project or specific files.
+
+WHEN TO USE: Checking coverage before commits, identifying untested code, CI reports.
+
+Runs tests with coverage flag. Returns summary and detailed report if available.
+Supports: vitest, jest, pytest (with pytest-cov), mocha (with c8/nyc).`, {
 		path: z.string().optional().describe('Optional file or directory path to get coverage for'),
 		format: z.enum(['text', 'json', 'lcov', 'html']).optional().default('text').describe('Output format for coverage report'),
 		framework: z.enum(['auto', 'vitest', 'jest', 'pytest', 'mocha']).optional().default('auto').describe('Force specific framework (default: auto-detect)'),
@@ -251,7 +261,12 @@ export function registerTestTools(server: McpServer): void {
 		}
 	});
 
-	server.tool('format_document_code', `Format a file (prettier/black/etc).`, {
+	server.tool('format_document_code', `Formats a file using the appropriate formatter (Prettier, Black, rustfmt, gofmt, ruff, etc.).
+
+WHEN TO USE: Auto-formatting code before commits, fixing style inconsistencies.
+
+Auto-detects formatter from config files (prettierrc, pyproject.toml, etc.) and file extension.
+Returns formatted content or success confirmation.`, {
 		path: z.string().describe('Path to the file to format'),
 		formatter: z.enum(['auto', 'prettier', 'black', 'ruff', 'rustfmt', 'gofmt']).optional().default('auto').describe('Force specific formatter (default: auto-detect)'),
 		checkOnly: z.boolean().optional().default(false).describe('Only check if formatting is needed, do not write changes'),
@@ -326,7 +341,11 @@ export function registerTestTools(server: McpServer): void {
 		}
 	});
 
-	server.tool('lint_and_fix_code', `Lint and auto-fix (eslint/ruff/etc).`, {
+	server.tool('lint_and_fix_code', `Runs linter with auto-fix for the project or specific file (ESLint, ruff, flake8, pylint).
+
+WHEN TO USE: Fixing linting errors automatically, cleaning up code before commits.
+
+Auto-detects linter from config files. Returns fixed issues summary.`, {
 		path: z.string().optional().describe('Optional file or directory to lint (default: entire workspace)'),
 		linter: z.enum(['auto', 'eslint', 'ruff', 'flake8', 'pylint']).optional().default('auto').describe('Force specific linter (default: auto-detect)'),
 		fix: z.boolean().optional().default(true).describe('Apply auto-fixes (default: true)'),
@@ -367,7 +386,11 @@ export function registerTestTools(server: McpServer): void {
 		}
 	});
 
-	server.tool('get_git_diff_code', `Show git diff.`, {
+	server.tool('get_git_diff_code', `Shows git diff for the current file, staged changes, or entire repository.
+
+WHEN TO USE: Reviewing changes before commit, seeing what modified, debugging.
+
+Shows unstaged changes by default. Use staged=true for staged changes.`, {
 		path: z.string().optional().describe('Optional file path to show diff for (default: all changes)'),
 		staged: z.boolean().optional().default(false).describe('Show staged (cached) changes instead of unstaged'),
 		noColor: z.boolean().optional().default(true).describe('Disable ANSI color codes in output'),

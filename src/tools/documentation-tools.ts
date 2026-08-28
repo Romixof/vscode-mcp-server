@@ -1150,7 +1150,12 @@ async function getProjectContext(options: {
 }
 
 export function registerDocumentationTools(server: McpServer): void {
-	server.tool('get_package_dependencies_code', `List project dependencies (npm/pip/etc).`, {
+	server.tool('get_package_dependencies_code', `Lists all project dependencies across all package managers (npm, pip, cargo, go, composer, bundler, etc.).
+
+WHEN TO USE: Auditing dependencies, checking versions, finding outdated packages, security reviews.
+
+Supports: npm/yarn/pnpm, pip/poetry/pipenv, cargo, go modules, composer, bundler, and more.
+Returns unified format with type (prod/dev/peer/optional), ecosystem, and metadata.`, {
 		ecosystem: z.enum(['all', 'npm', 'pypi', 'cargo', 'go', 'composer', 'bundler', 'nuget', 'maven', 'gradle']).optional().default('all').describe('Filter by ecosystem (default: all)'),
 		includeOutdated: z.boolean().optional().default(false).describe('Check for outdated versions (slower)'),
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
@@ -1199,7 +1204,11 @@ export function registerDocumentationTools(server: McpServer): void {
 		}
 	});
 
-	server.tool('get_file_history_code', `Git history for a file.`, {
+	server.tool('get_file_history_code', `Shows git commit history for a specific file with stats and optional diffs.
+
+WHEN TO USE: Understanding how a file evolved, finding when bugs were introduced, code archaeology.
+
+Supports filtering by date, author, commit message, and commit count. Returns structured data with stats.`, {
 		path: z.string().describe('File path relative to workspace root'),
 		maxCommits: z.number().optional().default(50).describe('Maximum commits to return'),
 		since: z.string().optional().describe('ISO date or relative (e.g., "2 weeks ago")'),
@@ -1220,7 +1229,12 @@ export function registerDocumentationTools(server: McpServer): void {
 		}
 	});
 
-	server.tool('generate_docstring_code', `Generate docstring for a function/class.`, {
+	server.tool('generate_docstring_code', `Generates docstrings for functions/classes in multiple languages (JS/TS, Python, PHP, Go, Rust, etc.).
+
+WHEN TO USE: Adding documentation to undocumented functions, standardizing docstring style.
+
+Auto-detects language from file extension. Supports JSDoc, Google/NumPy Python, PHPDoc, GoDoc, Rustdoc, etc.
+Can insert directly into file or return the docstring only.`, {
 		path: z.string().describe('File path relative to workspace root'),
 		symbol: z.string().optional().describe('Function/class name to document (auto-detects from line if omitted)'),
 		line: z.number().optional().describe('Line number (1-based) of the function/class'),
@@ -1240,7 +1254,11 @@ export function registerDocumentationTools(server: McpServer): void {
 		}
 	});
 
-	server.tool('get_project_context_code', `Project overview: stack, structure, deps.`, {
+	server.tool('get_project_context_code', `Provides a comprehensive project summary: stack, structure, dependencies, entry points, scripts, and test setup.
+
+WHEN TO USE: Onboarding to a new codebase, getting project overview before making changes, context for AI.
+
+Aggregates package.json, configs, file structure, languages, frameworks, entry points, and test setup.`, {
 		depth: z.number().optional().default(3).describe('Directory depth for structure tree'),
 		includeDeps: z.boolean().optional().default(true).describe('Include dependency summary'),
 		includeScripts: z.boolean().optional().default(true).describe('Include npm/composer scripts'),
@@ -1258,7 +1276,12 @@ export function registerDocumentationTools(server: McpServer): void {
 		}
 	});
 
-	server.tool('find_todo_code', `Find TODO/FIXME/HACK comments.`, {
+	server.tool('find_todo_code', `Searches for TODO/FIXME/HACK/XXX/NOTE/BUG/OPTIMIZE/REVIEW comments across the workspace.
+
+WHEN TO USE: Technical debt tracking, sprint planning, code quality reviews.
+
+Supports custom patterns, filtering by path/file type, grouping by file or tag, and context lines.
+Returns structured data with severity classification (high/medium/low).`, {
 		customPatterns: z.array(z.string()).optional().describe('Additional tag patterns on top of the defaults'),
 		path: z.string().optional().describe('Search path (default: workspace root)'),
 		include: z.array(z.string()).optional().describe('Glob patterns to include'),
