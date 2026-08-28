@@ -8,7 +8,6 @@ import { logger } from '../utils/logger';
 import { checkShellCommand } from '../auth/shellguard';
 import { appendAudit } from '../auth/audit';
 import { currentScopes } from '../auth/toolgate';
-import { notifyDashboard } from '../dashboard';
 
 export type ShellKind = 'bash' | 'powershell';
 
@@ -386,7 +385,14 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
 
     server.tool(
         'execute_shell_command_code',
-        `Run a shell command in VS Code terminal.`,
+        `Executes shell commands in VS Code integrated terminal.
+
+        WHEN TO USE: Running CLI commands, builds, git operations, npm/pip installs.
+
+        Working directory: Use cwd to run commands in specific directories. Defaults to workspace root. If you get unexpected results, ensure the cwd is correct.
+        Multi-root: pass workspace to anchor cwd against that folder (name or 1-based index).
+
+        Timeout: A command that exceeds its time limit (default 10s) returns the output captured so far with exit code 124 and a note; the process keeps running in the terminal. Slow scans or installs need a larger timeout passed explicitly.`,
         {
             command: z.string().describe('The shell command to execute'),
             cwd: z.string().optional().default('.').describe('Optional working directory for the command'),
@@ -402,7 +408,6 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
                         client: currentScopes().client,
                         detail: `rule=${verdict.rule} cmd=${command.slice(0, 120)}`
                     });
-                    notifyDashboard({ ts: Date.now(), kind: 'shell_blocked', client: currentScopes().client, detail: `rule=${verdict.rule} cmd=${command.slice(0, 60)}` });
                     return {
                         content: [{
                             type: 'text',

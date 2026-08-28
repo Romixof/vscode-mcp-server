@@ -497,7 +497,9 @@ async function findUnusedCss(options: { searchPath?: string; workspace?: string 
 }
 
 export function registerFrontendTools(server: McpServer): void {
-	server.tool('audit_accessibility_code', `Audit HTML/JSX for a11y issues.`, {
+	server.tool('audit_accessibility_code', `Audits HTML/JSX/Vue/PHP markup for common accessibility problems: images without alt text, inputs without labels or aria attributes, positive tabindex, clickable div/span with onclick, empty links, html tag without lang.
+
+WHEN TO USE: before shipping frontend changes, reviewing generated markup, quick WCAG hygiene pass.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude'),
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
@@ -506,7 +508,9 @@ export function registerFrontendTools(server: McpServer): void {
 		return { content: [{ type: 'text', text: formatFindings('# Accessibility Audit', result.scanned, result.findings) }] };
 	});
 
-	server.tool('analyze_css_code', `Analyze CSS quality (dupes, specificity).`, {
+	server.tool('analyze_css_code', `Reports CSS quality issues per stylesheet: selectors defined more than once, properties repeated inside one rule (only the last wins), empty rule blocks, heavy !important use.
+
+WHEN TO USE: cleaning up stylesheets, hunting why a style "doesn't apply", pre-refactor review.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 	}, async ({ path: searchPath, workspace }) => {
@@ -514,7 +518,9 @@ export function registerFrontendTools(server: McpServer): void {
 		return { content: [{ type: 'text', text: formatFindings('# CSS Analysis', result.scanned, result.findings) }] };
 	});
 
-	server.tool('inspect_element_code', `Find where a CSS selector is used.`, {
+	server.tool('inspect_element_code', `Given a CSS selector (.class, #id or plain tag), shows where it appears in the markup and every CSS rule that styles it.
+
+WHEN TO USE: answering "where does this class come from / what does it do", impact check before changing a style.`, {
 		selector: z.string().describe('Selector to inspect, e.g. ".btn", "#app" or "nav"'),
 		path: z.string().optional().describe('Subdirectory to search (default: whole workspace)'),
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
@@ -523,7 +529,9 @@ export function registerFrontendTools(server: McpServer): void {
 		return { content: [{ type: 'text', text }] };
 	});
 
-	server.tool('find_unused_css_code', `Find unused CSS selectors.`, {
+	server.tool('find_unused_css_code', `Lists CSS classes and ids that never appear anywhere in markup or scripts. Quoted strings anywhere count as usage, so dynamically composed names are almost never false positives.
+
+WHEN TO USE: slimming dead stylesheets before a redesign or performance pass.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 	}, async ({ path: searchPath, workspace }) => {

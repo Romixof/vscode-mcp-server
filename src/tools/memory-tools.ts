@@ -167,7 +167,11 @@ async function loadAllMemory(workspace?: string): Promise<{ global: string | nul
 }
 
 export function registerMemoryTools(server: McpServer): void {
-	server.tool('memory_load_code', `Load persistent memory.`, {
+	server.tool('memory_load_code', `Loads the persistent memory system. Reads global memory (~/Mammouth/MEMORY.md) and project memory ({workspaceName}_MEMORY.md in workspace root).
+
+WHEN TO USE: ONCE per conversation, on the very first user message only — not before every reply. Skip it when memory is already loaded in the current conversation, even if several turns have passed. Loads user identity, preferences, workflow rules, and project-specific context.
+
+Returns merged content with clear separation between global and project memory.`, {
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
 	}, async ({ workspace }) => {
 		const { global, project, projectPath } = await loadAllMemory(workspace);
@@ -193,7 +197,12 @@ export function registerMemoryTools(server: McpServer): void {
 		return { content: [{ type: 'text', text: result }] };
 	});
 
-	server.tool('memory_save_code', `Save entry to memory.`, {
+	server.tool('memory_save_code', `Saves an entry to memory. Appends a dated entry under a section header in either global or project memory.
+
+WHEN TO USE: Remember user preferences, project decisions, snippets, or any context that should persist across sessions.
+
+Scope "global" → ~/Mammouth/MEMORY.md (user identity, preferences, workflow)
+Scope "project" → {workspaceName}_MEMORY.md in workspace root (project rules, decisions, context)`, {
 		section: z.string().describe('Section header (e.g., "Préférences utilisateur", "Contexte projet", "Règles personnelles")'),
 		entry: z.string().describe('The fact/rule/preference to remember'),
 		scope: z.enum(['global', 'project']).optional().default('project').describe('Which memory to save to: "global" for ~/Mammouth/MEMORY.md, "project" for workspace memory'),
@@ -217,7 +226,9 @@ export function registerMemoryTools(server: McpServer): void {
 		};
 	});
 
-	server.tool('memory_search_code', `Search memory for a keyword.`, {
+	server.tool('memory_search_code', `Searches memory for a keyword across global and/or project memory.
+
+WHEN TO USE: Find previously saved preferences, decisions, or snippets without reading entire memory files.`, {
 		query: z.string().describe('Search term to find in memory entries'),
 		scope: z.enum(['global', 'project', 'both']).optional().default('both').describe('Which memory to search: "global", "project", or "both"'),
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
@@ -247,7 +258,11 @@ export function registerMemoryTools(server: McpServer): void {
 		return { content: [{ type: 'text', text: output }] };
 	});
 
-	server.tool('memory_clear_code', `Remove entry/section from memory.`, {
+	server.tool('memory_clear_code', `Removes an entry or entire section from memory. Use to correct outdated or wrong information.
+
+WHEN TO USE: Memory becomes toxic if it accumulates stale/incorrect data. Clean it up periodically.
+
+Provide entry to remove a specific bullet. Omit entry to remove the entire section.`, {
 		section: z.string().describe('Section header to clear from'),
 		entry: z.string().optional().describe('Specific entry text to remove (omit to delete entire section)'),
 		scope: z.enum(['global', 'project']).optional().default('project').describe('Which memory to clear from'),

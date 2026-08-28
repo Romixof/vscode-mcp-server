@@ -380,7 +380,11 @@ async function handleEncodingConvert(filePath: string, from: SupportedEncoding, 
 }
 
 export function registerProductivityTools(server: McpServer): void {
-	server.tool('find_dead_code_code', `Find unused exported symbols.`, {
+	server.tool('find_dead_code_code', `Finds exported symbols that are never referenced anywhere else in the workspace.
+
+WHEN TO USE: cleanup passes before a release, spotting leftovers after refactors.
+
+Heuristic scanner: an export whose name appears only once across all scanned files (its own declaration) is reported as dead. Dynamic references such as obj["name"] are not counted.`, {
 		path: z.string().optional().describe('Subdirectory to scan (default: whole workspace)'),
 		include: z.array(z.string()).optional().describe('Glob patterns to include'),
 		exclude: z.array(z.string()).optional().describe('Glob patterns to exclude'),
@@ -398,7 +402,11 @@ export function registerProductivityTools(server: McpServer): void {
 		return { content: [{ type: 'text', text: output }] };
 	});
 
-	server.tool('snapshot_workspace_code', `Snapshot workspace files.`, {
+	server.tool('snapshot_workspace_code', `Saves or compares point-in-time snapshots of every workspace file (path, size, SHA-256).
+
+WHEN TO USE: capture the workspace state before an automated edit session, then compare afterwards to review exactly what changed.
+
+Snapshots live in .vscode-mcp/snapshots/ inside the workspace.`, {
 		action: z.enum(['save', 'compare', 'list']).describe('save: create a snapshot. compare: diff current state against a baseline. list: show saved snapshots.'),
 		name: z.string().optional().describe('Name for a new snapshot (save only)'),
 		baseline: z.string().optional().describe('Name of the snapshot to compare against (compare only)'),
@@ -408,7 +416,9 @@ export function registerProductivityTools(server: McpServer): void {
 		return { content: [{ type: 'text', text: result }] };
 	});
 
-	server.tool('regex_tester_code', `Test a regex against text/file.`, {
+	server.tool('regex_tester_code', `Tests a regular expression against text or a file and reports every match with position and captured groups.
+
+WHEN TO USE: debugging patterns before applying them, extracting data from logs, validating that a replace behaves as expected.`, {
 		pattern: z.string().describe('The regular expression'),
 		flags: z.string().optional().default('g').describe('Regex flags (default: g)'),
 		text: z.string().optional().describe('Inline text to test against'),
@@ -420,7 +430,9 @@ export function registerProductivityTools(server: McpServer): void {
 		return { content: [{ type: 'text', text: result }] };
 	});
 
-	server.tool('convert_encoding_code', `Detect/convert file encoding.`, {
+	server.tool('convert_encoding_code', `Detects or converts the character encoding of a file using native Buffers.
+
+WHEN TO USE: fixing files saved in the wrong encoding, adding or removing a BOM, normalizing sources to plain UTF-8.`, {
 		path: z.string().describe('File to inspect or convert (relative to workspace root)'),
 		action: z.enum(['detect', 'convert']).describe('detect: report the current encoding. convert: rewrite the file.'),
 		from: z.enum(['utf-8', 'utf-8-bom', 'utf-16le', 'latin1']).optional().describe('Source encoding (convert only)'),

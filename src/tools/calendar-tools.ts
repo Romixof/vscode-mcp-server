@@ -219,7 +219,11 @@ function buildIcs(events: ExtractedEvent[], calendarName: string, sourceFile: st
 
 export function registerCalendarTools(server: McpServer): void {
 	server.tool(
-		'generate_ics_code', `Generate .ics calendar file from document dates.`,
+		'generate_ics_code', `Reads a document (.md, .txt, .docx, .pdf) from the workspace, extracts dated events (French and English date formats, holiday/exam/leave keywords boost matching), and generates an RFC 5545 .ics calendar file you can import into Google Calendar, Outlook, Obsidian or Apple Calendar.
+
+        WHEN TO USE: the user gives you a planning document, holiday list, exam schedule or meeting notes and wants those dates in their calendar.
+
+        The tool reports each extracted event with its source line so you can verify before importing.`,
 		{
 			path: z.string().describe('The document to read (.md, .txt, .docx, .pdf)'),
 			output: z.string().optional().describe('Output .ics path (default: alongside the source file, same base name). Relative to workspace.'),
