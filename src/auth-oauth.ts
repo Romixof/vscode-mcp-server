@@ -29,7 +29,8 @@ const AUTH_CODE_TTL_MS = 5 * 60 * 1000;
 export interface OAuthHub {
 
 	getAccessToken(): string | undefined;
-
+	getAlternateSecret?(): string | undefined;
+	getAllSecrets?(): string[];
 	getLastClientName(): string | undefined;
 
 	loadClients?(): Array<RegisteredClient>;
@@ -59,7 +60,21 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): Router {
 		if (!c.grantedScopes) c.grantedScopes = intersectScopes(c.requestedScopes, PRESETS['standard']);
 		clients.set(c.client_id, c);
 	}
+	function syncFromHub(): void {
+		try {
+			for (const c of hub.loadClients?.() ?? []) {
+				const ex = clients.get(c.client_id);
+				if (!ex) {
+					if (!c.grantedScopes) c.grantedScopes = intersectScopes(c.requestedScopes, PRESETS['standard']);
+					clients.set(c.client_id, c as RegisteredClient);
+				} else if (c.grantedScopes && JSON.stringify(c.grantedScopes) !== JSON.stringify(ex.grantedScopes)) {
+					ex.grantedScopes = c.grantedScopes as Scope[];
+				}
+			}
+		} catch {}
+	}
 	function persistClients(): void {
+		syncFromHub();
 		hub.saveClients?.([...clients.values()]);
 	}
 
@@ -327,27 +342,31 @@ ${ok
 
 	router.post('/revoke', expressUrlencoded({ extended: false }), (req, res) => {
 		const token = typeof req.body?.token === 'string' ? req.body.token : '';
-		const secret = hub.getAccessToken();
-		if (secret && token) {
-			for (const clientId of clients.keys()) {
-				const scopes = clients.get(clientId)?.grantedScopes ?? intersectScopes(clients.get(clientId)?.requestedScopes, PRESETS['standard']);
-				const derived = deriveAccessToken(secret, `${clientId}|${scopes.join(',')}`);
-				const legacy = deriveAccessToken(secret, clientId);
-				if (tokensMatch(token, derived) || tokensMatch(token, legacy)) {
-					revokeClient(clientId);
-					appendAudit({ kind: 'token_revoked', client: clientId, detail: `scopes=[${scopes.join(',')}]` });
-					break;
-				}
-				let revoked = false;
-				for (const preset of Object.values(PRESETS)) {
-					const alt = deriveAccessToken(secret, `${clientId}|${preset.join(',')}`);
-					if (tokensMatch(token, alt)) {
+		syncFromHub();
+		const secrets = hub.getAllSecrets?.() ?? [hub.getAccessToken(), hub.getAlternateSecret?.()].filter((s): s is string => Boolean(s)) as string[];
+		if (secrets.length && token) {
+			for (const secret of secrets) {
+				let done = false;
+				for (const clientId of clients.keys()) {
+					const scopes = clients.get(clientId)?.grantedScopes ?? intersectScopes(clients.get(clientId)?.requestedScopes, PRESETS['standard']);
+					const derived = deriveAccessToken(secret, `${clientId}|${scopes.join(',')}`);
+					const legacy = deriveAccessToken(secret, clientId);
+					if (tokensMatch(token, derived) || tokensMatch(token, legacy)) {
 						revokeClient(clientId);
-						appendAudit({ kind: 'token_revoked', client: clientId, detail: `scopes=[${preset.join(',')}]` });
-						revoked = true; break;
+						appendAudit({ kind: 'token_revoked', client: clientId, detail: `scopes=[${scopes.join(',')}]` });
+						done = true; break;
 					}
+					for (const preset of Object.values(PRESETS)) {
+						const alt = deriveAccessToken(secret, `${clientId}|${preset.join(',')}`);
+						if (tokensMatch(token, alt)) {
+							revokeClient(clientId);
+							appendAudit({ kind: 'token_revoked', client: clientId, detail: `scopes=[${preset.join(',')}]` });
+							done = true; break;
+						}
+					}
+					if (done) break;
 				}
-				if (revoked) break;
+				if (done) break;
 			}
 		}
 		res.status(200).end();
@@ -357,26 +376,36 @@ ${ok
 
 	return Object.assign(router, {
 		verifyDerivedToken(token: string): { verdict: 'ok' | 'revoked' | 'unknown'; scopes: Scope[]; client?: string } {
-			const secret = hub.getAccessToken();
-			if (!secret) {return { verdict: 'unknown', scopes: [] };}
-			for (const [clientId, client] of clients) {
-				const scopes = client.grantedScopes ?? intersectScopes(client.requestedScopes, PRESETS['standard']);
-				const derived = deriveAccessToken(secret, `${clientId}|${scopes.join(',')}`);
-				const legacy = deriveAccessToken(secret, clientId);
-				if (tokensMatch(token, derived) || tokensMatch(token, legacy)) {
-					return isClientRevoked(clientId)
-						? { verdict: 'revoked', scopes: [], client: clientId }
-						: { verdict: 'ok', scopes, client: clientId };
-				}
-				for (const preset of Object.values(PRESETS)) {
-					const alt = deriveAccessToken(secret, `${clientId}|${preset.join(',')}`);
-					if (tokensMatch(token, alt)) {
-						return isClientRevoked(clientId)
-							? { verdict: 'revoked', scopes: [], client: clientId }
-							: { verdict: 'ok', scopes: preset as Scope[], client: clientId };
+			const secrets = hub.getAllSecrets?.() ?? [hub.getAccessToken(), hub.getAlternateSecret?.()].filter((s): s is string => Boolean(s)) as string[];
+			if (!secrets.length) {return { verdict: 'unknown', scopes: [] };}
+			const trySecrets = (list: Map<string, RegisteredClient>): { verdict: 'ok' | 'revoked' | 'unknown'; scopes: Scope[]; client?: string } | undefined => {
+				for (const secret of secrets) {
+					for (const [clientId, client] of list) {
+						const scopes = client.grantedScopes ?? intersectScopes(client.requestedScopes, PRESETS['standard']);
+						const derived = deriveAccessToken(secret, `${clientId}|${scopes.join(',')}`);
+						const legacy = deriveAccessToken(secret, clientId);
+						if (tokensMatch(token, derived) || tokensMatch(token, legacy)) {
+							return isClientRevoked(clientId)
+								? { verdict: 'revoked', scopes: [], client: clientId }
+								: { verdict: 'ok', scopes, client: clientId };
+						}
+						for (const preset of Object.values(PRESETS)) {
+							const alt = deriveAccessToken(secret, `${clientId}|${preset.join(',')}`);
+							if (tokensMatch(token, alt)) {
+								return isClientRevoked(clientId)
+									? { verdict: 'revoked', scopes: [], client: clientId }
+									: { verdict: 'ok', scopes: preset as Scope[], client: clientId };
+							}
+						}
 					}
 				}
-			}
+				return undefined;
+			};
+			let res = trySecrets(clients);
+			if (res) return res;
+			syncFromHub();
+			res = trySecrets(clients);
+			if (res) return res;
 			return { verdict: 'unknown', scopes: [] };
 		},
 	});

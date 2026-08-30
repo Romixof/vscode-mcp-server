@@ -2,13 +2,43 @@ import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 
-export type AuthMode = 'session-token' | 'static-token' | 'oauth' | 'none';
+export type AuthMode = 'session-token' | 'static-token' | 'oauth' | 'api-key' | 'none';
 
 export interface AuthConfig {
 	mode: AuthMode;
 	staticToken?: string;
+	apiKey?: string;
 	allowedOrigins?: string[];
 	allowNoOrigin?: boolean;
+}
+
+let _secretStorage: vscode.SecretStorage | undefined;
+
+export function setSecretStorage(storage: vscode.SecretStorage): void {
+	_secretStorage = storage;
+}
+
+/** Generates a cryptographically secure API key, stores it in VS Code SecretStorage (not in settings.json), and returns it. */
+export async function generateAndStoreApiKey(): Promise<string> {
+	const key = 'mcp_' + crypto.randomBytes(48).toString('base64url');
+	if (_secretStorage) {
+		await _secretStorage.store('vscode-mcp-server.apiKey', key);
+	}
+	return key;
+}
+
+export async function getStoredApiKey(): Promise<string | undefined> {
+	if (!_secretStorage) {
+		return undefined;
+	}
+	return await _secretStorage.get('vscode-mcp-server.apiKey');
+}
+
+export async function clearStoredApiKey(): Promise<void> {
+	if (!_secretStorage) {
+		return;
+	}
+	await _secretStorage.delete('vscode-mcp-server.apiKey');
 }
 
 export function readAuthConfig(): AuthConfig {
@@ -16,6 +46,7 @@ export function readAuthConfig(): AuthConfig {
 	return {
 		mode: cfg.get<AuthMode>('auth.mode', 'session-token'),
 		staticToken: cfg.get<string>('auth.staticToken', ''),
+		apiKey: cfg.get<string>('auth.apiKey', ''),
 		allowedOrigins: cfg.get<string[]>('auth.allowedOrigins', []),
 		allowNoOrigin: cfg.get<boolean>('auth.allowNoOrigin', true),
 	};
@@ -73,4 +104,35 @@ export function bearerAuth(getExpected: () => string | undefined): RequestHandle
 		}
 		next();
 	};
+}
+
+export function verifyApiKey(req: Request, cfg: AuthConfig): boolean {
+	if (cfg.mode !== 'api-key' || !cfg.apiKey) {
+		return false;
+	}
+	const presented = extractToken(req.headers as Record<string, string | string[] | undefined>);
+	return !!presented && tokensMatch(presented, cfg.apiKey);
+}
+
+/**
+ * Async API key verification that also checks VS Code SecretStorage if the
+ * key is not in settings.json. This allows the key to be stored securely
+ * (in SecretStorage) rather than in plaintext settings.json.
+ */
+export async function verifyApiKeyAsync(req: Request, cfg: AuthConfig): Promise<boolean> {
+	if (cfg.mode !== 'api-key') {
+		return false;
+	}
+	const presented = extractToken(req.headers as Record<string, string | string[] | undefined>);
+	if (!presented) {
+		return false;
+	}
+	if (cfg.apiKey && tokensMatch(presented, cfg.apiKey)) {
+		return true;
+	}
+	const stored = await getStoredApiKey();
+	if (stored && tokensMatch(presented, stored)) {
+		return true;
+	}
+	return false;
 }

@@ -7,6 +7,9 @@ import { setSandboxConfigProvider } from './utils/workspace';
 import type { SandboxMode } from './utils/sandbox';
 import { initAudit } from './auth/audit';
 import { Dashboard, setDashboardRef } from './dashboard';
+import { setSecretStorage, getStoredApiKey, generateAndStoreApiKey, clearStoredApiKey } from './auth';
+import { refreshApiKeyCache } from './server';
+import { readAuthConfig } from './auth';
 
 export { MCPServer };
 
@@ -66,7 +69,6 @@ export function getExtensionTerminal(context: vscode.ExtensionContext): vscode.T
     const existingTerminal = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
 
     if (existingTerminal && existingTerminal.exitStatus === undefined) {
-
         logger.info('[getExtensionTerminal] Reusing existing terminal for shell commands');
         return existingTerminal;
     }
@@ -92,12 +94,12 @@ function updateStatusBar(port: number) {
     if (serverEnabled && mcpServer?.cluster.getRole() === 'spoke') {
 
         statusBarItem.text = `$(server) MCP Server: ${port} (joined)`;
-        statusBarItem.tooltip = `Sharing another VS Code window's MCP server at localhost:${port} — tool calls for this window's folders are forwarded there.\nClick to leave the shared server.`;
+        statusBarItem.tooltip = `Sharing another VS Code window's MCP server at localhost:${port} — tool calls for this window's folders are forwarded there.\\nClick to leave the shared server.`;
         statusBarItem.backgroundColor = undefined;
     } else if (serverEnabled) {
 
         const remoteName = vscode.env.remoteName;
-        const remoteNote = remoteName ? ` — running inside remote "${remoteName}"` : '';
+        const remoteNote = remoteName ? ` — running inside remote ${remoteName}` : '';
         statusBarItem.text = `$(server) MCP Server: ${port}`;
         statusBarItem.tooltip = `MCP Server running at localhost:${port}${remoteNote} (Click to toggle)`;
         statusBarItem.backgroundColor = undefined;
@@ -115,7 +117,7 @@ async function startOrJoinServer(
     options: { resetPersistedOnFailure: boolean }
 ): Promise<MCPServer | undefined> {
     const config = vscode.workspace.getConfiguration('vscode-mcp-server');
-    const port = config.get<number>('port') || 3000;
+    const port = config.get<number>('port') || 3400;
     const host = config.get<string>('host') || '127.0.0.1';
     const terminal = getExtensionTerminal(context);
 
@@ -173,11 +175,10 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
     context.globalState.update('mcpServerEnabled', serverEnabled);
 
     const config = vscode.workspace.getConfiguration('vscode-mcp-server');
-    const port = config.get<number>('port') || 3000;
+    const port = config.get<number>('port') || 3400;
     const host = config.get<string>('host') || '127.0.0.1';
 
     updateStatusBar(port);
-
     if (serverEnabled) {
 
         if (!mcpServer) {
@@ -194,7 +195,7 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
             const duration = Date.now() - startTime;
             logger.info(`[toggleServerState] Server started successfully at ${new Date().toISOString()} (took ${duration}ms)`);
 
-            const remoteSuffix = vscode.env.remoteName ? ` (inside remote "${vscode.env.remoteName}" — forward the port or connect from within the remote)` : '';
+            const remoteSuffix = vscode.env.remoteName ? ` (inside remote ${vscode.env.remoteName} — forward the port or connect from within the remote)` : '';
             vscode.window.showInformationMessage(
                 started.cluster.getRole() === 'spoke'
                     ? `MCP Server joined the server already running at http://localhost:${port}/mcp — this window's folders are served through it${remoteSuffix}`
@@ -231,10 +232,51 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
     logger.info(`[toggleServerState] Toggle operation completed`);
 }
 
+async function ensureApiKey(context: vscode.ExtensionContext): Promise<string | undefined> {
+    const cfg = readAuthConfig();
+    if (cfg.mode !== 'api-key') {
+        return undefined;
+    }
+    const stored = await getStoredApiKey();
+    if (stored) {
+        return stored;
+    }
+    const generated = await generateAndStoreApiKey();
+    await vscode.env.clipboard.writeText(generated);
+    vscode.window.showInformationMessage(
+        'A new MCP Server API key was generated and copied to the clipboard. It is stored securely in VS Code SecretStorage.'
+    );
+    return generated;
+}
+
+const copyApiKeyCommand = vscode.commands.registerCommand(
+    'vscode-mcp-server.copyApiKey',
+    async () => {
+        const key = await getStoredApiKey();
+        if (key) {
+            await vscode.env.clipboard.writeText(key);
+            vscode.window.showInformationMessage('API key copied to the clipboard.');
+        } else {
+            vscode.window.showInformationMessage('No API key found. Start the MCP server first, or use Generate API Key.');
+        }
+    }
+);
+
+const generateApiKeyCommand = vscode.commands.registerCommand(
+    'vscode-mcp-server.generateApiKey',
+    async () => {
+        await clearStoredApiKey();
+        const key = await generateAndStoreApiKey();
+        await vscode.env.clipboard.writeText(key);
+        await refreshApiKeyCache();
+        vscode.window.showInformationMessage('New API key generated and copied to the clipboard. The old key is now invalid.');
+    }
+);
+
 export async function activate(context: vscode.ExtensionContext) {
     logger.info('Activating vscode-mcp-server extension');
     if (vscode.env.remoteName) {
-        logger.info(`[activate] Remote environment detected: "${vscode.env.remoteName}" — the server binds this host's localhost only`);
+        logger.info(`[activate] Remote environment detected: ${vscode.env.remoteName}`);
     }
 
     setSandboxConfigProvider(() => {
@@ -247,11 +289,16 @@ export async function activate(context: vscode.ExtensionContext) {
         () => context.globalState.get<import('./auth/audit').AuditEvent[]>('audit.log', []),
         events => context.globalState.update('audit.log', events)
     );
+    setSecretStorage(context.secrets);
+
     try {
+
+        await ensureApiKey(context);
+        await refreshApiKeyCache();
 
         const config = vscode.workspace.getConfiguration('vscode-mcp-server');
         const defaultEnabled = config.get<boolean>('defaultEnabled') ?? false;
-        const port = config.get<number>('port') || 3000;
+        const port = config.get<number>('port') || 3400;
         const host = config.get<string>('host') || '127.0.0.1';
 
         serverEnabled = context.globalState.get('mcpServerEnabled', defaultEnabled);
@@ -276,7 +323,6 @@ export async function activate(context: vscode.ExtensionContext) {
         }
 
         updateStatusBar(port);
-
         const toggleServerCommand = vscode.commands.registerCommand(
             'vscode-mcp-server.toggleServer',
             () => toggleServerState(context)
@@ -343,6 +389,8 @@ export async function activate(context: vscode.ExtensionContext) {
             showServerInfoCommand,
             openDashboardCommand,
             copyAuthTokenCommand,
+            copyApiKeyCommand,
+            generateApiKeyCommand,
             configChangeListener,
             workspaceFoldersListener,
             { dispose: async () => mcpServer && await mcpServer.stop() }
