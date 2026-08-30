@@ -10,3 +10,6 @@ vsc-extension-quickstart.md
 **/*.ts
 **/.vscode-test.*
 *.svg
+V14/**
+!node_modules/**
+node_modules/@types/**

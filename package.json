@@ -2,8 +2,8 @@
   "name": "vscode-mcp-server",
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
-  "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.14.7",
+  "description": "Turn VS Code into an MCP server \u2014 file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
+  "version": "0.15.1",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -23,7 +23,7 @@
       "properties": {
         "vscode-mcp-server.port": {
           "type": "number",
-          "default": 3000,
+          "default": 3400,
           "minimum": 1024,
           "maximum": 65535,
           "description": "The port number for the MCP server"
@@ -44,6 +44,7 @@
             "session-token",
             "static-token",
             "oauth",
+            "api-key",
             "none"
           ],
           "default": "session-token",
@@ -51,6 +52,7 @@
             "A random secret is generated once and required on every call (recommended)",
             "You pin the secret yourself in #vscode-mcp-server.auth.staticToken#",
             "MCP OAuth 2.1 with dynamic client registration — what remote clients like Mammouth require",
+            "API key — stored in VS Code SecretStorage (OS keychain), auto-generated on first use. Clients send Authorization: Bearer <key>",
             "No authentication (any local process or web page can run tools — not recommended)"
           ],
           "description": "How clients must authenticate to the MCP endpoint."
@@ -59,6 +61,12 @@
           "type": "string",
           "default": "",
           "description": "Token required when auth.mode is static-token. Pick a long random string (32+ characters).",
+          "minLength": 0
+        },
+        "vscode-mcp-server.auth.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key required when auth.mode is api-key. If left empty, a key is auto-generated on first activation and stored securely in VS Code SecretStorage.",
           "minLength": 0
         },
         "vscode-mcp-server.auth.allowedOrigins": {
@@ -76,13 +84,19 @@
         },
         "vscode-mcp-server.security.sandbox.mode": {
           "type": "string",
-          "enum": ["workspace", "home", "full"],
+          "enum": [
+            "workspace",
+            "home",
+            "full"
+          ],
           "default": "workspace",
           "description": "Filesystem confinement for authenticated tools. 'workspace': only folders open in this window plus allowPaths. 'home': the user profile directory. 'full': no restriction (dangerous with remote clients)."
         },
         "vscode-mcp-server.security.sandbox.allowPaths": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Extra absolute paths allowed when sandbox.mode is 'workspace' (e.g. D:\\Mammouth\\docs). Symlinks pointing outside are still refused."
         },
@@ -201,6 +215,14 @@
       {
         "command": "vscode-mcp-server.openDashboard",
         "title": "MCP Server: Open Dashboard"
+      },
+      {
+        "command": "vscode-mcp-server.copyApiKey",
+        "title": "MCP Server: Copy API Key"
+      },
+      {
+        "command": "vscode-mcp-server.generateApiKey",
+        "title": "MCP Server: Generate New API Key"
       }
     ]
   },
