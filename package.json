@@ -2,8 +2,8 @@
   "name": "vscode-mcp-server",
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
-  "description": "Turn VS Code into an MCP server \u2014 file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.15.1",
+  "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
+  "version": "0.17.0",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -119,7 +119,8 @@
             "refactoring": true,
             "frontend": true,
             "workflow": true,
-            "advanced": true
+            "advanced": true,
+            "skills": true
           },
           "properties": {
             "file": {
@@ -189,6 +190,10 @@
             "advanced": {
               "type": "boolean",
               "description": "Enable advanced tools (server info with local usage stats, extension inventory)"
+            },
+            "skills": {
+              "type": "boolean",
+              "description": "Enable agent-skill management tools (list, validate, package, scaffold SKILL.md-based skills)"
             }
           },
           "description": "Configure which MCP tools are enabled"

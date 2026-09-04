@@ -13,7 +13,15 @@ const BLOCKLIST: Array<{ rule: string; re: RegExp }> = [
     { rule: 'vscode-profiles', re: /AppData.*Code.*User|\.config\/Code/i },
     { rule: 'registry-write', re: /\breg(\.exe)?\s+(add|delete|import|load)\b/i },
     { rule: 'disk-destructive', re: /\b(format\b|diskpart\b|cipher\s+\/w)/i },
-    { rule: 'recursive-delete-root', re: /(Remove-Item|rm\s+-rf|rmdir\s+\/s)\s+[^&|;]*[A-Za-z]:\\?\s*$/i },
+    
+    
+    
+    { rule: 'recursive-delete-root',
+      re: /(?:Remove-Item|rm\s+-[A-Za-z]*[rf][A-Za-z]*|rmdir\s+\/s|rd\s+\/s)\s+[^&|;]*(?:[A-Za-z]:[\\\/]?(?:\*|\*\*)?|\*)\s*$/i },
+    
+    
+    { rule: 'recursive-delete-posix-root', re: /\brm\s+(?:-[A-Za-z]+\s+)+\/(?:\*|\s*)\s*$/ },
+    { rule: 'recursive-delete-home', re: /\brm\s+(?:-[A-Za-z]+\s+)+(?:~|\$HOME)(?:\/\*)?\s*$/i },
     { rule: 'dos-del-tree', re: /\bdel\s+\/[sq]\b|\brd\s+\/s\b/i },
     { rule: 'service-persistence', re: /\bschtasks\b|\bsc(\.exe)?\s+config\b|\bNew-Service\b/i },
     { rule: 'defender-off', re: /Set-MpPreference/i },
