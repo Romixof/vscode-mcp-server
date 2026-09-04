@@ -3,6 +3,49 @@
 All notable changes to the "vscode-mcp-server" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+
+## [0.17.0] - 2026-09-05
+### Added
+- New `skills` tool group (4 tools, toggle `vscode-mcp-server.enabledTools.skills`, default on) for managing folder-based agent skills (SKILL.md convention):
+  - `list_skills_code`: recursively scans a root folder (`.claude/skills` by default) for SKILL.md files and returns each skill's name + description parsed from its frontmatter. Read-only.
+  - `validate_skill_code`: validates a SKILL.md — required frontmatter fields, balanced ``` fences, referenced sibling files that actually exist next to it, and a non-executing syntax check (`new Function`, nothing is run) of embedded `javascript` blocks and `<script>` tags.
+  - `package_skill_code`: packages a skill folder into a .zip via the system `zip` CLI (availability probed with `zip -v`, works in both bash and PowerShell terminals), excluding `*.bak`, `.DS_Store`, `node_modules/*`, `__pycache__/*` by default plus optional extra patterns.
+  - `create_skill_code`: scaffolds `<root>/<slug>/SKILL.md` with a valid frontmatter from a human-readable name (accent-stripping slugify), refuses to overwrite unless `overwrite: true`.
+- Scope classification: `list_skills_code`/`validate_skill_code` → `fs:read`, `create_skill_code` → `fs:write`, `package_skill_code` → `shell:exec` (enforced by the existing permission gate).
+
+## [0.16.2] - 2026-09-05
+### Added
+- Hidden traffic log ("boîte noire" HTTP): every incoming request — including ones silently dropped before the auth middleware (404 unknown path, 405, 406, 400 malformed JSON, 403 origin guard) or aborted mid-flight — is now journaled to `<home>/.vscode-mcp-server/traffic.log` (2 MB rotation to `.1`, path overridable via `VSCODE_MCP_TRAFFIC_LOG`). Each line records method, path, client IP (X-Forwarded-For aware), Host, Origin, User-Agent, masked credentials (never the full key), Content-Type, Accept, protocol headers, a ≤400-char body preview and the response status with duration.
+- TCP-level hooks on the HTTP server (`connection`, `clientError`): connections that never produce a complete HTTP request (proxy/timeout issues) are now visible in the journal.
+- Protected diagnostic endpoint `GET /__traffic?key=<your key>[&lines=N]` returning the last N journal lines as plain text, so the whole chain (Mammouth → Tailscale Funnel → extension) can be inspected remotely with a browser. Denied without a valid key (401, logged).
+
+## [0.16.1] - 2026-09-05
+### Fixed
+- CORS preflight (`OPTIONS`) was handled after the auth middleware, so a browser-originated client (Mammouth connector update) got 401/403 on the preflight and could never reach `/mcp`. Preflight is now answered before origin/auth: 204 with `Access-Control-Allow-Origin` echoing the allowed origin, `Access-Control-Allow-Credentials: true`, and the full allow-headers list (Authorization, X-Api-Key, Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, X-Mcp-Token, X-Mcp-Cluster).
+- Successful and error responses now carry `Access-Control-Allow-Origin` when the Origin is allowed (echoed origin + `Vary: Origin`), so browser-based clients can read both 200 and 401/403 responses.
+- `extractToken` now also accepts the key sent in `X-Api-Key` (some MCP clients no longer use the Bearer header).
+
+## [0.16.0] - 2026-09-01
+### Fixed
+- `server.ts` patched only the parsed `req.headers` accept value, but the MCP SDK (>= 1.17) converts the request through `@hono/node-server`, which reads `req.rawHeaders`. Any client not sending exactly `Accept: application/json, text/event-stream` was rejected with 406 `Not Acceptable`. Both header views are now normalized.
+- `server.ts` read `this.oauthRouterInstance` in the auth middleware while the router is created lazily, so a valid OAuth token got a flaky 401 on the first request after a restart until discovery was re-run. The lazy getter is now used and verification is always available.
+- `auth.ts` `bearerAuth` treated an empty expected token as "no auth needed", so `auth.mode = static-token` with an empty `auth.staticToken` left the server wide open. Misconfigured secure modes now deny with 503 `auth_misconfigured` and `bearerAuth` denies when no candidate is configured.
+- `server.ts` async auth middleware had no rejection handler (Express 4 does not catch them), so a throwing check left requests hanging forever.
+- Multi-window token race: the 700 ms reconciliation could invalidate tokens announced seconds earlier. `expectedTokens()` now accepts the current token plus the recent `vscode-mcp.authTokenHistory` entries.
+- `server.ts` `refreshApiKeyCache` only refreshed when api-key mode was already active; switching `auth.mode` at runtime left a stale cache. It now refreshes unconditionally.
+- `shellguard.ts` only matched destructive deletes ending in `X:\`, so `Remove-Item -Path C:\*`, `rm -rf /`, `rm -fr /*` and `rm -rf ~` were allowed. Wildcard/drive-root endings, POSIX root and home deletes are now blocked.
+### Added
+- Unauthenticated `GET /health` endpoint returning `{ok, mode, version}` to verify the whole chain (Tailscale Funnel → serve → extension) without credentials.
+- `auth.allowedOrigins` entries may contain one `*` wildcard in the host (e.g. `https://*.ts.net`) for browser clients behind a funnel.
+- Every rejected request (401/403/503) is now logged with method, path and client IP (X-Forwarded-For aware) — silent drops behind proxies are visible in the MCP output channel.
+- Proxy stability: `keepAliveTimeout` raised from 5 s to 65 s and `headersTimeout` to 66 s on both HTTP listeners, eliminating random ECONNRESET when a funnel/tunnel reuses sockets; JSON body limit raised to 10 MB on `/mcp` and cluster invoke.
+
+## [0.14.8] - 2026-08-29
+### Fixed
+- Two windows starting at once could generate different `vscode-mcp.authToken` values and the second write overwrote the first, so tokens issued before the race (`HMAC(oldToken, client|scopes)`) failed after the next restart. Token creation now checks for an existing value before writing, keeps the last three tokens in `vscode-mcp.authTokenHistory`, and `verifyDerivedToken` tries every stored secret. Installations stay valid even if a race happened.
+- `server.ts` `saveClients` overwrote `globalState` with the in-memory list, wiping a client added by another window. Saves now merge with the current stored list and preserve `grantedScopes` when the incoming entry has none.
+- `auth-oauth.ts` `verifyDerivedToken` and `/revoke` now reload clients from storage if the token is not found and try every known secret. A spoke that becomes the new hub after the old hub closes will find clients registered after it was created.
+
 ## [0.14.7] - 2026-08-28
 ### Fixed
 - `server.ts` discarded `grantedScopes` when loading `vscode-mcp.oauthClients` from `globalState`, so a Mammouth client authorized as Full was verified as Standard and rejected with 401 `mcp_needs_auth`. Scopes now persist and restore correctly.

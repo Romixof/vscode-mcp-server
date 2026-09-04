@@ -42,7 +42,8 @@ function getToolConfiguration(): ToolConfiguration {
         refactoring: enabledTools.refactoring ?? true,
         frontend: enabledTools.frontend ?? true,
         workflow: enabledTools.workflow ?? true,
-        advanced: enabledTools.advanced ?? true
+        advanced: enabledTools.advanced ?? true,
+        skills: enabledTools.skills ?? true
     };
 }
 
