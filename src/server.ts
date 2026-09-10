@@ -28,11 +28,16 @@ import { registerFrontendTools } from './tools/frontend-tools';
 import { registerWorkflowTools } from './tools/workflow-tools';
 import { registerAdvancedTools } from './tools/advanced-tools';
 import { registerCoffeeTools } from './tools/coffee-tools';
+import { registerSearchTools } from './tools/search-tools';
+import { applyToolAnnotations } from './utils/tool-annotations';
 import { registerSkillsTools } from './tools/skills-tools';
 import { EXTENSION_ID } from './tools/advanced-tools';
+import { registerOcrTools } from './tools/ocr-tools';
+import { registerTokenEfficiencyTools } from './utils/token-efficiency';
+import { registerAgentInstructionsTool, resolveAgentInstructions } from './utils/agent-instructions';
 import { recordToolCall } from './utils/usage';
 import { logger } from './utils/logger';
-import { setClusterRootsProvider } from './utils/workspace';
+import { setClusterRootsProvider, resolveInputPath } from './utils/workspace';
 import { runWithScopes, checkToolAccess, currentScopes } from './auth/toolgate';
 import { ALL_SCOPES as LOCAL_ALL_SCOPES, scopeAllows as scopeAllowsCached } from './auth/scopes';
 import { appendAudit } from './auth/audit';
@@ -49,13 +54,19 @@ import {
 
 let api_key_cache: string | undefined;
 
+const EXT_VERSION_FALLBACK = '0.18.0';
 
-const EXT_VERSION = '0.17.0';
+function resolveExtVersion(): string {
+    try {
+        return vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? EXT_VERSION_FALLBACK;
+    } catch {
+        return EXT_VERSION_FALLBACK;
+    }
+}
+
+const EXT_VERSION = resolveExtVersion();
 
 export async function refreshApiKeyCache(): Promise<void> {
-        
-        
-        
         api_key_cache = await getStoredApiKey();
 }
 
@@ -78,6 +89,7 @@ export interface ToolConfiguration {
     workflow: boolean;
     advanced: boolean;
     skills: boolean;
+    ocr: boolean;
 }
 
 export class MCPServer {
@@ -179,7 +191,8 @@ export class MCPServer {
             frontend: true,
             workflow: true,
             advanced: true,
-            skills: true
+            skills: true,
+            ocr: true
         };
         this.app = express();
 
@@ -194,7 +207,10 @@ export class MCPServer {
             const mode = readAuthConfig().mode;
             if (mode === 'none') {return undefined;}
             if (mode === 'static-token') {return readAuthConfig().staticToken;}
-            if (mode === 'api-key') {return api_key_cache;}
+            if (mode === 'api-key') {
+                const cfgKey = readAuthConfig().apiKey;
+                return api_key_cache || cfgKey || undefined;
+            }
             return this.authToken ?? this.extensionContext?.globalState.get<string>('vscode-mcp.authToken');
         });
 
@@ -228,6 +244,19 @@ export class MCPServer {
         });
         this.registerToolsOn(server);
         return server;
+    }
+
+    public getAgentInstructions(): string {
+        return resolveAgentInstructions(this.currentAgentInstructionsOverride());
+    }
+
+    private currentAgentInstructionsOverride(): string | undefined {
+        try {
+            const value = vscode.workspace.getConfiguration('vscode-mcp-server').get<string>('agentInstructions', '');
+            return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+        } catch {
+            return undefined;
+        }
     }
 
     private registerToolsOn(server: McpServer): void {
@@ -289,7 +318,8 @@ export class MCPServer {
                 if (mode === 'api-key') {return 'api key — clients send Authorization: Bearer <key>. Key is auto-generated and stored in VS Code SecretStorage on first activation';}
                 return `session token — clients send Authorization: Bearer <token> or X-MCP-Token. Token for this installation: ${this.authToken}`;
             })],
-            ['skills', c.skills, () => registerSkillsTools(server)]
+            ['skills', c.skills, () => registerSkillsTools(server)],
+            ['ocr', c.ocr, () => registerOcrTools(server)]
         ];
 
         for (const [, enabled, register] of groups) {
@@ -299,10 +329,16 @@ export class MCPServer {
         }
 
         registerCoffeeTools(server);
+        registerTokenEfficiencyTools(server);
+        registerSearchTools(server, (inputPath: string, workspace?: string) => resolveInputPath(inputPath, workspace).fsPath);
+        registerAgentInstructionsTool(server, () => this.currentAgentInstructionsOverride());
+        const annotationReport = applyToolAnnotations(server);
+        if (annotationReport.unknown.length > 0) {
+            logger.warn(`Tool annotations missing for: ${annotationReport.unknown.join(', ')}`);
+        }
         this.enforceScopesOn(server);
     }
 
-    
     private enforceScopesOn(server: McpServer): void {
         const registrations = (server as unknown as { _registeredTools?: Record<string, { handler: (args: unknown, extra: unknown) => Promise<unknown> }> })._registeredTools;
         if (!registrations) {
@@ -317,7 +353,9 @@ export class MCPServer {
                 const started = Date.now();
                 if (!scopeAllowsCached(scopes, name)) {
                     this.dashboard?.recordToolCall(name, client, 0, 0, true);
-                    return checkToolAccess(name, scopes, client) as unknown as ReturnType<typeof original>;
+                    const denied = checkToolAccess(name, scopes, client);
+                    const reason = (denied as { reason?: string }).reason ?? '';
+                    return { content: [{ type: 'text', text: `Tool "${name}" denied. ${reason}`.trim() }], isError: true } as unknown as ReturnType<typeof original>;
                 }
                 appendAudit({ kind: 'tool_call', client, detail: name });
                 try {
@@ -338,29 +376,17 @@ export class MCPServer {
 
         const authCfg = () => readAuthConfig();
 
-        
-        
-        
-        
-        
         this.app.use(trafficMiddleware());
 
-        
-        
-        
-        
         this.app.get('/health', (_req, res) => {
             res.setHeader('Cache-Control', 'no-store');
             res.json({ ok: true, mode: authCfg().mode, version: EXT_VERSION });
         });
 
-        
-        
-        
-        
-        
-        
-        
+        this.app.get('/favicon.ico', (_req, res) => {
+            res.status(204).end();
+        });
+
         this.app.use((req, res, next) => {
             const origin = req.headers.origin as string | undefined;
             if (origin && !originAllowed(origin, authCfg(), this.port)) {return next();}
@@ -390,10 +416,6 @@ export class MCPServer {
             if (mode === 'api-key') {return api_key_cache;}
             return this.authToken;
         };
-        
-        
-        
-        
         const expectedTokens = (): string[] => {
             const cfg = authCfg();
             if (cfg.mode === 'static-token') {return cfg.staticToken ? [cfg.staticToken] : [];}
@@ -414,18 +436,13 @@ export class MCPServer {
         const clusterRoutes = [CLUSTER_REGISTER_PATH, CLUSTER_HEARTBEAT_PATH, CLUSTER_DEREGISTER_PATH,
                                CLUSTER_HUB_SHUTDOWN_PATH, INVOKE_PATH];
 
-        
-        
-        
-        
-        
         this.app.get('/__traffic', async (req, res) => {
             try {
                 let urlKey: string | null = null;
                 try {
                     const u = new URL(req.originalUrl ?? req.url, 'http://localhost');
                     urlKey = u.searchParams.get('key');
-                } catch { /* URL relative inhabituelle */ }
+                } catch { }
                 const supplied = urlKey
                     || extractToken(req.headers as Record<string, string | string[] | undefined>)
                     || (typeof req.headers['x-api-key'] === 'string' ? req.headers['x-api-key'] as string : undefined);
@@ -435,7 +452,7 @@ export class MCPServer {
                     try {
                         const k = await getStoredApiKey();
                         if (k) {candidates.push(k);}
-                    } catch { /* secretStorage indisponible */ }
+                    } catch { }
                     if (api_key_cache) {candidates.push(api_key_cache);}
                 } else if (mode === 'static-token') {
                     const st = authCfg().staticToken;
@@ -456,7 +473,7 @@ export class MCPServer {
                     const u2 = new URL(req.originalUrl ?? req.url, 'http://localhost');
                     const parsed = parseInt(u2.searchParams.get('lines') ?? '150', 10);
                     if (Number.isFinite(parsed) && parsed > 0) {lines = parsed;}
-                } catch { /* defaut */ }
+                } catch { }
                 res.setHeader('Cache-Control', 'no-store');
                 res.setHeader('Content-Type', 'text/plain; charset=utf-8');
                 return res.status(200).send(readTrafficTail(lines));
@@ -468,9 +485,6 @@ export class MCPServer {
 
         this.app.use(async (req, res, next) => {
             try {
-                
-                
-                
                 if (authCfg().mode === 'static-token' && !expectedToken()) {
                     logger.warn(`[auth] 503 misconfigured — ${req.method} ${req.path} from ${clientIp(req)} (auth.mode=static-token but auth.staticToken is empty)`);
                     return res.status(503).json({
@@ -478,13 +492,14 @@ export class MCPServer {
                         error_description: 'auth.mode is static-token but auth.staticToken is empty — set vscode-mcp-server.auth.staticToken or pick another mode'
                     });
                 }
+                if (req.path === CLUSTER_IDENTITY_PATH) {
+                    const peer = req.socket.remoteAddress?.replace('::ffff:', '');
+                    if (peer === '127.0.0.1' || peer === '::1') {return next();}
+                }
                 if (authCfg().mode === 'none') {return next();}
                 if (authCfg().mode === 'api-key') {
                     const valid = await verifyApiKeyAsync(req, authCfg());
                     if (valid) {return runWithScopes(LOCAL_ALL_SCOPES, 'api-key-client', next);}
-                    
-                    
-                    
                     logger.warn(`[auth] 401 api-key — ${req.method} ${req.path} from ${clientIp(req)} (${extractToken(req.headers as Record<string, string | string[] | undefined>) ? 'bad key' : 'missing key'})`);
                     res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server", error="invalid_token"');
                     return res.status(401).json({ error: 'invalid_token' });
@@ -492,11 +507,6 @@ export class MCPServer {
                 if (req.path.startsWith('/.well-known/') || PUBLIC_PATHS.has(req.path)) {return next();}
                 const presented = extractToken(req.headers as Record<string, string | string[] | undefined>);
 
-                
-                
-                
-                
-                
                 if (presented && (authCfg().mode === 'oauth')) {
                     const verdict = this.oauthRouter.verifyDerivedToken(presented);
                     if (verdict.verdict === 'ok') {
@@ -510,23 +520,26 @@ export class MCPServer {
                     }
                 }
                 if (clusterRoutes.includes(req.path)) {
-                    const expected = expectedToken();
-                    if (!expected) {
+                    const candidates: string[] = [];
+                    const primary = expectedToken();
+                    if (primary) {candidates.push(primary);}
+                    for (const t of expectedTokens()) {
+                        if (!candidates.includes(t)) {candidates.push(t);}
+                    }
+                    if (candidates.length === 0) {
                         return res.status(503).json({
                             error: 'auth_misconfigured',
                             error_description: 'no cluster credential available for the current auth mode'
                         });
                     }
                     const clusterHdr = req.headers['x-mcp-cluster'];
-                    if (typeof clusterHdr === 'string' && clusterHdr && tokensMatch(clusterHdr, expected)) {return next();}
-                    if (presented && tokensMatch(presented, expected)) {return next();}
+                    if (typeof clusterHdr === 'string' && clusterHdr && candidates.some(c => tokensMatch(clusterHdr, c))) {return next();}
+                    if (presented && candidates.some(c => tokensMatch(presented, c))) {return next();}
                     res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server"');
                     return res.status(401).json({ error: 'invalid_token' });
                 }
                 bearerAuth(expectedTokens)(req, res, () => runWithScopes(LOCAL_ALL_SCOPES, 'local-session', next));
             } catch (err) {
-                
-                
                 logger.error(`[auth] middleware error: ${err instanceof Error ? err.message : String(err)}`);
                 if (!res.headersSent) {
                     res.status(500).json({ error: 'internal_error' });
@@ -542,15 +555,22 @@ export class MCPServer {
         });
 
         this.app.post('/mcp', express.json({ limit: '10mb' }), async (req, res) => {
-            const clientName = (req.headers['x-mcp-client-name'] as string) || 'unknown';
-            logger.info(`MCP request from ${clientName}`);
-            
-            
+            const headerName = typeof req.headers['x-mcp-client-name'] === 'string' ? (req.headers['x-mcp-client-name'] as string).trim() : '';
+            const bodyInfo = (req.body && typeof req.body === 'object') ? (req.body as { params?: { clientInfo?: { name?: unknown } } }).params : undefined;
+            const infoNameRaw = bodyInfo?.clientInfo?.name;
+            const infoName = typeof infoNameRaw === 'string' ? infoNameRaw.trim() : '';
+            const uaToken = typeof req.headers['user-agent'] === 'string' ? ((req.headers['user-agent'] as string).trim().split(/\s+/)[0] ?? '') : '';
+            const clientLabel = headerName || infoName || uaToken || 'unknown';
+            logger.info(`MCP request from ${clientLabel} @ ${clientIp(req)}`);
             trafficNoteBody(req, req.body);
             let transport: StreamableHTTPServerTransport | undefined;
             let sessionServer: McpServer | undefined;
             let disposed = false;
+            const startedAt = Date.now();
             const dispose = () => {
+                if (!res.writableEnded) {
+                    logger.warn(`MCP client ${clientLabel} @ ${clientIp(req)} disconnected after ${Date.now() - startedAt}ms before the response completed (possible tunnel/proxy drop)`);
+                }
                 if (disposed || !transport || !sessionServer) {
                     return;
                 }
@@ -562,12 +582,6 @@ export class MCPServer {
             try {
                 res.setHeader('Content-Type', 'application/json');
                 res.setHeader('Cache-Control', 'no-store');
-                
-                
-                
-                
-                
-                
                 const desiredAccept = 'application/json, text/event-stream';
                 const acceptHdr = req.headers['accept'];
                 const acceptVal = typeof acceptHdr === 'string' ? acceptHdr : '';
@@ -669,9 +683,8 @@ export class MCPServer {
                 const boundPort = typeof addr === 'object' && addr ? addr.port : port;
 
                 this.httpServer = server;
-                
-                server.keepAliveTimeout = 65_000;
-                server.headersTimeout = 66_000;
+                server.keepAliveTimeout = 90_000;
+                server.headersTimeout = 91_000;
                 logger.info(`[ClusterHost.listenOn] Bound to ${host}:${boundPort}`);
                 resolve(boundPort);
             });
@@ -782,14 +795,8 @@ export class MCPServer {
             return new Promise((resolve, reject) => {
 
                 this.httpServer = this.app.listen(this.port, this.host, () => {
-                    
-                    
-                    
-                    
-                    this.httpServer!.keepAliveTimeout = 65_000;
-                    this.httpServer!.headersTimeout = 66_000;
-                    
-                    
+                    this.httpServer!.keepAliveTimeout = 90_000;
+                    this.httpServer!.headersTimeout = 91_000;
                     attachTrafficHooks(this.httpServer!);
                     initTrafficLog(`vscode-mcp-server v${EXT_VERSION} — écoute ${this.host}:${this.port} — mode=${readAuthConfig().mode}`);
                     trafficWriteLine(`démarrage OK — journal caché : ${process.env.VSCODE_MCP_TRAFFIC_LOG || '<home>/.vscode-mcp-server/traffic.log'}`);

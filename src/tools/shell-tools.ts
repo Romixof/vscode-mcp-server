@@ -8,6 +8,7 @@ import { logger } from '../utils/logger';
 import { checkShellCommand } from '../auth/shellguard';
 import { appendAudit } from '../auth/audit';
 import { currentScopes } from '../auth/toolgate';
+import { compactCommandOutput, rememberOriginal, formatCompactionNotice } from '../utils/token-efficiency';
 
 export type ShellKind = 'bash' | 'powershell';
 
@@ -224,10 +225,10 @@ const CSI_SEQUENCE_REGEX = /\x1b\[[0-9;?]*[A-Za-z]/g;
 const BARE_OSC_FRAGMENT_REGEX = /(^|\n)\]?633;[A-Z](?:;[^\n]*)?(?=\n|$)/g;
 
 function stripControlSequences(text: string): string {
-	return text
-		.replace(OSC_SEQUENCE_REGEX, '')
-		.replace(CSI_SEQUENCE_REGEX, '')
-		.replace(BARE_OSC_FRAGMENT_REGEX, '$1');
+        return text
+                .replace(OSC_SEQUENCE_REGEX, '')
+                .replace(CSI_SEQUENCE_REGEX, '')
+                .replace(BARE_OSC_FRAGMENT_REGEX, '$1');
 }
 
 const forcedShellKinds = new WeakMap<vscode.Terminal, ShellKind>();
@@ -392,14 +393,19 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
         Working directory: Use cwd to run commands in specific directories. Defaults to workspace root. If you get unexpected results, ensure the cwd is correct.
         Multi-root: pass workspace to anchor cwd against that folder (name or 1-based index).
 
-        Timeout: A command that exceeds its time limit (default 10s) returns the output captured so far with exit code 124 and a note; the process keeps running in the terminal. Slow scans or installs need a larger timeout passed explicitly.`,
+        Timeout: A command that exceeds its time limit (default 10s) returns the output captured so far with exit code 124 and a note; the process keeps running in the terminal. Slow scans or installs need a larger timeout passed explicitly.
+
+        Read-only preference: for simple reads (file contents, directory listing, text search, git status/diff/log, diagnostics) prefer the dedicated read-only tools — read_file_code, list_files_code, search_workspace_code, get_git_diff_code, get_file_history_code, get_diagnostics_code. They never modify anything, so MCP clients can auto-approve them without a manual prompt; keeping this tool for commands that actually build, install, commit or otherwise mutate makes approvals the exception.
+
+        Token efficiency: output is token-compacted by default (progress bars stripped, repeated lines collapsed, long lines truncated, head+tail capped; git transport, package-manager installs, test runners and builds get category-specific filters like rtk). Nothing is lost: a notice at the end of a compacted result carries a retrieve_output_code handle that pages back through the full original when the compact version is not enough. Pass outputMode "raw" to get the untouched output directly.`,
         {
             command: z.string().describe('The shell command to execute'),
             cwd: z.string().optional().default('.').describe('Optional working directory for the command'),
             timeout: z.number().optional().default(10000).describe('Command timeout in milliseconds (default: 10000)'),
+            outputMode: z.enum(['compact', 'raw']).optional().default('compact').describe('Output formatting: "compact" (default) applies token-efficiency filtering and keeps the full original retrievable via retrieve_output_code; "raw" returns the untouched output.'),
             workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ command, cwd, timeout = 10000, workspace }): Promise<CallToolResult> => {
+        async ({ command, cwd, timeout = 10000, outputMode = 'compact', workspace }): Promise<CallToolResult> => {
             try {
                 const verdict = checkShellCommand(command);
                 if (!verdict.allowed) {
@@ -437,6 +443,22 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
                 }
 
                 const { output, exitCode } = await executeShellCommand(terminal, command, fullCwd, timeout);
+
+                if (outputMode === 'compact') {
+                    const compaction = compactCommandOutput(command, output);
+                    if (compaction.strategy !== 'skipped') {
+                        const handle = rememberOriginal('shell', output, `Command: ${command}`);
+                        const compactResult: CallToolResult = {
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: `Command: ${command}\nExit code: ${exitCode}\n\nOutput (compacted):\n${compaction.text}\n\n${formatCompactionNotice(compaction, handle)}`
+                                }
+                            ]
+                        };
+                        return compactResult;
+                    }
+                }
 
                 const result: CallToolResult = {
                     content: [

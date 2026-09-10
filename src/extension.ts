@@ -10,6 +10,7 @@ import { Dashboard, setDashboardRef } from './dashboard';
 import { setSecretStorage, getStoredApiKey, generateAndStoreApiKey, clearStoredApiKey } from './auth';
 import { refreshApiKeyCache } from './server';
 import { readAuthConfig } from './auth';
+import { resolveAgentInstructions } from './utils/agent-instructions';
 
 export { MCPServer };
 
@@ -43,7 +44,8 @@ function getToolConfiguration(): ToolConfiguration {
         frontend: enabledTools.frontend ?? true,
         workflow: enabledTools.workflow ?? true,
         advanced: enabledTools.advanced ?? true,
-        skills: enabledTools.skills ?? true
+        skills: enabledTools.skills ?? true,
+        ocr: enabledTools.ocr ?? true
     };
 }
 
@@ -359,6 +361,15 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         );
 
+        const copyAgentInstructionsCommand = vscode.commands.registerCommand(
+            'vscode-mcp-server.copyAgentInstructions',
+            async () => {
+                const text = mcpServer ? mcpServer.getAgentInstructions() : resolveAgentInstructions();
+                await vscode.env.clipboard.writeText(text);
+                vscode.window.showInformationMessage('Agent instructions copied. Paste them into your agent instructions (CLAUDE.md, project instructions, Mammouth memory). The MCP server also sends them automatically in the initialize response.');
+            }
+        );
+
         const configChangeListener = vscode.workspace.onDidChangeConfiguration(async (event) => {
             const relevant =
                 event.affectsConfiguration('vscode-mcp-server.enabledTools') ||
@@ -390,6 +401,7 @@ export async function activate(context: vscode.ExtensionContext) {
             showServerInfoCommand,
             openDashboardCommand,
             copyAuthTokenCommand,
+            copyAgentInstructionsCommand,
             copyApiKeyCommand,
             generateApiKeyCommand,
             configChangeListener,
