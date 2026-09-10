@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
   "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.17.0",
+  "version": "0.19.12",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -82,6 +82,11 @@
           "default": true,
           "description": "Accept requests that carry no Origin header (curl, SDK clients). Browsers always send Origin on cross-site posts, so this does not weaken the drive-by protection."
         },
+        "vscode-mcp-server.agentInstructions": {
+          "type": "string",
+          "default": "",
+          "description": "Override the agent instructions sent automatically in the MCP initialize response (and copied by 'MCP Server: Copy Agent Instructions'). Leave empty to use the built-in workflow guide: tool map, read-only preference, diagnostics-first workflow, memory auto-load."
+        },
         "vscode-mcp-server.security.sandbox.mode": {
           "type": "string",
           "enum": [
@@ -120,7 +125,8 @@
             "frontend": true,
             "workflow": true,
             "advanced": true,
-            "skills": true
+            "skills": true,
+            "ocr": true
           },
           "properties": {
             "file": {
@@ -194,6 +200,10 @@
             "skills": {
               "type": "boolean",
               "description": "Enable agent-skill management tools (list, validate, package, scaffold SKILL.md-based skills)"
+            },
+            "ocr": {
+              "type": "boolean",
+              "description": "Enable PDF OCR tools (scanned-page detection and text extraction via poppler-utils and tesseract)"
             }
           },
           "description": "Configure which MCP tools are enabled"
@@ -228,6 +238,10 @@
       {
         "command": "vscode-mcp-server.generateApiKey",
         "title": "MCP Server: Generate New API Key"
+      },
+      {
+        "command": "vscode-mcp-server.copyAgentInstructions",
+        "title": "MCP Server: Copy Agent Instructions"
       }
     ]
   },
