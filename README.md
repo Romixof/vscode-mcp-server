@@ -1,8 +1,8 @@
 # VSCodium MCP Server
 
-Turn VS Code into a local MCP server: 61 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
+Turn VS Code into a local MCP server: 74 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, read scanned PDFs, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
 
-This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 49 came later. Credit for the core idea and the first implementation belongs to him.
+This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 62 came later. Credit for the core idea and the first implementation belongs to him.
 
 ## Demo
 
@@ -29,69 +29,37 @@ https://github.com/user-attachments/assets/f60da97b-a5a9-45cb-8379-3bf91c9bbad0
 
 Clients that speak streamable HTTP directly can skip `mcp-remote` and use the URL as-is.
 
-### A prompt that works well
+### The agent guide
 
-Drop this into your agent's instructions (project instructions in Claude, `CLAUDE.md` elsewhere):
+Tell your agent to call `get_agent_instructions_code` once at the start of every conversation. The tool is read-only and auto-approved, and it returns the full map: all 74 tools with their key parameters, grouped by task, tagged `[RO]`/`[MUT]`/`[DST]` to match the approval behavior, plus the workflow rules (memory first, diagnostics after every edit batch, secret scan before commits) and recipes for common jobs. An agent that loads it stops discovering tools by trial and error, which is where most wasted tokens go.
 
-```
-You are working on an existing codebase, which you can access using your tools. These code tools interact with a VS Code workspace.
-
-WORKFLOW ESSENTIALS:
-1. Always start exploration with list_files_code on root directory (.) first
-2. CRITICAL: Run get_diagnostics_code after EVERY set of code changes before completing tasks
-3. For small edits (≤10 lines): use replace_lines_code with exact original content
-4. For large changes, new files, or uncertain content: use create_file_code with overwrite=true
-5. Before committing: run find_secrets_code and security_scan_code, fix what they flag
-
-EXPLORATION STRATEGY:
-- Start: list_files_code with path='.' (never recursive on root)
-- Understand structure: read key files like package.json, README, main entry points
-- Find symbols: use search_symbols_code for functions/classes, get_document_symbols_code for file overviews
-- Before editing: read_file_code the target file to understand current content
-
-EDITING BEST PRACTICES:
-- Small modifications: replace_lines_code (requires exact original content match)
-- If replace_lines_code fails: read_file_code the target lines, then retry with correct content
-- Renaming a function or class across files: rename_symbol_code, never manual search and replace
-- Large changes: create_file_code with overwrite=true is more reliable
-- After any changes: get_diagnostics_code to check for errors
-
-MULTI-ROOT WORKSPACES:
-- With several folders open, every path tool accepts workspace='<folder name or number>'
-- Results show paths as FolderName/path; feed those strings straight back in, they resolve correctly
-
-BUILDS AND CHECKS:
-- Project tasks: run_task_code without arguments lists what exists, then run them by name
-- Tests and coverage: run_tests_code, get_test_coverage_code; style: format_document_code, lint_and_fix_code
-- Builds: build_project_code detects the command; if a tool misbehaves, get_server_info_code shows versions and per-tool call counts
-
-APPROVAL PROCESS:
-IMPORTANT: Only run code modification tools after presenting a plan and receiving explicit approval.
-```
-
-For context efficiency, agents that already read whole files benefit most from the symbol tools:
+Paste this into the agent's instructions (project instructions in Claude, `CLAUDE.md`, or your agent's persistent memory):
 
 ```
-Use VS Code symbol tools to reduce context consumption:
-- get_document_symbols_code for file structure instead of reading entire files
-- search_symbols_code to find functions/classes by name across the project
-- get_symbol_definition_code for type info without pulling the whole file
-Workflow: outline → search → definition → read only what you need
+At the start of every conversation, call get_agent_instructions_code (read-only,
+auto-approved). It returns the complete tool catalog with parameters; follow it.
+If memory tools are available, call memory_load_code right after.
 ```
+
+You can replace the built-in guide with your own text through the `vscode-mcp-server.agentInstructions` setting, or copy it with the **MCP Server: Copy Agent Instructions** command if your client cannot call tools at all.
 
 ## What the tools do
 
-Every group maps to a key in the `vscode-mcp-server.enabledTools` setting and can be turned off individually. Useful when your coding agent already has some of these abilities: disable file/edit and keep only symbol tools, for example.
+Every group in the table maps to a key in the `vscode-mcp-server.enabledTools` setting and can be turned off individually. Useful when your coding agent already has some of these abilities: disable file/edit and keep only symbol tools, for example. Four tools are always on regardless of the setting: `search_workspace_code`, `retrieve_output_code`, `get_agent_instructions_code` and a coffee easter egg.
+
+### Read-only tools run without approval
+
+43 of the 74 tools carry the MCP `readOnlyHint` annotation: file reads, search, symbol lookup, diagnostics, git blame/diff/history, secret scanning, static analyzers, the PDF checks. Clients that honor annotations auto-approve them, so a plain read never sits behind a confirmation dialog. The classification is deliberately conservative: 21 tools that modify files or state and 10 destructive tools (shell, SQL, stashes, file moves) keep their prompts. Nothing is marked read-only if it can execute, erase, or reach the network.
 
 ### Multiple workspace folders
 
 Every tool that takes a path or a working directory also accepts an optional `workspace` parameter: an open folder's name (case-insensitive) or its 1-based position in the window. Relative paths resolve against that folder; leave the parameter out and the first folder is used, so single-folder setups behave exactly as before. A folder literally named "2" is matched by name before the number 2 means anything. `list_workspace_folders_code` prints the numbering to quote back.
 
-Paths round-trip in both directions: results are displayed as `FolderName/relative/path` when several folders are open, and that same form is accepted as input — as are absolute paths — so an output of one tool can be fed to the next without re-deriving which root it lives in.
+Paths round-trip in both directions: results are displayed as `FolderName/relative/path` when several folders are open, and that same form is accepted as input, as are absolute paths, so an output of one tool can be fed to the next without re-deriving which root it lives in.
 
 ### Several VS Code windows, one server
 
-Windows do not fight over the port: the first one to start serves `http://localhost:3000/mcp` exactly as before, and every other VS Code window joins it automatically. There is still one client URL to configure, no matter how many windows are open — each joined window registers its open folders with the hosting window, which forwards every tool call to whichever window owns the target folder. Folder names, deduped labels (`proj-beta-2` when two windows open same-named folders) and the 1-based indexes all span the whole cluster; `list_workspace_folders_code` shows the global numbering and names the window behind each folder, and whole-workspace diagnostics or symbol searches fan out to every window at once. The status bar reads `MCP Server: 3000 (joined)` on a window sharing another's server. Close the hosting window and the remaining ones elect a new host within seconds — the client URL never changes.
+Windows do not fight over the port: the first one to start serves `http://localhost:3000/mcp` exactly as before, and every other VS Code window joins it automatically. There is still one client URL to configure, no matter how many windows are open. Each joined window registers its open folders with the hosting window, which forwards every tool call to whichever window owns the target folder. Folder names, deduped labels (`proj-beta-2` when two windows open same-named folders) and the 1-based indexes all span the whole cluster; `list_workspace_folders_code` shows the global numbering and names the window behind each folder, and whole-workspace diagnostics or symbol searches fan out to every window at once. The status bar reads `MCP Server: 3000 (joined)` on a window sharing another's server. Close the hosting window and the remaining ones elect a new host within seconds, so the client URL never changes.
 
 | Group | Tools | Covers |
 |---|---|---|
@@ -99,19 +67,23 @@ Windows do not fight over the port: the first one to start serves `http://localh
 | Edit | 2 | create files, replace line ranges with validation |
 | Diagnostics | 1 | errors/warnings from the Problems panel |
 | Symbol | 3 | fuzzy search, hover definitions, document outlines |
-| Shell | 1 | terminal execution with real exit codes and timeouts |
+| Shell | 1 | terminal execution with compact output and full-output recall |
 | Memory | 4 | persistent global and per-project notes |
 | Test | 5 | run tests, coverage, formatting, linting, diffs |
 | Git | 5 | commits, branches, blame, conflicts, stashes |
 | Documentation | 5 | dependencies, file history, docstrings, project context, TODOs |
 | Database | 5 | SQL, HTTP endpoints, env vars, ports, dev servers |
-| Productivity | 4 | dead code, snapshots, regex testing, encodings |
-| Security | 3 | secret scanning, risky constructs, dependency audit |
+| Productivity | 5 | dead code, snapshots, regex testing, encodings, calendar extraction |
+| Security | 4 | secret scanning, risky constructs, dependency audit, audit log |
 | Performance | 3 | bundle sizes, server report, command profiling |
 | Refactoring | 4 | rename symbol, extract function, duplicates, suggestions |
 | Frontend | 4 | accessibility, CSS quality, element inspection, unused CSS |
 | Workflow | 4 | npm/composer/Makefile tasks, project build, snippets, shell aliases |
 | Advanced | 2 | server info, installed extensions |
+| Skills | 4 | agent skills: list, validate, create, package |
+| OCR | 3 | scanned PDFs: needs-OCR check, page rendering, text extraction |
+
+70 tools across those 19 groups, plus 4 always-on tools (search, output recall, agent guide, coffee) for 74 total.
 
 ## Tool reference
 
@@ -129,6 +101,9 @@ Optional parameters are listed with their defaults.
 - **create_file_code**: creates a file or rewrites an existing one completely. Params: `path`, `content`, `overwrite` (default false), `ignoreIfExists` (default false).
 - **replace_lines_code**: replaces a line range, validating against the original text. Params: `path`, `startLine`, `endLine`, `content`, `originalCode`.
 
+### Search (always on)
+- **search_workspace_code**: regex search across the workspace, matches grouped by file with 1-based line numbers. Params: `pattern`, `path` (default `.`), `glob` (a pattern without `/` like `*.ts` matches the file name at any depth, `src/**/*.py` matches relative paths), `caseSensitive`, `maxResults` (default 50, max 200), `skipCommon` (default true: node_modules, dist, out, build, dot-directories). Binary files and files over 1.5 MB are skipped. This replaces grep-through-shell for simple reads: strictly read-only, auto-approved, no terminal involved.
+
 ### Diagnostics
 - **get_diagnostics_code**: lists errors and warnings. Params: `path` (optional; whole workspace if omitted), `severities` (default [0, 1]), `format` ('text' or 'json'), `includeSource` (default true). Run it after every round of changes. With several folders open, reported paths carry the owning folder's name as a prefix.
 
@@ -138,7 +113,8 @@ Optional parameters are listed with their defaults.
 - **get_document_symbols_code**: hierarchical outline of a file. Params: `path`, `maxDepth`.
 
 ### Shell
-- **execute_shell_command_code**: runs a command in the integrated terminal through shell integration and captures real output plus exit code. Commands on the same terminal run one after another, never interleaved. Params: `command`, `cwd`, `timeout` ms (default 10000). A command past its limit returns the output captured so far with exit code 124; the process keeps running in the terminal, so slow scans need a larger timeout passed explicitly.
+- **execute_shell_command_code**: runs a command in the integrated terminal through shell integration and captures real output plus exit code. Commands on the same terminal run one after another, never interleaved. Params: `command`, `cwd`, `timeout` ms (default 10000), `outputMode` (`compact` by default: transport logs, test runners, package managers and build output come back filtered to the lines that matter; `raw` disables filtering). A command past its limit returns the output captured so far with exit code 124; the process keeps running in the terminal, so slow scans need a larger timeout passed explicitly. When compact output ends with a `[@vscode-mcp ... retrieve_output_code "handle"]` notice, the full unfiltered text is one call away.
+- **retrieve_output_code** (always on): recalls the full original output behind a compaction notice, paginated. Params: `handle`, `offset` (default 0), `maxChars` (default 20000).
 
 ### Memory
 Notes live in markdown: global at `~/Mammouth/MEMORY.md`, per-project at `{workspaceName}_MEMORY.md` in the workspace root.
@@ -183,14 +159,16 @@ Frameworks auto-detect from `package.json`, `requirements.txt` or `pyproject.tom
 - **snapshot_workspace_code**: SHA-256 snapshots of every file with before/after compare. Params: `action` (save/compare/list), `name`, `baseline`.
 - **regex_tester_code**: matches with positions, captured groups and a replace preview. Params: `pattern`, `flags`, `text`, `filePath`, `replace`.
 - **convert_encoding_code**: detects and converts utf-8, utf-8-bom, utf-16le, latin1. Params: `path`, `action`, `from`, `to`.
+- **generate_ics_code**: pulls events out of a document into an .ics calendar file. Params: `path`, `output`, `calendarName`, `keywords`, `requireKeyword`, `year`.
 
 ### Security
 - **find_secrets_code**: hardcoded AWS keys, GitHub/Slack tokens, Google API keys, Stripe live keys, private key blocks, JWTs and generic credential assignments. Values come back masked and obvious placeholders are ignored. Params: `path`, `exclude`, `maxResults`.
 - **security_scan_code**: risky constructs rated by severity: eval/new Function, innerHTML sinks, exec calls with interpolated input, disabled TLS verification, unsafe yaml/pickle/subprocess, SQL string concatenation. Params: `path`, `severity` floor, `maxResults`.
-- **check_dependencies_vulnerabilities_code**: npm audit results per package with patched versions.
+- **check_dependencies_vulnerabilities_code**: npm audit results per package with patched versions. Params: `workspace`.
+- **get_audit_log_code**: recent tool calls, denied tools, blocked shell commands, sandbox violations, consent grants and token revocations. Params: `limit`, `kind`.
 
 ### Performance
-- **analyze_bundle_code**: build output sizes with the largest files and their share. Params: `dir`, `top`.
+- **analyze_bundle_code**: build output sizes with the largest files and their share. Params: `dir` (default dist), `top`.
 - **get_performance_report_code**: server uptime and memory, workspace weight, heaviest npm packages.
 - **profile_command_code**: wall-clock timing of a command over repeated runs, alongside its output. Params: `command`, `runs`.
 
@@ -215,20 +193,41 @@ Project tasks, builds, editor snippets and shared shell shortcuts, discovered fr
 - **list_snippets_code**: lists snippets with a body preview, from `.vscode/snippets/*.json`, `.vscode/snippets/*.code-snippets` and the `.vscode/*.code-snippets` files VS Code itself creates; comment lines are tolerated. Params: `prefixFilter`.
 - **run_alias_code**: runs shortcuts from `.mcp-aliases.json` at the workspace root, so a whole team shares one set of commands; values are plain command strings or `{ command, description }`. Params: `name`, `args`, `cwd`, `timeout`.
 
-### Advanced
-- **get_server_info_code**: endpoint, extension and VS Code versions, Node version, platform, uptime, the open workspace folders and per-tool call counts since activation. The counters live in memory only; nothing is sent anywhere. Reports when VS Code runs inside a devcontainer, WSL or SSH remote, where a client on another machine needs the port forwarded.
-- **list_extensions_code**: installed extensions with versions and descriptions. Params: `filter` (case-insensitive substring on id or description), `includeBuiltins` (default false), `missingOnly` (lists the `.vscode/extensions.json` recommendations that are not installed instead).
+### Skills
+
+Agent skills are folders carrying a SKILL.md with YAML frontmatter. The server can inventory, lint, scaffold and package them.
+
+- **list_skills_code**: recursively finds every SKILL.md under a root folder and reads its frontmatter (name, description). Params: `root`.
+- **validate_skill_code**: checks one SKILL.md: frontmatter completeness, balanced code fences, referenced sibling files exist next to it, non-executing syntax check of embedded JavaScript blocks. Params: `path`.
+- **create_skill_code**: scaffolds `<root>/<slug>/SKILL.md` with valid frontmatter and a section skeleton. Params: `name`, `description`, `root`, `overwrite`.
+- **package_skill_code**: zips a skill folder through the system `zip` command, ready to share. Params: `skillPath`, `outputPath`, `exclude`.
+
+### PDF and OCR
+
+Reading scanned documents runs entirely on your machine: for every engine, no page content leaves it.
+
+- **pdf_needs_ocr_code**: decide first. Checks whether a PDF already has an extractable text layer or is (fully or partly) image-only. Params: `pdfPath`, `minCharsPerPage`.
+- **render_pdf_pages_code**: rasterizes pages to images returned in the tool result, so whichever vision-capable model drives the conversation reads them itself. Params: `pdfPath`, `firstPage`, `lastPage`, `dpi`.
+- **ocr_pdf_code**: extracts text from a scanned PDF. Engines: `tesseract` (local binary; common Windows install paths are probed, including `%LOCALAPPDATA%\Programs\Tesseract-OCR`), `vision` (a local Ollama vision model), or `auto`. Page ranges are supported; long jobs run the passes under a shared deadline (`timeoutMs`) and come back with partial results and a note saying which pages were skipped instead of failing whole. Params: `pdfPath`, `engine` (default tesseract), `language` (default eng, combos like `fra+eng`), `firstPage`, `lastPage`, `dpi`, `ollamaUrl`, `visionModel`, `outputPath` (full text also written to disk), `timeoutMs`.
+
+### Agent guide and housekeeping (always on)
+- **get_agent_instructions_code**: the complete 74-tool catalog, workflow rules and recipes, described in the agent guide section above.
+- **brew_coffee_code**: brews nothing. Params: `sugar`.
 
 ## Configuration
 
 * `vscode-mcp-server.port`: server port (default 3000)
 * `vscode-mcp-server.host`: bind address (default 127.0.0.1)
 * `vscode-mcp-server.defaultEnabled`: start the server automatically on launch
-* `vscode-mcp-server.enabledTools`: which of the 17 groups above are active, all on by default. Changing it restarts the server.
-* `vscode-mcp-server.auth.mode`: how clients authenticate — `session-token` (default), `static-token`, `oauth` or `none` (unsafe). See Security below.
+* `vscode-mcp-server.enabledTools`: which of the 19 groups above are active, all on by default. Changing it restarts the server.
+* `vscode-mcp-server.auth.mode`: how clients authenticate: `session-token` (default), `static-token`, `api-key`, `oauth` or `none` (unsafe). See Security below.
 * `vscode-mcp-server.auth.staticToken`: the secret required when mode is `static-token`.
+* `vscode-mcp-server.auth.apiKey`: the key required when mode is `api-key`. Left empty, a key is generated on first activation and stored in VS Code SecretStorage.
 * `vscode-mcp-server.auth.allowedOrigins`: extra Origins allowed besides the server itself (tunneled remote clients).
 * `vscode-mcp-server.auth.allowNoOrigin`: accept Origin-less requests (curl, SDK clients). On by default; browsers always send Origin so drive-by protection is unaffected.
+* `vscode-mcp-server.agentInstructions`: replaces the built-in text returned by `get_agent_instructions_code` and copied by **MCP Server: Copy Agent Instructions**. Empty means the built-in guide.
+* `vscode-mcp-server.security.sandbox.mode`: filesystem confinement for authenticated tools. `workspace` (default): only folders open in this window plus `allowPaths`. `home`: the user profile directory. `full`: no restriction, dangerous with remote clients.
+* `vscode-mcp-server.security.sandbox.allowPaths`: extra absolute paths allowed in `workspace` mode (e.g. `D:\docs`); symlinks pointing outside are refused.
 
 Each request gets its own stateless MCP session, so one slow or hung call never blocks the others.
 
@@ -238,10 +237,11 @@ Every call to the endpoint carries a credential. On first start a random token i
 
 Cross-origin browser requests are rejected with 403 outright, so visiting a hostile page cannot silently reach your files even with the port number known.
 
-Three modes under `vscode-mcp-server.auth.mode`:
+Four modes under `vscode-mcp-server.auth.mode`:
 
 - `session-token` (default): one random secret per installation, persisted across window reloads.
 - `static-token`: you pin the secret in `auth.staticToken`; handy for scripted setups.
+- `api-key`: a stable key kept in SecretStorage (or pinned via `auth.apiKey`), sent as `Authorization: Bearer <key>` or `x-api-key`. The choice for agents and automations that cannot follow an OAuth dance, especially behind a tunnel.
 - `oauth`: MCP OAuth 2.1 for remote clients that require it (Mammouth today). Clients discover `/.well-known/oauth-protected-resource` and register themselves at `/register`; the authorization shows a VS Code consent dialog before any code is issued. PKCE S256 is mandatory, and issued access tokens are this installation's session secret.
 
 One honest limit: a token proves whoever holds it may act here. It cannot prove they are an AI.
@@ -260,12 +260,14 @@ The OAuth metadata always announce the origin the request actually arrived throu
 
 No tunnel-specific setting exists on purpose: run the tunnel, connect through it, and discovery reflects it. Remote clients that POST from a browser context should also have their public origin added to `vscode-mcp-server.auth.allowedOrigins`; pure server-to-server calls carry no Origin header and pass regardless.
 
-Connecting [Mammouth](https://mammouth.ai): set `auth.mode` to `oauth`, expose the port through any of the tunnels above, then give Mammouth the public URL. It discovers the OAuth endpoints itself. Log into mammouth.ai in the same browser first; their flow bounces through their login page otherwise. Approve the VS Code consent dialog when it appears. When their direct API connection ships, switching to `static-token` is a two-line change.
+For liveness probes (uptime monitors, `tailscale serve` checks, reverse proxies), hit the unauthenticated `GET /health`: it answers `{ok, mode, version}` before any auth check, so a 200 tells you the tunnel and the server are both up. `/favicon.ico` answers `204` so browser hits stop spamming the log with 401s.
+
+Connecting [Mammouth](https://mammouth.ai): set `auth.mode` to `oauth`, expose the port through any of the tunnels above, then give Mammouth the public URL. It discovers the OAuth endpoints itself. Log into mammouth.ai in the same browser first; their flow bounces through their login page otherwise. Approve the VS Code consent dialog when it appears.
 
 ## Caveats
 
-Multiple workspace folders are supported; tools pick one through the `workspace` parameter described above. Local connections only. Every VS Code window shares the one server automatically — extra windows join the first one, so there is nothing to configure per window (a foreign program squatting on the port still reports an explicit already-in-use error, and windows on different extension versions refuse to mix). Shell execution means a misbehaving *authenticated* client can run commands on your machine: keep the port closed to your network and only connect clients you trust. Inside a devcontainer, WSL or SSH remote the server listens within that environment, so forward the port or connect from a client inside the same remote.
+Multiple workspace folders are supported; tools pick one through the `workspace` parameter described above. Local connections only. Every VS Code window shares the one server automatically, so extra windows join the first one and there is nothing to configure per window (a foreign program squatting on the port still reports an explicit already-in-use error, and windows on different extension versions refuse to mix). Shell execution means a misbehaving *authenticated* client can run commands on your machine: keep the port closed to your network and only connect clients you trust. Inside a devcontainer, WSL or SSH remote the server listens within that environment, so forward the port or connect from a client inside the same remote.
 
 ## Credits and license
 
-Original extension by [Juehang Qin](https://github.com/juehang/vscode-mcp-server); this fork extends his work under the same [MIT license](LICENSE). Demo video by LTTPoseidon.
+Original extension by [Juehang Qin](https://github.com/juehang/vscode-mcp-server); this fork extends his work under the same [MIT license](https://github.com/Romixof/vscode-mcp-server/blob/HEAD/LICENSE). Demo video by LTTPoseidon.

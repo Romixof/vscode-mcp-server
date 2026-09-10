@@ -4,6 +4,56 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.19.12] - 2026-09-10
+### Changed
+- `get_agent_instructions_code` now returns the COMPLETE tool catalog (guide v3): all 74 tools listed by exact name, grouped by task (files, code structure, edits, diagnostics, tests/builds, git, shell, memory, security, project/docs, skills, frontend, PDF/OCR, network/misc), each with its key parameters and an `[RO]`/`[MUT]`/`[DST]` tag matching the tool annotations, plus a non-negotiable workflow section and common recipes (locate an implementation, change code safely, ship a change, read a scanned PDF). Agents no longer need to discover tools by trial and error or spend calls figuring out how to do something: one call at conversation start provides the full map. The tool description itself now advertises the complete catalog. Guide remains pure ASCII; guide version bumped to 3.
+
+## [0.19.11] - 2026-09-10
+### Fixed
+- Critical: 19 tools were silently denied at execution (empty response, `content: []`) even for fully-privileged clients, because the compiled `SCOPE_TOOLS` mapping in `auth/scopes.js` was never updated when tools were added. Affected: `search_workspace_code`, `retrieve_output_code`, `find_secrets_code`, `security_scan_code`, `regex_tester_code`, `find_dead_code_code`, `find_duplicate_code_code`, `suggest_refactoring_code`, `analyze_bundle_code`, `analyze_css_code`, `audit_accessibility_code`, `find_unused_css_code`, `inspect_element_code`, `get_test_coverage_code`, `lint_and_fix_code`, `convert_encoding_code`, `extract_function_code`, `brew_coffee_code`. The mapping now covers all 74 registered tools, and a regression test keeps it in sync with the registry.
+- Scope denials now return a proper MCP error result (`isError: true` + explicit reason text) instead of a malformed `{allowed: false}` object with no content, so agents can see WHY a tool was refused and adapt instead of silently moving on.
+### Added
+- New read-only tool `get_agent_instructions_code`: returns the agent guide (tool map, workflow rules, approval behavior, memory protocol) on demand. Its description explicitly instructs agents to CALL IT FIRST AT THE START OF EVERY CONVERSATION, exactly like loading persistent memory, so the guide reaches the agent context even on clients that never surface server instructions. The tool is marked `readOnlyHint` (auto-approved), the guide footer carries a version tag, and the `vscode-mcp-server.agentInstructions` setting + `Copy Agent Instructions` command now feed the tool output.
+### Changed
+- Removed the `instructions` field from the MCP `initialize` response: probing showed some clients (e.g. Mammouth) ignore it entirely, so the guide is now delivered exclusively through `get_agent_instructions_code`, which works everywhere tool descriptions are visible. The guide text is now pure ASCII (em-dashes no longer turn into mojibake on Windows consoles such as PowerShell), guide version bumped to 2.
+
+## [0.19.10] - 2026-09-10
+### Added
+- Server-sent agent instructions: the MCP `initialize` response now carries an `instructions` field with a built-in workflow guide (tool map, read-only preference, diagnostics-first editing, multi-root handling, memory auto-load). Clients that honour the MCP spec (Claude, Cline, Mammouth, ...) inject it into the model context at connection time, so the agent knows which tool to use WITHOUT discovering/re-listing tools first. Override it (or disable it by setting your own) with the new `vscode-mcp-server.agentInstructions` setting.
+- New command `MCP Server: Copy Agent Instructions` — copies the same guide to the clipboard for pasting into agent instructions that cannot read the initialize response (`CLAUDE.md`, project instructions, Mammouth memory, ...).
+- `GET /health` endpoint documented for tunnel liveness probes: the existing unauthenticated, pre-auth health route (`{ok, mode, version}`, answers before auth in every auth mode) is now the recommended probe target for `tailscale serve` / cloudflared / nginx / uptime monitors. `/favicon.ico` now answers `204 No Content` instead of triggering a `401 api-key` warning in the logs on every browser or health-checker hit.
+### Changed
+- Anti-502 hardening behind proxies/tunnels: `keepAliveTimeout` raised 65s → 90s (and `headersTimeout` 91s) on both listener paths. A server closing an idle keep-alive connection while a proxy (Cloudflare, relay, tunnel) reuses it is the classic cause of intermittent `502 origin_bad_gateway` errors; the server now holds idle sockets longer than any intermediate's reuse window.
+- `/mcp` diagnostics: when a client disconnects before the response completes, the log now records `MCP client <name> @ <ip> disconnected after <N>ms before the response completed (possible tunnel/proxy drop)` — correlate its timestamp with 502/timeout pages to tell a network/tunnel drop (warning present) apart from a request that never reached the machine (nothing in the log).
+
+## [0.19.9] - 2026-09-10
+### Added
+- MCP tool annotations: every tool now declares standard `readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint` annotations. Read-only tools (file reads, listings, search, diagnostics, git blame/diff/history, symbol lookup, static analyzers, ...) are marked `readOnlyHint: true`, so MCP clients that honour annotations can auto-approve them — no more manual validation for pure reads. Classification is conservative: anything that can modify files, run arbitrary commands/SQL or erase data is never marked read-only. Tools unknown to the table get no hints (clients keep asking), and a warning lists them in the server log.
+- New tool `search_workspace_code` (strictly read-only): regex search across the workspace with matches grouped by file and 1-based line numbers, optional glob filter (`*.ts` matches the file name at any depth, `src/**/*.py` matches relative paths), case sensitivity control, `skipCommon` toggle for vendor/build directories (default on: node_modules, dist, out, build, dot-directories, ...), binary/large-file skip and a result cap (default 50, max 200). This fills the last gap that forced agents to route simple greps through `execute_shell_command_code` (which requires manual approval).
+### Changed
+- `execute_shell_command_code` description now explicitly steers agents to the dedicated read-only tools (`read_file_code`, `list_files_code`, `search_workspace_code`, `get_git_diff_code`, `get_file_history_code`, `get_diagnostics_code`) for simple reads, reserving the shell tool for commands that actually mutate something.
+
+## [0.19.8] - 2026-09-10
+### Added
+- Token-efficiency layer (inspired by rtk-ai/rtk and headroomlabs-ai/headroom, implemented natively):
+  - `execute_shell_command_code` output is token-compacted by default (`outputMode` param, `"compact"` default): progress bars stripped, repeated lines collapsed (`×N repeat`), long lines truncated, head+tail capped at 500 lines, plus category-specific filters for git transport/status/diff, package-manager installs (deprecated-warning spam collapsed), test runners (failures + totals kept) and builds (errors-only on failure, last lines on success). Pass `outputMode: "raw"` for the untouched output; outputs where compaction would save less than ~15% are returned raw (never needlessly reformatted).
+  - New tool `retrieve_output_code`: headroom-style CCR — whenever a result is compacted or truncated, the FULL original is kept in memory and the result carries a handle (`[@vscode-mcp: ... retrieve_output_code "a1b2c3d4e5"]`). Call it to page back through the original (offset/maxChars). Handles live in the VS Code window's memory (most recent 40 stored outputs).
+  - `ocr_pdf_code` result text is lightly compacted (blank/duplicate-line collapse, same 15% guard) and over-long previews now also carry a `retrieve_output_code` handle instead of being unrecoverably truncated.
+### Changed
+- OCR "vision"/"auto" engines: pages are now processed 2 at a time (bounded concurrency) under a shared wall-clock deadline — roughly half the wall time for vision-heavy batches, and the call ALWAYS returns within its internal budget: pages that don't fit come back as explicit `[Skipped: ... firstPage=N lastPage=N]` markers (with a footer note and counts) instead of the whole call being killed client-side at the ~30s ceiling mid-flight.
+- Tesseract detection: added the per-user install locations (`%LOCALAPPDATA%\Programs\Tesseract-OCR`, e.g. winget user-scope installs) to the Windows fallback probe list, on top of `command -v` / `where.exe` / `C:\Program Files`.
+
+## [0.19.7] - 2026-09-10
+### Changed
+- `/mcp` request log no longer prints "MCP request from unknown" for clients that don't send the `x-mcp-client-name` header: the log now falls back to the MCP `initialize` `clientInfo.name` (taken from the JSON-RPC body), then to the User-Agent's first token, and always appends the client IP — e.g. `MCP request from mammouth-connector @ 100.94.96.66`. Clients that want a stable, explicit name in the logs can send an `X-MCP-Client-Name: <name>` header (already allowed through CORS).
+
+## [0.19.6] - 2026-09-10
+### Fixed
+- Cluster join (2nd window) could never join when auth.mode = "api-key": the api-key branch of the auth middleware answered 401 on `/__mcp_cluster/identity` before the PUBLIC_PATHS exemption was reached, so the joining window parsed the 401 body as a (role-less) identity, re-threw EADDRINUSE and gave up. The identity probe is now answered before any auth mode branch, restricted to loopback peers (127.0.0.1 / ::1).
+- The identity probes in `joinAfterAddressInUse` and the election path now send the cluster credential (`x-mcp-token`) and require `response.ok` before parsing, so a 401 JSON body can no longer be mistaken for a valid identity.
+- In api-key mode the cluster credential now falls back to the settings-configured `auth.apiKey` when the SecretStorage cache is empty, so register/heartbeat/invoke from a spoke carry a key the hub actually accepts.
+- Cluster routes (register/heartbeat/deregister/hub-shutdown/invoke) now accept the current token AND recently rotated ones (authTokenHistory), instead of only the current token — a spoke holding a technically-valid but stale credential is no longer dropped during a rotation/election window.
+- Registration failures now log each of the 6 attempts and include the hub's refusal detail (code/detail body) in the error instead of a bare "HTTP 401".
 ## [0.17.0] - 2026-09-05
 ### Added
 - New `skills` tool group (4 tools, toggle `vscode-mcp-server.enabledTools.skills`, default on) for managing folder-based agent skills (SKILL.md convention):

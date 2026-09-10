@@ -21,21 +21,30 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'get_project_context_code', 'get_package_dependencies_code',
         'memory_load_code', 'memory_search_code',
         'snapshot_workspace_code',
-        'list_skills_code', 'validate_skill_code'
+        'list_skills_code', 'validate_skill_code',
+        'pdf_needs_ocr_code',
+        'search_workspace_code', 'retrieve_output_code', 'get_agent_instructions_code',
+        'find_secrets_code', 'security_scan_code', 'regex_tester_code',
+        'find_dead_code_code', 'find_duplicate_code_code', 'suggest_refactoring_code',
+        'analyze_bundle_code', 'analyze_css_code', 'audit_accessibility_code',
+        'find_unused_css_code', 'inspect_element_code', 'brew_coffee_code'
     ],
     'fs:write': [
         'create_file_code', 'move_file_code', 'copy_file_code', 'rename_file_code',
         'replace_lines_code', 'format_document_code', 'generate_docstring_code',
         'generate_ics_code', 'rename_symbol_code',
         'memory_save_code',
-        'create_skill_code'
+        'create_skill_code',
+        'convert_encoding_code', 'extract_function_code'
     ],
     'shell:exec': [
         'execute_shell_command_code', 'run_task_code', 'restart_dev_server_code',
         'run_sql_query_code', 'profile_command_code', 'run_alias_code',
         'commit_changes_code', 'create_branch_code', 'stash_changes_code',
         'run_tests_code', 'build_project_code',
-        'package_skill_code'
+        'package_skill_code',
+        'ocr_pdf_code', 'render_pdf_pages_code',
+        'get_test_coverage_code', 'lint_and_fix_code'
     ],
     'net:out': [
         'test_api_endpoint_code', 'check_dependencies_vulnerabilities_code'
