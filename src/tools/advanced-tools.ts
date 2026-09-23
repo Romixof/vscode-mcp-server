@@ -13,6 +13,7 @@ import {
         BOOTSTRAP_LOG_ENTRIES,
         BOOTSTRAP_MEMORY_CHARS,
         clip,
+        projectLogPath,
         projectStatePath,
         readTextFile,
         tailLog
@@ -168,7 +169,7 @@ export function registerSessionBootstrapTool(server: McpServer, guideOverride?: 
                                 const { global, project, projectPath } = await loadAllMemory(workspace);
                                 const statePath = projectStatePath(workspace);
                                 const state = statePath ? await readTextFile(statePath) : null;
-                                const logPath = statePath ? statePath.replace(/_STATE\.md$/, '_LOG.md') : undefined;
+                                const logPath = projectLogPath(workspace);
                                 const log = logPath ? await readTextFile(logPath) : null;
                                 const budgeted = (text: string | null): string => text === null ? '' : clip(text, BOOTSTRAP_MEMORY_CHARS);
                                 if (state) {

@@ -378,13 +378,14 @@ export class MCPServer {
                     return { content: [{ type: 'text', text: `Tool "${name}" denied. ${reason}`.trim() }], isError: true } as unknown as ReturnType<typeof original>;
                 }
                 appendAudit({ kind: 'tool_call', client, detail: name });
-                recordJournalEvent(name, args, true);
                 try {
                     const result = await original(args, extra);
                     this.dashboard?.recordToolCall(name, client, Date.now() - started, estimateTokens(result), false);
+                    recordJournalEvent(name, args, true);
                     return result;
                 } catch (e) {
                     this.dashboard?.recordToolCall(name, client, Date.now() - started, 0, false);
+                    recordJournalEvent(name, args, false);
                     throw e;
                 }
             };

@@ -185,6 +185,14 @@ function extractDetail(args: unknown): string {
         return '';
 }
 
+function extractWorkspaceRef(args: unknown): string | undefined {
+        if (typeof args !== 'object' || args === null) {
+                return undefined;
+        }
+        const value = (args as Record<string, unknown>).workspace;
+        return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 async function flushJournal(): Promise<void> {
         journalTimer = undefined;
         const pending = journalBuffer;
@@ -214,11 +222,10 @@ export function recordJournalEvent(tool: string, args: unknown, ok: boolean): vo
                 if (!detail) {
                         return;
                 }
-                const statePath = projectStatePath();
-                if (!statePath) {
+                const target = projectLogPath(extractWorkspaceRef(args));
+                if (!target) {
                         return;
                 }
-                const target = statePath.replace(/_STATE\.md$/, '_LOG.md');
                 if (journalTarget && journalTarget !== target) {
                         void flushJournal();
                 }
