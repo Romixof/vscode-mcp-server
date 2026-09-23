@@ -6,5 +6,13 @@ tsconfig.json
 **/.vscode-test
 **/.codegraph
 **/.vscode-mcp
+**/.swarm
+**/.omo
 *_LOG.md
 *_STATE.md
+COMMIT.md
+RELEASE-NOTES-*.md
+CONTEXT.md
+SECURITY-*.md
+*.bak-*
+*.zip
