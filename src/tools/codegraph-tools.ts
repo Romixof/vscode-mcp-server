@@ -232,7 +232,7 @@ Removed exports and renamed suspects are flagged BREAKING. Depth is one level: s
                 const out: string[] = [];
                 out.push(`Migration ${base} -> ${head}: ${fileLines.length} file(s) changed. ${stats.out}`);
                 out.push('', `FILES:`);
-                out.push(capList(fileLines.map(l => l.replace(/\t/, '  ')), 50));
+                out.push(capList(fileLines.map(l => l.replace(/\t/g, '  ')), 50));
                 out.push('', added.length > 0 ? `DECLARATIONS ADDED (${added.length}):` : 'DECLARATIONS ADDED: none');
                 if (added.length > 0) { out.push(capList(added, 40)); }
                 out.push('', breaking.length > 0 ? `BREAKING — DECLARATIONS REMOVED (${breaking.length}):` : 'DECLARATIONS REMOVED: none');
