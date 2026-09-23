@@ -39,6 +39,7 @@ import { recordToolCall } from './utils/usage';
 import { logger } from './utils/logger';
 import { setClusterRootsProvider, resolveInputPath } from './utils/workspace';
 import { runWithScopes, checkToolAccess, currentScopes } from './auth/toolgate';
+import { recordJournalEvent } from './utils/workspace-state';
 import { ALL_SCOPES as LOCAL_ALL_SCOPES, scopeAllows as scopeAllowsCached, toolsWithoutScopeMapping } from './auth/scopes';
 import { appendAudit } from './auth/audit';
 import { checkShellCommand } from './auth/shellguard';
@@ -377,6 +378,7 @@ export class MCPServer {
                     return { content: [{ type: 'text', text: `Tool "${name}" denied. ${reason}`.trim() }], isError: true } as unknown as ReturnType<typeof original>;
                 }
                 appendAudit({ kind: 'tool_call', client, detail: name });
+                recordJournalEvent(name, args, true);
                 try {
                     const result = await original(args, extra);
                     this.dashboard?.recordToolCall(name, client, Date.now() - started, estimateTokens(result), false);

@@ -20,6 +20,7 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'get_performance_report_code', 'get_server_info_code', 'get_open_ports_code',
         'get_project_context_code', 'get_package_dependencies_code',
         'memory_load_code', 'memory_search_code',
+        'workspace_state_code', 'workspace_log_code',
         'snapshot_workspace_code',
         'list_skills_code', 'validate_skill_code',
         'pdf_needs_ocr_code',
@@ -36,6 +37,7 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'replace_lines_code', 'format_document_code', 'generate_docstring_code',
         'generate_ics_code', 'rename_symbol_code',
         'memory_save_code',
+        'session_end_code',
         'create_skill_code',
         'convert_encoding_code', 'extract_function_code',
         'plan_mode_code', 'checkpoint_code'

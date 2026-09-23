@@ -4,6 +4,19 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.0] - 2026-09-23
+### Added
+- Workspace state snapshot (`<workspace>_STATE.md`): a small, always-overwritten file holding the version, branch, status, what is in progress and the single next step. Unlike memory it never accumulates, so the model always resumes knowing which version it was working on instead of re-deriving it.
+- `session_end_code(summary, version, branch, status, inProgress, nextStep)`: closes a unit of work by writing the state snapshot and appending a dated summary to the workspace log. The summary carries what no tool can infer — the intent behind the work, the decisions and their reasoning, and what was deliberately left out. Wired into the agent guide as the closing step of a task.
+- `workspace_log_code(count)`: reads recent session history (files touched, commands run) when the state snapshot is not detailed enough.
+- `workspace_state_code(action="read"|"write", …)`: read or update the snapshot directly, for recording a mid-task state change.
+- Server-side activity journal: tool calls with a file path, command or query are recorded to the workspace log automatically, buffered and flushed on a timer, with no model call and no tokens spent. Works even if the model never calls a tool.
+
+### Changed
+- `session_bootstrap_code` is now budgeted and leads with the state snapshot. It returns the state in full, memory files trimmed to a budget with the dropped size reported, and only the most recent log entries. On a realistic memory pair this cuts the bootstrap payload by ~75% (25.6k to 6.5k chars in the reference case) while leaving small memory files untouched.
+- `memory_load_code` gained a `full` flag: budgeted by default, verbatim on request. It also surfaces the workspace state alongside memory.
+- Agent guide v7 documents the state, session-end and log tools and adds closing a session to the non-negotiable workflow.
+
 ## [0.19.18] - 2026-09-22
 ### Fixed
 - `session_bootstrap_code` was denied for EVERY key (even full-scope ones) with

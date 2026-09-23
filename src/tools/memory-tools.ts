@@ -4,6 +4,17 @@ import * as os from 'os';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { resolveWorkspaceFolder, listWorkspaceFolders, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
+import {
+        BOOTSTRAP_MEMORY_CHARS,
+        appendLogEntry,
+        clip,
+        clipLog,
+        projectStatePath,
+        readTextFile,
+        renderState,
+        tailLog,
+        writeTextFile
+} from '../utils/workspace-state';
 
 const MAMMOUTH_DIR = path.join(os.homedir(), 'Mammouth');
 const GLOBAL_MEMORY_FILE = path.join(MAMMOUTH_DIR, 'MEMORY.md');
@@ -167,26 +178,33 @@ export async function loadAllMemory(workspace?: string): Promise<{ global: strin
 }
 
 export function registerMemoryTools(server: McpServer): void {
-        server.tool('memory_load_code', `Loads the persistent memory system. Reads global memory (~/Mammouth/MEMORY.md) and project memory ({workspaceName}_MEMORY.md in workspace root).
+        server.tool('memory_load_code', `Loads the persistent memory system. Reads global memory (~/Mammouth/MEMORY.md), project memory ({workspaceName}_MEMORY.md in workspace root) and the workspace state snapshot.
 
-WHEN TO USE: ONCE per conversation, on the very first user message only — not before every reply. Skip it when memory is already loaded in the current conversation, even if several turns have passed. Loads user identity, preferences, workflow rules, and project-specific context.
+WHEN TO USE: ONCE per conversation, on the very first user message only — not before every reply. Skip it when memory is already loaded in the current conversation, even if several turns have passed. Prefer session_bootstrap_code, which returns the same context plus layout and skills in one call.
 
-Returns merged content with clear separation between global and project memory.`, {
+Long files are trimmed to a budget and the tool reports how much was cut. Pass full=true to get everything verbatim.`, {
+                full: z.boolean().optional().default(false).describe('Return memory files verbatim instead of trimming them to a budget'),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-        }, async ({ workspace }) => {
+        }, async ({ full = false, workspace }) => {
                 const { global, project, projectPath } = await loadAllMemory(workspace);
+                const statePath = projectStatePath(workspace);
+                const state = statePath ? await readTextFile(statePath) : null;
+                const budget = (text: string): string => full ? `${text}\n` : `${clip(text, BOOTSTRAP_MEMORY_CHARS)}\n`;
                 let result = '# 🧠 Memory Loaded\n\n';
                 if (global) {
                         result += '## 📍 Global Memory (~/Mammouth/MEMORY.md)\n\n';
-                        result += global;
-                        result += '\n\n---\n\n';
+                        result += budget(global);
+                        result += '\n---\n\n';
                 } else {
                         result += '## 📍 Global Memory (~/Mammouth/MEMORY.md)\n\n';
                         result += '*No global memory found. Create ~/Mammouth/MEMORY.md to store persistent preferences.*\n\n---\n\n';
                 }
+                if (state) {
+                        result += `## 🧭 Workspace State (${statePath})\n\n${state}\n\n---\n\n`;
+                }
                 if (project) {
                         result += `## 📁 Project Memory (${projectPath})\n\n`;
-                        result += project;
+                        result += budget(project);
                 } else if (projectPath) {
                         result += `## 📁 Project Memory (${projectPath})\n\n`;
                         result += '*No project memory found. Use memory_save_code with scope="project" to create it.*';
@@ -288,5 +306,97 @@ Provide entry to remove a specific bullet. Omit entry to remove the entire secti
                                 text: `✅ ${action} "${section}"${entry ? `: "${entry}"` : ''} from ${scope} memory (${location})`
                         }]
                 };
+        });
+
+        server.tool('workspace_state_code', `Reads or overwrites the CURRENT working state of this workspace: version, branch, status, what is in progress, and the next step.
+
+WHEN TO USE: at the start of a task to find out where the last session stopped, and at the end to record where you stopped. The state file is a small snapshot that gets overwritten, so it never grows — unlike memory, which only accumulates.
+
+Actions:
+- read (default): the current state snapshot.
+- write {version, branch, status, inProgress, nextStep}: overwrites the snapshot. Omit any field to clear it.
+
+The next session reads this through session_bootstrap_code, so write a real next step — that is the whole point.`, {
+                action: z.enum(['read', 'write']).optional().default('read').describe('Read the state snapshot or overwrite it'),
+                version: z.string().optional().describe('write: version or build identifier currently being worked on'),
+                branch: z.string().optional().describe('write: current git branch or tag'),
+                status: z.string().optional().describe('write: short overall status, e.g. "tests green", "2 files failing"'),
+                inProgress: z.string().optional().describe('write: what is currently being worked on'),
+                nextStep: z.string().optional().describe('write: the single next action to take on resuming'),
+                workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+        }, async ({ action = 'read', version, branch, status, inProgress, nextStep, workspace }) => {
+                const target = projectStatePath(workspace);
+                if (!target) {
+                        throw new Error('No workspace open — workspace state needs an open folder.');
+                }
+                if (action === 'write') {
+                        const content = renderState({ version, branch, status, inProgress, nextStep });
+                        await writeTextFile(target, content);
+                        return { content: [{ type: 'text', text: `✅ Workspace state written to ${target}:\n\n${content}` }] };
+                }
+                const existing = await readTextFile(target);
+                if (!existing) {
+                        return { content: [{ type: 'text', text: `No workspace state yet at ${target}. Use workspace_state_code(action="write", …) to record where the work stands.` }] };
+                }
+                return { content: [{ type: 'text', text: `# Workspace state (${target})\n\n${existing}` }] };
+        });
+
+        server.tool('session_end_code', `Closes out a work session: records what was done, what is still open, and the next step, so the next conversation resumes instead of starting over.
+
+WHEN TO USE: as the LAST tool call of a task, right before you report completion. Not for every reply — only when a unit of work is finished, handed off, or abandoned.
+
+It does two things:
+- writes the workspace state snapshot (version, branch, in progress, next step) that session_bootstrap_code loads next time;
+- appends a dated session summary to the workspace log.
+
+The summary is the part a tool cannot infer: the intent behind the work, the decisions you made and why, and anything you deliberately left out. Write it for someone with no memory of this conversation.`, {
+                summary: z.string().describe('What was done, what was decided and why, what was deliberately skipped. Concrete, not generic.'),
+                version: z.string().optional().describe('Version or build identifier this session was working on'),
+                branch: z.string().optional().describe('Current git branch or tag'),
+                status: z.string().optional().describe('Short overall status at close, e.g. "builds clean, 1 test skipped"'),
+                inProgress: z.string().optional().describe('Anything still unfinished at close'),
+                nextStep: z.string().optional().describe('The single next action for whoever resumes this'),
+                workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+        }, async ({ summary, version, branch, status, inProgress, nextStep, workspace }) => {
+                const stateTarget = projectStatePath(workspace);
+                const logTarget = projectStatePath(workspace)?.replace(/_STATE\.md$/, '_LOG.md');
+                if (!stateTarget || !logTarget) {
+                        throw new Error('No workspace open — session_end_code needs an open folder.');
+                }
+                const state = renderState({ version, branch, status, inProgress, nextStep });
+                await writeTextFile(stateTarget, state);
+                const existingLog = await readTextFile(logTarget);
+                const appended = appendLogEntry(existingLog ?? '', {
+                        ts: new Date().toISOString(),
+                        session: `summary-${Date.now().toString(36)}`,
+                        tool: 'session_end_code',
+                        detail: summary.replace(/\s+/g, ' ').trim(),
+                        ok: true
+                });
+                await writeTextFile(logTarget, clipLog(appended));
+                return {
+                        content: [{
+                                type: 'text',
+                                text: `✅ Session closed.\n\nState → ${stateTarget}\nLog → ${logTarget}\n\n${state}\n\nLogged summary: ${summary.slice(0, 400)}${summary.length > 400 ? '…' : ''}`
+                        }]
+                };
+        });
+
+        server.tool('workspace_log_code', `Reads the workspace session log: a dated, budgeted history of what happened, most recent last. Rotates automatically so it never grows without bound.
+
+WHEN TO USE: to recover detail that workspace_state_code does not carry — the last few sessions, how a problem was approached before, or why a file looks the way it does. For a keyword lookup prefer memory_search_code.`, {
+                count: z.number().int().min(1).max(20).optional().default(5).describe('How many recent entries to return (default 5)'),
+                workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+        }, async ({ count = 5, workspace }) => {
+                const target = projectStatePath(workspace)?.replace(/_STATE\.md$/, '_LOG.md');
+                if (!target) {
+                        throw new Error('No workspace open — workspace log needs an open folder.');
+                }
+                const existing = await readTextFile(target);
+                if (!existing) {
+                        return { content: [{ type: 'text', text: `No workspace log yet at ${target}. It is written by session_end_code and by tool activity.` }] };
+                }
+                const { text } = tailLog(existing, count);
+                return { content: [{ type: 'text', text: `# Workspace log (${target})\n\n${text}` }] };
         });
 }
