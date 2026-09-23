@@ -19,6 +19,26 @@ interface ExtractedEvent {
         sourceLine: string;
 }
 
+const XML_ENTITY_MAX_PASSES = 8;
+
+export function decodeXmlEntities(input: string): string {
+        let previous = '';
+        let current = input;
+        let passes = 0;
+        while (current !== previous && passes < XML_ENTITY_MAX_PASSES) {
+                previous = current;
+                current = current
+                        .replace(/&lt;/g, '<')
+                        .replace(/&gt;/g, '>')
+                        .replace(/&quot;/g, '"')
+                        .replace(/&#39;/g, "'")
+                        .replace(/&apos;/g, "'")
+                        .replace(/&amp;/g, '&');
+                passes++;
+        }
+        return current;
+}
+
 const MONTHS_FR: Array<[RegExp, number]> = [
         [/^(janvier|janv\.?)$/i, 1], [/^(février|fevrier|févr\.?|fevr\.?)$/i, 2],
         [/^(mars|mar\.?)$/i, 3], [/^(avril|avr\.?)$/i, 4],
@@ -135,12 +155,7 @@ async function readFileText(fullPath: string): Promise<string> {
                 const { execFileSync } = await import('child_process');
                 try {
                         const xml = execFileSync('unzip', ['-p', fullPath, 'word/document.xml'], { maxBuffer: 50 * 1024 * 1024 }).toString('utf-8');
-                        return xml
-                                .replace(/<\/w:p>/g, '\n')
-                                .replace(/<[^>]+>/g, '')
-
-
-                                .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+                        return decodeXmlEntities(xml).replace(/<\/w:p>/g, '\n').replace(/<[^>]+>/g, '');
                 } catch (err) {
                         throw new Error(`DOCX extraction failed (unzip unavailable?): ${err instanceof Error ? err.message : String(err)}`);
                 }

@@ -72,11 +72,18 @@ function collectFiles(rootDir: string, excludeRegexes: RegExp[], extensions?: st
 }
 
 const NUL = String.fromCharCode(0);
+const HTML_COMMENT_MAX_PASSES = 8;
 
-function stripHtmlComments(content: string): string {
-
-
-        return content.replace(/<!--[\s\S]*?--!?>/g, '');
+export function stripHtmlComments(content: string): string {
+        let previous = '';
+        let current = content;
+        let passes = 0;
+        while (current !== previous && passes < HTML_COMMENT_MAX_PASSES) {
+                previous = current;
+                current = current.replace(/<!--[\s\S]*?--!?>/g, '');
+                passes++;
+        }
+        return current;
 }
 
 function formatFindings(title: string, scanned: number, findings: Finding[]): string {
