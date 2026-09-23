@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
   "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.19.12",
+  "version": "0.19.18",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -85,7 +85,7 @@
         "vscode-mcp-server.agentInstructions": {
           "type": "string",
           "default": "",
-          "description": "Override the agent instructions sent automatically in the MCP initialize response (and copied by 'MCP Server: Copy Agent Instructions'). Leave empty to use the built-in workflow guide: tool map, read-only preference, diagnostics-first workflow, memory auto-load."
+          "description": "Override the agent guide returned by get_agent_instructions_code (and copied by 'MCP Server: Copy Agent Instructions'). Leave empty to use the built-in guide: the complete tool catalog grouped by task with workflow rules, common recipes and approval behavior."
         },
         "vscode-mcp-server.security.sandbox.mode": {
           "type": "string",
@@ -256,6 +256,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/inspector": "github:modelcontextprotocol/inspector",
+    "@types/express": "^4.17.21",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
     "@types/proxyquire": "^1.3.28",
@@ -273,7 +274,6 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.1",
-    "@types/express": "^4.17.21",
     "express": "^4.18.3",
     "zod": "^3.22.4"
   }

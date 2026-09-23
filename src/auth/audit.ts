@@ -5,7 +5,9 @@ export type AuditKind =
     | 'sandbox_violation'
     | 'consent_granted'
     | 'consent_denied'
-    | 'token_revoked';
+    | 'token_revoked'
+    | 'key_created'
+    | 'key_revoked';
 
 export interface AuditEvent {
     ts: number;

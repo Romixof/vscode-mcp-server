@@ -142,7 +142,7 @@ export function assertSandboxed(uri: vscode.Uri, toolName: string): vscode.Uri {
 	try {
 		real = fs.realpathSync.native(uri.fsPath);
 	} catch {
-		real = undefined; 
+		real = undefined;
 	}
 	try {
 		assertInSandbox(uri.fsPath, real, cfg, folders, toolName);

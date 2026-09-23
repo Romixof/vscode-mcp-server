@@ -8,6 +8,7 @@ import type { SandboxMode } from './utils/sandbox';
 import { initAudit } from './auth/audit';
 import { Dashboard, setDashboardRef } from './dashboard';
 import { setSecretStorage, getStoredApiKey, generateAndStoreApiKey, clearStoredApiKey } from './auth';
+import { setScopedKeyStorage } from './auth/scoped-keys';
 import { refreshApiKeyCache } from './server';
 import { readAuthConfig } from './auth';
 import { resolveAgentInstructions } from './utils/agent-instructions';
@@ -293,6 +294,7 @@ export async function activate(context: vscode.ExtensionContext) {
         events => context.globalState.update('audit.log', events)
     );
     setSecretStorage(context.secrets);
+    setScopedKeyStorage(context.secrets);
 
     try {
 

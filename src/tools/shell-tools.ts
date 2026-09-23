@@ -9,6 +9,7 @@ import { checkShellCommand } from '../auth/shellguard';
 import { appendAudit } from '../auth/audit';
 import { currentScopes } from '../auth/toolgate';
 import { compactCommandOutput, rememberOriginal, formatCompactionNotice } from '../utils/token-efficiency';
+import { planModeIntercept } from './safety-tools';
 
 export type ShellKind = 'bash' | 'powershell';
 
@@ -407,6 +408,8 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
         },
         async ({ command, cwd, timeout = 10000, outputMode = 'compact', workspace }): Promise<CallToolResult> => {
             try {
+                const pm = planModeIntercept('execute_shell_command_code', `{ command: ${JSON.stringify(command.slice(0, 160))}${cwd && cwd !== '.' ? `, cwd: ${JSON.stringify(cwd)}` : ''} }`);
+                if (pm) { return pm; }
                 const verdict = checkShellCommand(command);
                 if (!verdict.allowed) {
                     appendAudit({

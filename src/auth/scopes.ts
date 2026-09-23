@@ -24,10 +24,12 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'list_skills_code', 'validate_skill_code',
         'pdf_needs_ocr_code',
         'search_workspace_code', 'retrieve_output_code', 'get_agent_instructions_code',
+        'session_bootstrap_code',
         'find_secrets_code', 'security_scan_code', 'regex_tester_code',
         'find_dead_code_code', 'find_duplicate_code_code', 'suggest_refactoring_code',
         'analyze_bundle_code', 'analyze_css_code', 'audit_accessibility_code',
-        'find_unused_css_code', 'inspect_element_code', 'brew_coffee_code'
+        'find_unused_css_code', 'inspect_element_code', 'brew_coffee_code',
+        'diff_preview_code', 'call_graph_code', 'test_impact_code', 'migration_diff_code'
     ],
     'fs:write': [
         'create_file_code', 'move_file_code', 'copy_file_code', 'rename_file_code',
@@ -35,7 +37,8 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'generate_ics_code', 'rename_symbol_code',
         'memory_save_code',
         'create_skill_code',
-        'convert_encoding_code', 'extract_function_code'
+        'convert_encoding_code', 'extract_function_code',
+        'plan_mode_code', 'checkpoint_code'
     ],
     'shell:exec': [
         'execute_shell_command_code', 'run_task_code', 'restart_dev_server_code',
@@ -44,7 +47,8 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'run_tests_code', 'build_project_code',
         'package_skill_code',
         'ocr_pdf_code', 'render_pdf_pages_code',
-        'get_test_coverage_code', 'lint_and_fix_code'
+        'get_test_coverage_code', 'lint_and_fix_code',
+        'background_task_code'
     ],
     'net:out': [
         'test_api_endpoint_code', 'check_dependencies_vulnerabilities_code'
@@ -53,7 +57,7 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'memory_save_code', 'memory_clear_code'
     ],
     'admin': [
-        'get_audit_log_code'
+        'get_audit_log_code', 'expose_audit_code', 'scope_keys_code', 'secret_rotate_code'
     ]
 };
 
@@ -101,4 +105,9 @@ export function intersectScopes(requested: string | undefined, preset: Scope[]):
 export function unregisteredToolNames(): string[] {
     const known = new Set<string>(EXACT.keys());
     return [...known].sort();
+}
+
+
+export function toolsWithoutScopeMapping(names: string[]): string[] {
+    return names.filter(n => !EXACT.has(n));
 }

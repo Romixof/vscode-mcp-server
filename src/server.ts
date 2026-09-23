@@ -1,6 +1,6 @@
 import express from "express";
 import * as vscode from 'vscode';
-import { generateSessionToken, readAuthConfig, bearerAuth, originGuard, originAllowed, tokensMatch, extractToken, verifyApiKeyAsync, setSecretStorage, generateAndStoreApiKey, getStoredApiKey } from './auth';
+import { generateSessionToken, readAuthConfig, bearerAuth, originGuard, originAllowed, tokensMatch, extractToken, setSecretStorage, generateAndStoreApiKey, getStoredApiKey } from './auth';
 import type { RequestHandler } from 'express';
 import { createOAuthRouter } from './auth-oauth';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -26,7 +26,7 @@ import { registerPerformanceTools } from './tools/performance-tools';
 import { registerRefactorTools } from './tools/refactor-tools';
 import { registerFrontendTools } from './tools/frontend-tools';
 import { registerWorkflowTools } from './tools/workflow-tools';
-import { registerAdvancedTools } from './tools/advanced-tools';
+import { registerAdvancedTools, registerSessionBootstrapTool } from './tools/advanced-tools';
 import { registerCoffeeTools } from './tools/coffee-tools';
 import { registerSearchTools } from './tools/search-tools';
 import { applyToolAnnotations } from './utils/tool-annotations';
@@ -39,10 +39,19 @@ import { recordToolCall } from './utils/usage';
 import { logger } from './utils/logger';
 import { setClusterRootsProvider, resolveInputPath } from './utils/workspace';
 import { runWithScopes, checkToolAccess, currentScopes } from './auth/toolgate';
-import { ALL_SCOPES as LOCAL_ALL_SCOPES, scopeAllows as scopeAllowsCached } from './auth/scopes';
+import { ALL_SCOPES as LOCAL_ALL_SCOPES, scopeAllows as scopeAllowsCached, toolsWithoutScopeMapping } from './auth/scopes';
 import { appendAudit } from './auth/audit';
 import { checkShellCommand } from './auth/shellguard';
 import { ClusterCoordinator, ClusterHost } from './cluster/coordinator';
+import { registerSafetyTools } from './tools/safety-tools';
+import { registerBackgroundTools } from './tools/background-tools';
+import { registerKeyAdminTools } from './tools/key-admin-tools';
+import { registerExposeAuditTool } from './tools/expose-audit';
+import { registerCodeGraphTools } from './tools/codegraph-tools';
+import { verifyApiKeyVerdict } from './auth/scoped-keys';
+import { makeRateLimiter } from './auth/ratelimit';
+import { RATE_LIMIT_GLOBAL_MAX_PER_WINDOW } from './auth/ratelimit';
+import { getApiKeyCache, setApiKeyCache } from './auth/keycache';
 import {
         CLUSTER_DEREGISTER_PATH,
         CLUSTER_HEARTBEAT_PATH,
@@ -52,9 +61,7 @@ import {
         INVOKE_PATH
 } from './cluster/types';
 
-let api_key_cache: string | undefined;
-
-const EXT_VERSION_FALLBACK = '0.18.0';
+const EXT_VERSION_FALLBACK = '0.19.13';
 
 function resolveExtVersion(): string {
     try {
@@ -67,7 +74,7 @@ function resolveExtVersion(): string {
 const EXT_VERSION = resolveExtVersion();
 
 export async function refreshApiKeyCache(): Promise<void> {
-        api_key_cache = await getStoredApiKey();
+        setApiKeyCache(await getStoredApiKey());
 }
 
 export interface ToolConfiguration {
@@ -195,6 +202,7 @@ export class MCPServer {
             ocr: true
         };
         this.app = express();
+        this.app.disable('x-powered-by');
 
         this.cluster = new ClusterCoordinator(
             this as unknown as ClusterHost,
@@ -209,7 +217,7 @@ export class MCPServer {
             if (mode === 'static-token') {return readAuthConfig().staticToken;}
             if (mode === 'api-key') {
                 const cfgKey = readAuthConfig().apiKey;
-                return api_key_cache || cfgKey || undefined;
+                return getApiKeyCache() || cfgKey || undefined;
             }
             return this.authToken ?? this.extensionContext?.globalState.get<string>('vscode-mcp.authToken');
         });
@@ -331,7 +339,13 @@ export class MCPServer {
         registerCoffeeTools(server);
         registerTokenEfficiencyTools(server);
         registerSearchTools(server, (inputPath: string, workspace?: string) => resolveInputPath(inputPath, workspace).fsPath);
+        registerSafetyTools(server);
+        registerBackgroundTools(server);
+        registerCodeGraphTools(server);
+        registerKeyAdminTools(server);
+        registerExposeAuditTool(server);
         registerAgentInstructionsTool(server, () => this.currentAgentInstructionsOverride());
+        registerSessionBootstrapTool(server, () => this.currentAgentInstructionsOverride());
         const annotationReport = applyToolAnnotations(server);
         if (annotationReport.unknown.length > 0) {
             logger.warn(`Tool annotations missing for: ${annotationReport.unknown.join(', ')}`);
@@ -344,7 +358,12 @@ export class MCPServer {
         if (!registrations) {
             return;
         }
-        for (const name of Object.keys(registrations)) {
+        const toolNames = Object.keys(registrations);
+        const unmapped = toolsWithoutScopeMapping(toolNames);
+        if (unmapped.length > 0) {
+            logger.warn(`Tools without scope mapping (denied for every key): ${unmapped.join(', ')}`);
+        }
+        for (const name of toolNames) {
             const entry = registrations[name];
             const original = entry.handler.bind(entry);
             entry.handler = async (args: unknown, extra: unknown) => {
@@ -376,11 +395,16 @@ export class MCPServer {
 
         const authCfg = () => readAuthConfig();
 
+
+
+
+        this.app.use(makeRateLimiter(RATE_LIMIT_GLOBAL_MAX_PER_WINDOW));
+
         this.app.use(trafficMiddleware());
 
         this.app.get('/health', (_req, res) => {
             res.setHeader('Cache-Control', 'no-store');
-            res.json({ ok: true, mode: authCfg().mode, version: EXT_VERSION });
+            res.json({ ok: true, mode: authCfg().mode });
         });
 
         this.app.get('/favicon.ico', (_req, res) => {
@@ -388,12 +412,15 @@ export class MCPServer {
         });
 
         this.app.use((req, res, next) => {
-            const origin = req.headers.origin as string | undefined;
+            const rawOrigin: unknown = req.headers.origin;
+            const origin = typeof rawOrigin === 'string' ? rawOrigin : undefined;
             if (origin && !originAllowed(origin, authCfg(), this.port)) {return next();}
             if (origin) {
+
+
+
                 res.setHeader('Access-Control-Allow-Origin', origin);
                 res.setHeader('Vary', 'Origin');
-                res.setHeader('Access-Control-Allow-Credentials', 'true');
             }
             if (req.method === 'OPTIONS') {
                 res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -413,7 +440,7 @@ export class MCPServer {
         const expectedToken = (): string | undefined => {
             const mode = authCfg().mode;
             if (mode === 'static-token') {return authCfg().staticToken;}
-            if (mode === 'api-key') {return api_key_cache;}
+            if (mode === 'api-key') {return getApiKeyCache();}
             return this.authToken;
         };
         const expectedTokens = (): string[] => {
@@ -453,7 +480,7 @@ export class MCPServer {
                         const k = await getStoredApiKey();
                         if (k) {candidates.push(k);}
                     } catch { }
-                    if (api_key_cache) {candidates.push(api_key_cache);}
+                    if (getApiKeyCache()) {candidates.push(getApiKeyCache()!);}
                 } else if (mode === 'static-token') {
                     const st = authCfg().staticToken;
                     if (st) {candidates.push(st);}
@@ -498,8 +525,8 @@ export class MCPServer {
                 }
                 if (authCfg().mode === 'none') {return next();}
                 if (authCfg().mode === 'api-key') {
-                    const valid = await verifyApiKeyAsync(req, authCfg());
-                    if (valid) {return runWithScopes(LOCAL_ALL_SCOPES, 'api-key-client', next);}
+                    const verdict = await verifyApiKeyVerdict(req, authCfg());
+                    if (verdict.ok) {return runWithScopes(verdict.scopes, verdict.client, next);}
                     logger.warn(`[auth] 401 api-key — ${req.method} ${req.path} from ${clientIp(req)} (${extractToken(req.headers as Record<string, string | string[] | undefined>) ? 'bad key' : 'missing key'})`);
                     res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server", error="invalid_token"');
                     return res.status(401).json({ error: 'invalid_token' });
@@ -554,7 +581,9 @@ export class MCPServer {
             next();
         });
 
-        this.app.post('/mcp', express.json({ limit: '10mb' }), async (req, res) => {
+        const mcpRateLimit = makeRateLimiter();
+
+        this.app.post('/mcp', mcpRateLimit, express.json({ limit: '10mb' }), async (req, res) => {
             const headerName = typeof req.headers['x-mcp-client-name'] === 'string' ? (req.headers['x-mcp-client-name'] as string).trim() : '';
             const bodyInfo = (req.body && typeof req.body === 'object') ? (req.body as { params?: { clientInfo?: { name?: unknown } } }).params : undefined;
             const infoNameRaw = bodyInfo?.clientInfo?.name;
@@ -633,9 +662,17 @@ export class MCPServer {
         this.app.delete('/mcp', methodNotAllowed);
 
         this.app.options('/mcp', (req, res) => {
-            res.setHeader('Access-Control-Allow-Origin', '*');
+            const origin = req.headers.origin as string | undefined;
+            if (origin && !originAllowed(origin, authCfg(), this.port)) {
+                res.status(403).end();
+                return;
+            }
+            res.setHeader('Vary', 'Origin');
+            if (origin) {
+                res.setHeader('Access-Control-Allow-Origin', origin);
+            }
             res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+            res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-Api-Key, Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, X-Mcp-Token, X-Mcp-Cluster, X-Mcp-Client-Name');
             res.status(204).end();
         });
 
@@ -643,7 +680,7 @@ export class MCPServer {
             res.json(this.cluster.handleIdentity());
         });
 
-        this.app.post(CLUSTER_REGISTER_PATH, express.json(), (req, res) => {
+        this.app.post(CLUSTER_REGISTER_PATH, mcpRateLimit, express.json(), (req, res) => {
             const result = this.cluster.handleRegister(req.body);
             res.status(result.status).json(result.body);
         });
@@ -663,7 +700,7 @@ export class MCPServer {
             res.json({ ok: true });
         });
 
-        this.app.post(INVOKE_PATH, express.json({ limit: '10mb' }), async (req, res) => {
+        this.app.post(INVOKE_PATH, mcpRateLimit, express.json({ limit: '10mb' }), async (req, res) => {
             const result = await this.cluster.handleInvoke(req.body);
             res.status(result.status).json(result.body);
         });

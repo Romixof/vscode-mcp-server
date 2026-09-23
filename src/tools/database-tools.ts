@@ -1,14 +1,42 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { execFile } from 'child_process';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { resolveWorkspaceFolder, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { executeShellCommand, resolveShellKind } from './shell-tools';
+import { planModeIntercept } from './safety-tools';
+import { assertUrlSafe, maskSecret, MAX_API_BODY_BYTES, readBodyWithCap, REDIRECT_STATUSES } from '../utils/security-helpers';
+
+const MAX_REDIRECTS = 5;
+
+function execDbCommand(bin: string, args: string[], opts: { cwd?: string; timeout: number; env?: NodeJS.ProcessEnv }): Promise<{ output: string; exitCode: number }> {
+    return new Promise(resolve => {
+        execFile(bin, args, {
+            cwd: opts.cwd,
+            timeout: Math.max(1000, opts.timeout),
+            maxBuffer: 16 * 1024 * 1024,
+            windowsHide: true,
+            shell: false,
+            env: { ...process.env, ...(opts.env || {}) }
+        }, (error, stdout, stderr) => {
+            if (error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+                resolve({ output: `${bin} CLI not found in PATH. Install it or add it to PATH.`, exitCode: 127 });
+                return;
+            }
+            const out = (stdout || '');
+            const err = (stderr || '');
+            const output = `${out}${err ? (out ? '\n' : '') + err : ''}`.trim();
+            const code = error ? (typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : 1) : 0;
+            resolve({ output: output || '(empty result)', exitCode: code });
+        });
+    });
+}
 
 function getWorkspaceRoot(ref?: string): string {
-	return resolveWorkspaceFolder(ref).uri.fsPath;
+        return resolveWorkspaceFolder(ref).uri.fsPath;
 }
 
 let sharedTerminal: vscode.Terminal | undefined;
@@ -76,39 +104,64 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         },
         async ({ query, database, connectionString, databaseName, filePath, format = 'json', timeout = 30000, workspace }): Promise<CallToolResult> => {
             try {
-                let cmd = '';
+                const pm = planModeIntercept('run_sql_query_code', `{ query: ${JSON.stringify(query.slice(0, 160))}${database ? `, database: "${database}"` : ''}${filePath ? `, filePath: "${filePath}"` : ''} }`);
+                if (pm) { return pm; }
                 const cwd = getWorkspaceRoot(workspace);
+                let bin: string;
+                let args: string[];
+                const env: NodeJS.ProcessEnv = {};
 
                 if (database === 'sqlite' || (!database && filePath)) {
                     if (!filePath) {
                         throw new Error('filePath required for SQLite');
                     }
-                    cmd = `sqlite3 "${filePath}" -${format === 'json' ? 'json' : format === 'csv' ? 'csv' : 'column'} "${query}"`;
+                    bin = 'sqlite3';
+                    args = [format === 'json' ? '-json' : format === 'csv' ? '-csv' : '-column', filePath, query];
                 } else if (database === 'postgresql' || (!database && (connectionString?.startsWith('postgresql://') || connectionString?.startsWith('postgres://')))) {
                     const conn = connectionString || `postgresql://localhost:5432/${databaseName || 'postgres'}`;
                     const cleanQuery = query.trim().replace(/;+\s*$/, '');
                     const sql = format === 'json'
-
                         ? `SELECT COALESCE(json_agg(t), '[]'::json) FROM (${cleanQuery}) AS t`
                         : query;
-                    cmd = `psql "${conn}" -c "${sql.replace(/"/g, '\\"')}" ${format === 'json' ? '-t -A' : format === 'csv' ? '--csv' : ''}`;
+                    bin = 'psql';
+                    args = [conn, '-c', sql];
+                    if (format === 'json') {
+                        args.push('-t', '-A');
+                    } else if (format === 'csv') {
+                        args.push('--csv');
+                    }
+                    try {
+                        const u = new URL(conn);
+                        if (u.password) {
+                            env.PGPASSWORD = decodeURIComponent(u.password);
+                            u.password = '';
+                            args[0] = u.toString();
+                        }
+                    } catch {
+                    }
                 } else if (database === 'mysql' || (!database && (connectionString?.startsWith('mysql://')))) {
-
                     const url = new URL(connectionString || `mysql://localhost:3306/${databaseName || 'mysql'}`);
                     const host = url.hostname || 'localhost';
                     const dbPort = url.port || '3306';
                     const user = decodeURIComponent(url.username) || 'root';
                     const password = decodeURIComponent(url.password);
                     const dbName = (url.pathname || '/').slice(1);
-                    const auth = password ? `-p"${password.replace(/"/g, '\\"')}"` : '';
-                    cmd = `mysql -h "${host}" -P ${dbPort} -u "${user}" ${auth} ${dbName} -e "${query.replace(/"/g, '\\"')}"`;
+                    bin = 'mysql';
+                    args = ['-h', host, '-P', dbPort, '-u', user, '-e', query];
+                    if (dbName) {
+                        args.push(dbName);
+                    }
+                    if (password) {
+                        env.MYSQL_PWD = password;
+                    }
                 } else {
                     throw new Error('Database type required (postgresql, mysql, sqlite) or provide connectionString');
                 }
 
-                const result = await runShellCommand(cmd, cwd, timeout);
+                const result = await execDbCommand(bin, args, { cwd, timeout, env });
+                const exitNote = result.exitCode !== 0 ? `\n(exit code ${result.exitCode})` : '';
                 return {
-                    content: [{ type: 'text', text: `Query: ${query}\n\n${result.output}` }]
+                    content: [{ type: 'text', text: `Query: ${query}\n\n${result.output}${exitNote}` }]
                 };
             } catch (error) {
                 console.error('[run_sql_query_code] Error:', error);
@@ -126,15 +179,16 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         Supports all HTTP methods, headers, body, auth. Returns status, headers, body, timing.
         Follows redirects by default.`,
         {
-            url: z.string().describe('API endpoint URL (e.g., http://localhost:3000/api/users)'),
+            url: z.string().describe('API endpoint URL (e.g., http://localhost:3000/api/users). SSRF-guarded: private/link-local/metadata IPs blocked unless allowPrivateNetwork=true.'),
             method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']).optional().default('GET').describe('HTTP method'),
             headers: z.record(z.string()).optional().describe('Request headers'),
             body: z.string().optional().describe('Request body (JSON, form data, etc.)'),
             timeout: z.number().optional().default(10000).describe('Request timeout in ms'),
             followRedirects: z.boolean().optional().default(true).describe('Follow redirects'),
-            validateStatus: z.boolean().optional().default(false).describe('Throw on non-2xx status')
+            validateStatus: z.boolean().optional().default(false).describe('Throw on non-2xx status'),
+            allowPrivateNetwork: z.boolean().optional().default(false).describe('Allow private-network targets (RFC1918, tailnet 100.64/10). Loopback (localhost/127.0.0.1) is always allowed; link-local/metadata (169.254.0.0/16) is never allowed.')
         },
-        async ({ url, method = 'GET', headers = {}, body, timeout = 10000, followRedirects = true, validateStatus = false }): Promise<CallToolResult> => {
+        async ({ url, method = 'GET', headers = {}, body, timeout = 10000, followRedirects = true, validateStatus = false, allowPrivateNetwork = false }): Promise<CallToolResult> => {
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -146,7 +200,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                         ...headers
                     },
                     signal: controller.signal,
-                    redirect: followRedirects ? 'follow' : 'manual'
+                    redirect: 'manual'
                 };
 
                 if (body && method !== 'GET' && method !== 'HEAD') {
@@ -154,7 +208,27 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                 }
 
                 const startTime = Date.now();
-                const response = await fetch(url, fetchOptions);
+                let currentUrl = url;
+                let hops = 0;
+
+
+
+
+                await assertUrlSafe(currentUrl, { allowLoopback: true, allowPrivateNetwork });
+                let response = await fetch(currentUrl, fetchOptions);
+                while (followRedirects && REDIRECT_STATUSES.has(response.status)) {
+                    const location = response.headers.get('location');
+                    if (!location) {
+                        break;
+                    }
+                    if (++hops > MAX_REDIRECTS) {
+                        throw new Error(`Too many redirects (>${MAX_REDIRECTS})`);
+                    }
+                    const nextUrl = new URL(location, currentUrl).toString();
+                    await assertUrlSafe(nextUrl, { allowLoopback: true, allowPrivateNetwork });
+                    currentUrl = nextUrl;
+                    response = await fetch(currentUrl, fetchOptions);
+                }
                 const duration = Date.now() - startTime;
                 clearTimeout(timeoutId);
 
@@ -163,7 +237,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                     responseHeaders[key] = value;
                 });
 
-                const responseBody = await response.text();
+                const { text: responseBody, truncated } = await readBodyWithCap(response);
 
                 if (validateStatus && !response.ok) {
                     throw new Error(`HTTP ${response.status}: ${responseBody}`);
@@ -177,10 +251,11 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                 } catch {
                 }
 
+                const truncNote = truncated ? `\n\n[Body truncated at ${Math.floor(MAX_API_BODY_BYTES / 1024)} KB — first bytes shown only]` : '';
                 return {
                     content: [{
                         type: 'text',
-                        text: `HTTP ${method} ${url}\nStatus: ${response.status} ${response.statusText} (${duration}ms)\n\nHeaders:\n${JSON.stringify(responseHeaders, null, 2)}\n\nBody:\n${JSON.stringify(parsedBody, null, 2)}`
+                        text: `HTTP ${method} ${url}${hops > 0 ? ` (followed ${hops} redirect${hops > 1 ? 's' : ''})` : ''}\nStatus: ${response.status} ${response.statusText} (${duration}ms)\n\nHeaders:\n${JSON.stringify(responseHeaders, null, 2)}\n\nBody:\n${JSON.stringify(parsedBody, null, 2)}${truncNote}`
                     }]
                 };
             } catch (error) {
@@ -202,9 +277,10 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
             checkCodeUsage: z.boolean().optional().default(true).describe('Scan code for process.env.VAR references'),
             envFiles: z.array(z.string()).optional().default(['.env', '.env.local', '.env.example']).describe('Env files to check (relative to workspace)'),
             ignorePatterns: z.array(z.string()).optional().default(['node_modules', '.git', 'dist', 'build']).describe('Glob patterns to ignore'),
+            revealValues: z.boolean().optional().default(false).describe('Show raw .env values. Default false: values redacted to length + sha fingerprint (drift still detected). Only enable when you actually need the plaintext.'),
             workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ checkCodeUsage = true, envFiles = ['.env', '.env.local', '.env.example'], ignorePatterns = ['node_modules', '.git', 'dist', 'build'], workspace }): Promise<CallToolResult> => {
+        async ({ checkCodeUsage = true, envFiles = ['.env', '.env.local', '.env.example'], ignorePatterns = ['node_modules', '.git', 'dist', 'build'], revealValues = false, workspace }): Promise<CallToolResult> => {
             try {
                 const workspaceRoot = getWorkspaceRoot(workspace);
                 const envData: Record<string, Map<string, string>> = {};
@@ -274,7 +350,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                     const locations: { file: string; value: string }[] = [];
                     for (const [file, vars] of Object.entries(envData)) {
                         if (vars.has(key)) {
-                            locations.push({ file, value: vars.get(key)! });
+                            locations.push({ file, value: revealValues ? vars.get(key)! : maskSecret(vars.get(key)!) });
                         }
                     }
                     if (locations.length > 1) {
@@ -299,7 +375,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                             `Unused in .env files:\n${JSON.stringify(results.unusedInEnv, null, 2)}\n\n` +
                             `Duplicate definitions:\n${JSON.stringify(results.duplicates, null, 2)}\n\n` +
                             `Value differences:\n${JSON.stringify(results.differences, null, 2)}\n\n` +
-                            `Only in code (not in any .env):\n${results.codeOnlyVars.join(', ') || '(none)'}`
+                            `Only in code (not in any .env):\n${results.codeOnlyVars.join(', ') || '(none)'}\n\nValues: ${revealValues ? 'REVEALED in plaintext — treat this output as secret' : 'redacted (len + sha8 fingerprint only, drift still detected). Pass revealValues: true for plaintext.'}`
                     }]
                 };
             } catch (error) {
@@ -330,7 +406,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                 try {
                     portCwd = getWorkspaceRoot(workspace);
                 } catch {
-                    
+
                 }
 
                 if (isWindows) {
@@ -399,6 +475,8 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         },
         async ({ script, command, cwd = '.', port, killTimeout = 5000, startupTimeout = 30000, workspace }): Promise<CallToolResult> => {
             try {
+                const pm = planModeIntercept('restart_dev_server_code', `{ ${command ? `command: ${JSON.stringify(command.slice(0, 120))}` : script ? `script: "${script}"` : '(auto-detected)'}${port ? `, port: ${port}` : ''} }`);
+                if (pm) { return pm; }
                 const workspaceRoot = getWorkspaceRoot(workspace);
                 const targetDir = cwd === '.' ? workspaceRoot : vscode.Uri.joinPath(resolveWorkspaceFolder(workspace).uri, cwd).fsPath;
 
@@ -429,7 +507,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                 const shellKind = await resolveShellKind(sharedTerminal);
 
                 if (port) {
-                    
+
                     const killCmd = shellKind === 'bash'
                         ? `lsof -ti:${port} | xargs kill -9 2>/dev/null || true`
                         : `Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }`;
