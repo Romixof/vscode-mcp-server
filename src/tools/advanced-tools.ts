@@ -9,6 +9,14 @@ import { getUsageSnapshot, getTotalCalls, getServerStartTime } from '../utils/us
 import { loadAllMemory } from './memory-tools';
 import { collectSkillsList } from './skills-tools';
 import { resolveAgentInstructions, AGENT_INSTRUCTIONS_VERSION } from '../utils/agent-instructions';
+import {
+        BOOTSTRAP_LOG_ENTRIES,
+        BOOTSTRAP_MEMORY_CHARS,
+        clip,
+        projectStatePath,
+        readTextFile,
+        tailLog
+} from '../utils/workspace-state';
 
 export const EXTENSION_ID = 'Romixo.vscode-mcp-server';
 
@@ -158,12 +166,28 @@ export function registerSessionBootstrapTool(server: McpServer, guideOverride?: 
                         const parts: string[] = ['# 🚀 Session bootstrap'];
                         if (memory) {
                                 const { global, project, projectPath } = await loadAllMemory(workspace);
+                                const statePath = projectStatePath(workspace);
+                                const state = statePath ? await readTextFile(statePath) : null;
+                                const logPath = statePath ? statePath.replace(/_STATE\.md$/, '_LOG.md') : undefined;
+                                const log = logPath ? await readTextFile(logPath) : null;
+                                const budgeted = (text: string | null): string => text === null ? '' : clip(text, BOOTSTRAP_MEMORY_CHARS);
+                                if (state) {
+                                        parts.push(`\n## 🧭 Workspace state (${statePath})\n`);
+                                        parts.push(state);
+                                }
                                 parts.push('\n## 📍 Memory (~/Mammouth/MEMORY.md)\n');
-                                parts.push(global ?? '*No global memory found.*');
+                                parts.push(budgeted(global) || '*No global memory found.*');
                                 if (project) {
-                                        parts.push(`\n\n## 📁 Project Memory (${projectPath})\n\n${project}`);
+                                        parts.push(`\n\n## 📁 Project Memory (${projectPath})\n\n${budgeted(project)}`);
                                 } else if (projectPath) {
                                         parts.push('\n\n## 📁 Project Memory\n\n*No project memory found. Use memory_save_code with scope="project" to create it.*');
+                                }
+                                if (log) {
+                                        const { text: recent } = tailLog(log, BOOTSTRAP_LOG_ENTRIES);
+                                        if (recent.trim()) {
+                                                parts.push(`\n\n## 📓 Recent activity (${logPath})\n`);
+                                                parts.push(recent);
+                                        }
                                 }
                         }
                         if (layout) {

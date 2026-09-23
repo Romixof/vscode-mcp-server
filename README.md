@@ -1,6 +1,6 @@
 # VSCodium MCP Server
 
-Turn VS Code into a local MCP server: 85 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, read scanned PDFs, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
+Turn VS Code into a local MCP server: 88 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, read scanned PDFs, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
 
 This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 73 came later. Credit for the core idea and the first implementation belongs to him.
 
@@ -31,7 +31,7 @@ Clients that speak streamable HTTP directly can skip `mcp-remote` and use the UR
 
 ### The agent guide
 
-Tell your agent to call `session_bootstrap_code` once at the start of every conversation. The tool is read-only and auto-approved, and ONE call returns everything needed to work: persistent memory, the workspace layout, the skills list and the full agent guide — all 85 tools with their key parameters, grouped by task, tagged `[RO]`/`[MUT]`/`[DST]` to match the approval behavior, plus workflow rules (tool-budget discipline, diagnostics after every edit batch, secret scan before commits) and recipes for common jobs. An agent that loads it stops discovering tools by trial and error, which is where most wasted tool calls go.
+Tell your agent to call `session_bootstrap_code` once at the start of every conversation. The tool is read-only and auto-approved, and ONE call returns everything needed to work: persistent memory, the workspace layout, the skills list and the full agent guide — all 88 tools with their key parameters, grouped by task, tagged `[RO]`/`[MUT]`/`[DST]` to match the approval behavior, plus workflow rules (tool-budget discipline, diagnostics after every edit batch, secret scan before commits) and recipes for common jobs. An agent that loads it stops discovering tools by trial and error, which is where most wasted tool calls go.
 
 Paste this into the agent's instructions (project instructions in Claude, `CLAUDE.md`, or your agent's persistent memory):
 
@@ -49,7 +49,7 @@ Every group in the table maps to a key in the `vscode-mcp-server.enabledTools` s
 
 ### Read-only tools run without approval
 
-49 of the 85 tools carry the MCP `readOnlyHint` annotation: file reads, search, symbol lookup, diagnostics, git blame/diff/history, secret scanning, static analyzers, the PDF checks. Clients that honor annotations auto-approve them, so a plain read never sits behind a confirmation dialog. The classification is deliberately conservative: 26 tools that modify files or state and 10 destructive tools (shell, SQL, stashes, file moves) keep their prompts. Nothing is marked read-only if it can execute, erase, or reach the network.
+51 of the 88 tools carry the MCP `readOnlyHint` annotation: file reads, search, symbol lookup, diagnostics, git blame/diff/history, secret scanning, static analyzers, the PDF checks. Clients that honor annotations auto-approve them, so a plain read never sits behind a confirmation dialog. The classification is deliberately conservative: 26 tools that modify files or state and 10 destructive tools (shell, SQL, stashes, file moves) keep their prompts. Nothing is marked read-only if it can execute, erase, or reach the network.
 
 ### Multiple workspace folders
 
@@ -121,13 +121,24 @@ Optional parameters are listed with their defaults.
 - **retrieve_output_code** (always on): recalls the full original output behind a compaction notice, paginated. Params: `handle`, `offset` (default 0), `maxChars` (default 20000).
 - **background_task_code**: runs long commands detached and returns a task id immediately; poll `output`, `list` tasks, `kill` a run. Nothing gets truncated by the 10 s terminal timeout. Params: `action` (`start`, `list`, `output`, `kill`), `command`, `cwd`, `task_id`, `offset`, `maxChars`.
 
-### Memory
-Notes live in markdown: global at `~/Mammouth/MEMORY.md`, per-project at `{workspaceName}_MEMORY.md` in the workspace root.
+### Memory and session state
+Three files, three jobs. The split is what keeps context small: memory accumulates, state is overwritten, the log is budgeted.
 
-- **memory_load_code**: loads both scopes.
+| File | What it holds | Growth |
+| --- | --- | --- |
+| `~/Mammouth/MEMORY.md` | user preferences, project rules, durable decisions | hand-curated |
+| `{workspace}_STATE.md` | current version, branch, status, in-progress work, next step | overwritten, ~2 KB |
+| `{workspace}_LOG.md` | dated session history: files touched, commands run, summaries | rotates at 40 entries |
+
+- **memory_load_code**: loads memory plus the state snapshot. Trimmed to a budget by default; pass `full=true` for verbatim. Params: `full`, `workspace`.
 - **memory_save_code**: appends a dated entry under a section header. Params: `section`, `entry`, `scope` (global/project), `sectionLevel`.
 - **memory_search_code**: keyword search. Params: `query`, `scope`.
 - **memory_clear_code**: removes an entry or a whole section. Params: `section`, `entry`, `scope`.
+- **workspace_state_code**: reads or overwrites the state snapshot. Params: `action` ('read'/'write'), `version`, `branch`, `status`, `inProgress`, `nextStep`.
+- **session_end_code**: closes a unit of work — writes the state snapshot and appends a dated summary. Call it as the last tool call of a finished, handed-off or abandoned task. Params: `summary`, `version`, `branch`, `status`, `inProgress`, `nextStep`.
+- **workspace_log_code**: recent session history when the snapshot is not detailed enough. Params: `count`.
+
+The server also journals tool activity on its own: any call carrying a path, command or query lands in the log without a model round-trip. `session_bootstrap_code` returns the state in full, memory within a budget, and only the newest log entries.
 
 ### Testing
 Frameworks auto-detect from `package.json`, `requirements.txt` or `pyproject.toml`.

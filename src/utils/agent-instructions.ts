@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-export const AGENT_INSTRUCTIONS_VERSION = '6';
+export const AGENT_INSTRUCTIONS_VERSION = '7';
 
 export const DEFAULT_AGENT_INSTRUCTIONS = [
     'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response.',
@@ -14,6 +14,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '4. Edit with replace_lines_code(path, startLine, endLine, content, originalCode) for small changes (10 lines or fewer; originalCode must match the current file content exactly) or create_file_code(path, content, overwrite=true) for new files and full rewrites. Rename code symbols only with rename_symbol_code(oldName, newName), never by manual search/replace.',
     '5. After EVERY batch of changes run get_diagnostics_code(). Before ANY commit run find_secrets_code() then security_scan_code() and fix what they flag.',
     '6. Builds and tests go through run_task_code / run_tests_code / build_project_code. execute_shell_command_code is the LAST RESORT for anything else - never for reading.',
+    '7. When a unit of work finishes, is handed off, or is abandoned, close it with ONE session_end_code(summary, version, branch, status, inProgress, nextStep) as your last tool call. The summary is the part no tool can infer: intent, decisions and why, and what you deliberately skipped. Write it for someone with no memory of this conversation. Update workspace_state_code(action="write") mid-task only when the working state changes materially.',
     '',
     'TOOL BUDGET (clients cap tool calls per response - make every call count):',
     '- Open with ONE session_bootstrap_code() call instead of memory_load + guide + folders + list_files. Do NOT reload memory or this guide again in the same conversation.',
@@ -86,6 +87,9 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '[RO] session_bootstrap_code(memory, guide, skills, layout, workspace) - ONE-CALL session start: memory + workspace folders + root layout + skills + this guide. Replaces four opening calls; use it FIRST, every conversation.',
     '[RO] memory_load_code() - memory only (when the session was opened with a partial bootstrap).',
     '[MUT] memory_save_code(section, entry, scope="global"|"project") - append a dated entry; save durable facts and decisions.',
+    '[RO] workspace_state_code(action="read"|"write", version, branch, status, inProgress, nextStep) - the CURRENT snapshot of where the work stands: which version/branch, what is in progress, the next step. Overwritten, never grows. Loaded by session_bootstrap_code.',
+    '[MUT] session_end_code(summary, version, branch, status, inProgress, nextStep) - close a work session: writes the state snapshot and appends a dated summary to the log. Call as the LAST tool call of a finished, handed-off or abandoned unit of work.',
+    '[RO] workspace_log_code(count) - recent session history with files touched and commands run, when the state snapshot is not enough detail.',
     '[RO] memory_search_code(query, scope) - search memory by keyword.',
     '[DST] memory_clear_code(section, entry, scope) - remove wrong or outdated entries.',
     '',

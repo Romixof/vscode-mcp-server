@@ -6,3 +6,5 @@ tsconfig.json
 **/.vscode-test
 **/.codegraph
 **/.vscode-mcp
+*_LOG.md
+*_STATE.md
