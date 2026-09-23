@@ -4,9 +4,9 @@ export type SandboxMode = 'workspace' | 'home' | 'full';
 
 export interface SandboxConfig {
 	mode: SandboxMode;
-	
+
 	allowPaths: string[];
-	
+
 	homeDir?: string;
 }
 
@@ -39,7 +39,7 @@ export function computeAllowedRoots(
 	const roots: string[] = [];
 	switch (config.mode) {
 		case 'full':
-			return []; 
+			return [];
 		case 'home':
 			if (config.homeDir) roots.push(config.homeDir);
 			break;
@@ -53,7 +53,7 @@ export function computeAllowedRoots(
 			}
 			break;
 	}
-	
+
 	const seen = new Set<string>();
 	return roots.filter(r => {
 		if (!r) return false;
@@ -72,7 +72,7 @@ export function assertInSandbox(
 	toolName: string
 ): void {
 	const roots = computeAllowedRoots(config, workspaceFolders);
-	if (roots.length === 0) return; 
+	if (roots.length === 0) return;
 
 	const candidates = [targetPath];
 	if (realTarget && realTarget !== targetPath) candidates.push(realTarget);

@@ -330,7 +330,7 @@ function renderSnapshot(m){
   if(m.latency){els.kLatency.textContent=m.latency.avg?m.latency.avg+'ms avg · '+m.latency.p95+'ms p95':'— ms avg'; const hint=document.getElementById('kLatency'); if(hint) hint.textContent=els.kLatency.textContent}
   els.clientsCount.textContent=String(m.clients.length);
   if(m.clients.length){els.clientsEmpty.style.display='none';els.clientsBody.innerHTML=m.clients.map(c=>{
-    const cls=c.preset==='Standard'?'ok':c.preset==='Full access'?'warn':''; 
+    const cls=c.preset==='Standard'?'ok':c.preset==='Full access'?'warn':'';
     return '<tr><td><strong>'+esc(c.label)+'</strong></td><td><span class="badge '+cls+'">'+esc(c.preset)+'</span></td><td class="num">'+c.calls+'</td><td class="num" style="'+(c.denied?'color:#dc2626':'')+'">'+(c.denied||0)+'</td><td class="num">~'+fmtT(c.estTokens)+'</td><td><button class="btn small" onclick="vsapi.postMessage({type:\\'revoke\\',clientId:'+JSON.stringify(c.clientId)+'})">Revoke</button></td></tr>';
   }).join('')} else {els.clientsEmpty.style.display='block';els.clientsBody.innerHTML=''}
   if(m.totals.topTools.length){document.getElementById('topEmpty').style.display='none';const max=Math.max(1,m.totals.topTools[0].tokens);els.topTools.innerHTML=m.totals.topTools.map(t=>'<div class="rank-row"><span class="rank-name">'+esc(t.tool)+'</span><span class="rank-meta">~'+fmtT(t.tokens)+'</span><span class="rank-meta">'+t.calls+'×</span><span class="rank-bar"><span class="rank-fill" style="width:'+Math.max(6,t.tokens/max*100)+'%"></span></span></div>').join('')} else {document.getElementById('topEmpty').style.display='block';els.topTools.innerHTML=''}
@@ -338,7 +338,7 @@ function renderSnapshot(m){
   if(m.config){els.cfgSandbox.textContent=m.config.sandboxMode; els.cfgServer.textContent=m.config.host; els.cfgPort.textContent=m.config.port}
   if(m.blocks && m.blocks.length){els.blocksEmpty.style.display='none';els.blocksCount.textContent=String(m.blocks.length);els.blocksList.innerHTML=m.blocks.map(b=>'<div class="mini-row"><span class="mini-time">'+fmtTime(b.ts)+'</span><span class="mini-kind" style="color:#dc2626">'+esc(b.kind)+'</span><span class="mini-detail">'+esc(b.detail).slice(0,100)+'</span></div>').join('')}
   if(m.audits && m.audits.length){els.auditsEmpty.style.display='none';els.auditsCount.textContent=String(m.audits.length);els.auditsList.innerHTML=m.audits.map(ev=>'<div class="mini-row"><span class="mini-time">'+fmtTime(ev.ts)+'</span><span class="mini-kind">'+esc(ev.kind)+'</span><span class="mini-detail">'+esc(ev.client)+' · '+esc(ev.detail).slice(0,90)+'</span></div>').join('')}
-  allRows=m.totals.calls?allRows:[]; // keep existing rows, don't wipe on snapshot
+  allRows=m.totals.calls?allRows:[];
   renderFeed();
 }
 vsapi.postMessage({type:'snapshot'});

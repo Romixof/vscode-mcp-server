@@ -1,8 +1,8 @@
 # VSCodium MCP Server
 
-Turn VS Code into a local MCP server: 74 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, read scanned PDFs, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
+Turn VS Code into a local MCP server: 85 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, read scanned PDFs, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
 
-This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 62 came later. Credit for the core idea and the first implementation belongs to him.
+This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 73 came later. Credit for the core idea and the first implementation belongs to him.
 
 ## Demo
 
@@ -12,7 +12,7 @@ https://github.com/user-attachments/assets/f60da97b-a5a9-45cb-8379-3bf91c9bbad0
 
 1. Install the extension from a `.vsix` (Extensions view → `⋯` → *Install from VSIX*), or build it yourself with `npm install && npm run compile`.
 2. Click the status bar item to start the server.
-3. Point your MCP client at `http://localhost:3000/mcp`.
+3. Point your MCP client at `http://localhost:3400/mcp`.
 
 ### Claude Desktop
 
@@ -21,7 +21,7 @@ https://github.com/user-attachments/assets/f60da97b-a5a9-45cb-8379-3bf91c9bbad0
   "mcpServers": {
     "vscode-mcp-server": {
         "command": "npx",
-        "args": ["mcp-remote@next", "http://localhost:3000/mcp"]
+        "args": ["mcp-remote@next", "http://localhost:3400/mcp"]
     }
   }
 }
@@ -31,7 +31,7 @@ Clients that speak streamable HTTP directly can skip `mcp-remote` and use the UR
 
 ### The agent guide
 
-Tell your agent to call `get_agent_instructions_code` once at the start of every conversation. The tool is read-only and auto-approved, and it returns the full map: all 74 tools with their key parameters, grouped by task, tagged `[RO]`/`[MUT]`/`[DST]` to match the approval behavior, plus the workflow rules (memory first, diagnostics after every edit batch, secret scan before commits) and recipes for common jobs. An agent that loads it stops discovering tools by trial and error, which is where most wasted tokens go.
+Tell your agent to call `session_bootstrap_code` once at the start of every conversation. The tool is read-only and auto-approved, and ONE call returns everything needed to work: persistent memory, the workspace layout, the skills list and the full agent guide — all 85 tools with their key parameters, grouped by task, tagged `[RO]`/`[MUT]`/`[DST]` to match the approval behavior, plus workflow rules (tool-budget discipline, diagnostics after every edit batch, secret scan before commits) and recipes for common jobs. An agent that loads it stops discovering tools by trial and error, which is where most wasted tool calls go.
 
 Paste this into the agent's instructions (project instructions in Claude, `CLAUDE.md`, or your agent's persistent memory):
 
@@ -45,11 +45,11 @@ You can replace the built-in guide with your own text through the `vscode-mcp-se
 
 ## What the tools do
 
-Every group in the table maps to a key in the `vscode-mcp-server.enabledTools` setting and can be turned off individually. Useful when your coding agent already has some of these abilities: disable file/edit and keep only symbol tools, for example. Four tools are always on regardless of the setting: `search_workspace_code`, `retrieve_output_code`, `get_agent_instructions_code` and a coffee easter egg.
+Every group in the table maps to a key in the `vscode-mcp-server.enabledTools` setting and can be turned off individually. Useful when your coding agent already has some of these abilities: disable file/edit and keep only symbol tools, for example. Five tools are always on regardless of the setting: `session_bootstrap_code`, `search_workspace_code`, `retrieve_output_code`, `get_agent_instructions_code` and a coffee easter egg.
 
 ### Read-only tools run without approval
 
-43 of the 74 tools carry the MCP `readOnlyHint` annotation: file reads, search, symbol lookup, diagnostics, git blame/diff/history, secret scanning, static analyzers, the PDF checks. Clients that honor annotations auto-approve them, so a plain read never sits behind a confirmation dialog. The classification is deliberately conservative: 21 tools that modify files or state and 10 destructive tools (shell, SQL, stashes, file moves) keep their prompts. Nothing is marked read-only if it can execute, erase, or reach the network.
+49 of the 85 tools carry the MCP `readOnlyHint` annotation: file reads, search, symbol lookup, diagnostics, git blame/diff/history, secret scanning, static analyzers, the PDF checks. Clients that honor annotations auto-approve them, so a plain read never sits behind a confirmation dialog. The classification is deliberately conservative: 26 tools that modify files or state and 10 destructive tools (shell, SQL, stashes, file moves) keep their prompts. Nothing is marked read-only if it can execute, erase, or reach the network.
 
 ### Multiple workspace folders
 
@@ -59,31 +59,31 @@ Paths round-trip in both directions: results are displayed as `FolderName/relati
 
 ### Several VS Code windows, one server
 
-Windows do not fight over the port: the first one to start serves `http://localhost:3000/mcp` exactly as before, and every other VS Code window joins it automatically. There is still one client URL to configure, no matter how many windows are open. Each joined window registers its open folders with the hosting window, which forwards every tool call to whichever window owns the target folder. Folder names, deduped labels (`proj-beta-2` when two windows open same-named folders) and the 1-based indexes all span the whole cluster; `list_workspace_folders_code` shows the global numbering and names the window behind each folder, and whole-workspace diagnostics or symbol searches fan out to every window at once. The status bar reads `MCP Server: 3000 (joined)` on a window sharing another's server. Close the hosting window and the remaining ones elect a new host within seconds, so the client URL never changes.
+Windows do not fight over the port: the first one to start serves `http://localhost:3400/mcp` exactly as before, and every other VS Code window joins it automatically. There is still one client URL to configure, no matter how many windows are open. Each joined window registers its open folders with the hosting window, which forwards every tool call to whichever window owns the target folder. Folder names, deduped labels (`proj-beta-2` when two windows open same-named folders) and the 1-based indexes all span the whole cluster; `list_workspace_folders_code` shows the global numbering and names the window behind each folder, and whole-workspace diagnostics or symbol searches fan out to every window at once. The status bar reads `MCP Server: 3400 (joined)` on a window sharing another's server. Close the hosting window and the remaining ones elect a new host within seconds, so the client URL never changes.
 
 | Group | Tools | Covers |
 |---|---|---|
 | File | 6 | list, read (paged, truncated gracefully), move, rename, copy, open-folder inventory |
-| Edit | 2 | create files, replace line ranges with validation |
+| Edit | 3 | create files, replace line ranges with validation, dry-run diff previews |
 | Diagnostics | 1 | errors/warnings from the Problems panel |
-| Symbol | 3 | fuzzy search, hover definitions, document outlines |
-| Shell | 1 | terminal execution with compact output and full-output recall |
+| Symbol | 6 | fuzzy search, hover definitions, document outlines, call graph, test impact, migration diff |
+| Shell | 2 | terminal execution with compact output and full-output recall, detached background tasks |
 | Memory | 4 | persistent global and per-project notes |
 | Test | 5 | run tests, coverage, formatting, linting, diffs |
 | Git | 5 | commits, branches, blame, conflicts, stashes |
 | Documentation | 5 | dependencies, file history, docstrings, project context, TODOs |
 | Database | 5 | SQL, HTTP endpoints, env vars, ports, dev servers |
-| Productivity | 5 | dead code, snapshots, regex testing, encodings, calendar extraction |
-| Security | 4 | secret scanning, risky constructs, dependency audit, audit log |
+| Productivity | 6 | dead code, snapshots, checkpoints, regex testing, encodings, calendar extraction |
+| Security | 7 | secret scanning, risky constructs, dependency audit, audit log, exposure view, scoped keys, key rotation |
 | Performance | 3 | bundle sizes, server report, command profiling |
 | Refactoring | 4 | rename symbol, extract function, duplicates, suggestions |
 | Frontend | 4 | accessibility, CSS quality, element inspection, unused CSS |
-| Workflow | 4 | npm/composer/Makefile tasks, project build, snippets, shell aliases |
+| Workflow | 5 | npm/composer/Makefile tasks, project build, snippets, shell aliases, plan mode |
 | Advanced | 2 | server info, installed extensions |
 | Skills | 4 | agent skills: list, validate, create, package |
 | OCR | 3 | scanned PDFs: needs-OCR check, page rendering, text extraction |
 
-70 tools across those 19 groups, plus 4 always-on tools (search, output recall, agent guide, coffee) for 74 total.
+80 tools across those 19 groups, plus 5 always-on tools (session bootstrap, search, output recall, agent guide, coffee) for 85 total.
 
 ## Tool reference
 
@@ -100,6 +100,7 @@ Optional parameters are listed with their defaults.
 ### Edit tools
 - **create_file_code**: creates a file or rewrites an existing one completely. Params: `path`, `content`, `overwrite` (default false), `ignoreIfExists` (default false).
 - **replace_lines_code**: replaces a line range, validating against the original text. Params: `path`, `startLine`, `endLine`, `content`, `originalCode`.
+- **diff_preview_code** (read-only): dry-run of the edit tools above and of move/rename — returns the unified diff that would be written without touching anything, and ends with the exact call to apply it. Params: `op` (`replace_lines`, `create`, `move`, `rename`) plus the same parameters the matching tool takes.
 
 ### Search (always on)
 - **search_workspace_code**: regex search across the workspace, matches grouped by file with 1-based line numbers. Params: `pattern`, `path` (default `.`), `glob` (a pattern without `/` like `*.ts` matches the file name at any depth, `src/**/*.py` matches relative paths), `caseSensitive`, `maxResults` (default 50, max 200), `skipCommon` (default true: node_modules, dist, out, build, dot-directories). Binary files and files over 1.5 MB are skipped. This replaces grep-through-shell for simple reads: strictly read-only, auto-approved, no terminal involved.
@@ -111,10 +112,14 @@ Optional parameters are listed with their defaults.
 - **search_symbols_code**: fuzzy search across every open folder at once (VS Code providers span all roots). Params: `query`, `maxResults` (default 10). Results carry the owning folder's name in their location when several folders are open.
 - **get_symbol_definition_code**: hover data for a symbol: type, docs, source. Params: `path`, `line`, `symbol`.
 - **get_document_symbols_code**: hierarchical outline of a file. Params: `path`, `maxDepth`.
+- **call_graph_code**: who calls a symbol and what it calls, with configurable depth and direction, served by the `.codegraph/` workspace index (built on first use, then incremental; delete the folder to force a rebuild). Heuristic and name-based: same-named symbols merge, dynamic dispatch is not resolved. Params: `symbol`, `depth` (default 3), `direction` (`callees`, `callers`, `both`), `maxNodes`.
+- **test_impact_code**: changed source files mapped to the test files that transitively import them. Defaults to the git working-tree changes. Params: `files` (optional list).
+- **migration_diff_code**: two revisions compared — changed files, declarations added, BREAKING declarations removed, renames flagged. Params: `base`, `head` (default HEAD).
 
 ### Shell
 - **execute_shell_command_code**: runs a command in the integrated terminal through shell integration and captures real output plus exit code. Commands on the same terminal run one after another, never interleaved. Params: `command`, `cwd`, `timeout` ms (default 10000), `outputMode` (`compact` by default: transport logs, test runners, package managers and build output come back filtered to the lines that matter; `raw` disables filtering). A command past its limit returns the output captured so far with exit code 124; the process keeps running in the terminal, so slow scans need a larger timeout passed explicitly. When compact output ends with a `[@vscode-mcp ... retrieve_output_code "handle"]` notice, the full unfiltered text is one call away.
 - **retrieve_output_code** (always on): recalls the full original output behind a compaction notice, paginated. Params: `handle`, `offset` (default 0), `maxChars` (default 20000).
+- **background_task_code**: runs long commands detached and returns a task id immediately; poll `output`, `list` tasks, `kill` a run. Nothing gets truncated by the 10 s terminal timeout. Params: `action` (`start`, `list`, `output`, `kill`), `command`, `cwd`, `task_id`, `offset`, `maxChars`.
 
 ### Memory
 Notes live in markdown: global at `~/Mammouth/MEMORY.md`, per-project at `{workspaceName}_MEMORY.md` in the workspace root.
@@ -157,6 +162,7 @@ Frameworks auto-detect from `package.json`, `requirements.txt` or `pyproject.tom
 ### AI productivity
 - **find_dead_code_code**: exported symbols nothing references. Params: `path`, `include`, `exclude`, `maxResults`.
 - **snapshot_workspace_code**: SHA-256 snapshots of every file with before/after compare. Params: `action` (save/compare/list), `name`, `baseline`.
+- **checkpoint_code**: one-call undo point backed by a non-destructive git stash: `save` records the current tracked changes and lets you keep working, `restore` rolls the tree back (kept, requires `confirm`), `list`/`drop` manage them. Params: `action` (save/list/restore/drop), `name`, `confirm`.
 - **regex_tester_code**: matches with positions, captured groups and a replace preview. Params: `pattern`, `flags`, `text`, `filePath`, `replace`.
 - **convert_encoding_code**: detects and converts utf-8, utf-8-bom, utf-16le, latin1. Params: `path`, `action`, `from`, `to`.
 - **generate_ics_code**: pulls events out of a document into an .ics calendar file. Params: `path`, `output`, `calendarName`, `keywords`, `requireKeyword`, `year`.
@@ -166,6 +172,9 @@ Frameworks auto-detect from `package.json`, `requirements.txt` or `pyproject.tom
 - **security_scan_code**: risky constructs rated by severity: eval/new Function, innerHTML sinks, exec calls with interpolated input, disabled TLS verification, unsafe yaml/pickle/subprocess, SQL string concatenation. Params: `path`, `severity` floor, `maxResults`.
 - **check_dependencies_vulnerabilities_code**: npm audit results per package with patched versions. Params: `workspace`.
 - **get_audit_log_code**: recent tool calls, denied tools, blocked shell commands, sandbox violations, consent grants and token revocations. Params: `limit`, `kind`.
+- **expose_audit_code**: aggregated exposure view — clients with their tool counts, denied/blocked events, and the current rate-limit window with the top source IPs. Params: `last`, `topTools`.
+- **scope_keys_code**: mint, list and revoke scoped api keys (`mcpk_ro_` / `mcpk_std_` / `mcpk_full_`). A read-only key cannot run shell commands, edit files or query databases; administration is never included, so remote clients never need the primary key. Params: `action`, `scope`, `label`, `key_id`.
+- **secret_rotate_code**: regenerates the primary api key and invalidates the old one immediately, one audited call. Params: `confirm`.
 
 ### Performance
 - **analyze_bundle_code**: build output sizes with the largest files and their share. Params: `dir` (default dist), `top`.
@@ -192,6 +201,7 @@ Project tasks, builds, editor snippets and shared shell shortcuts, discovered fr
 - **build_project_code**: detects the build command (package.json build script, Makefile, tsconfig.json) and runs it with a duration and exit code report. Params: `command` to override detection, `cwd`, `timeout` ms (default 300000).
 - **list_snippets_code**: lists snippets with a body preview, from `.vscode/snippets/*.json`, `.vscode/snippets/*.code-snippets` and the `.vscode/*.code-snippets` files VS Code itself creates; comment lines are tolerated. Params: `prefixFilter`.
 - **run_alias_code**: runs shortcuts from `.mcp-aliases.json` at the workspace root, so a whole team shares one set of commands; values are plain command strings or `{ command, description }`. Params: `name`, `args`, `cwd`, `timeout`.
+- **plan_mode_code**: a global planning switch — while on, every execution tool only describes what it would run, nothing executes; read-only tools keep working. Params: `enabled`, `status`.
 
 ### Skills
 
@@ -211,12 +221,12 @@ Reading scanned documents runs entirely on your machine: for every engine, no pa
 - **ocr_pdf_code**: extracts text from a scanned PDF. Engines: `tesseract` (local binary; common Windows install paths are probed, including `%LOCALAPPDATA%\Programs\Tesseract-OCR`), `vision` (a local Ollama vision model), or `auto`. Page ranges are supported; long jobs run the passes under a shared deadline (`timeoutMs`) and come back with partial results and a note saying which pages were skipped instead of failing whole. Params: `pdfPath`, `engine` (default tesseract), `language` (default eng, combos like `fra+eng`), `firstPage`, `lastPage`, `dpi`, `ollamaUrl`, `visionModel`, `outputPath` (full text also written to disk), `timeoutMs`.
 
 ### Agent guide and housekeeping (always on)
-- **get_agent_instructions_code**: the complete 74-tool catalog, workflow rules and recipes, described in the agent guide section above.
+- **session_bootstrap_code**: one-call session start — memory, workspace layout, skills and the complete 85-tool catalog in a single response, described in the agent guide section above.
 - **brew_coffee_code**: brews nothing. Params: `sugar`.
 
 ## Configuration
 
-* `vscode-mcp-server.port`: server port (default 3000)
+* `vscode-mcp-server.port`: server port (default 3400)
 * `vscode-mcp-server.host`: bind address (default 127.0.0.1)
 * `vscode-mcp-server.defaultEnabled`: start the server automatically on launch
 * `vscode-mcp-server.enabledTools`: which of the 19 groups above are active, all on by default. Changing it restarts the server.
@@ -252,11 +262,11 @@ The OAuth metadata always announce the origin the request actually arrived throu
 
 | Setup | What the user does | What the metadata announce |
 |---|---|---|
-| Local client only | nothing | `http://127.0.0.1:3000` |
-| nginx / Caddy reverse proxy | proxy to `127.0.0.1:3000`, set `proxy_set_header Host $host;` | the proxy's public `https://domain` |
-| Tailscale Funnel | `tailscale funnel 3000` | `https://machine.tailnet.ts.net` |
-| cloudflared | `cloudflared tunnel --url http://localhost:3000` | the `trycloudflare.com` URL |
-| ngrok | `ngrok http 3000` | the `ngrok-free.app` URL |
+| Local client only | nothing | `http://127.0.0.1:3400` |
+| nginx / Caddy reverse proxy | proxy to `127.0.0.1:3400`, set `proxy_set_header Host $host;` | the proxy's public `https://domain` |
+| Tailscale Funnel | `tailscale funnel 3400` | `https://machine.tailnet.ts.net` |
+| cloudflared | `cloudflared tunnel --url http://localhost:3400` | the `trycloudflare.com` URL |
+| ngrok | `ngrok http 3400` | the `ngrok-free.app` URL |
 
 No tunnel-specific setting exists on purpose: run the tunnel, connect through it, and discovery reflects it. Remote clients that POST from a browser context should also have their public origin added to `vscode-mcp-server.auth.allowedOrigins`; pure server-to-server calls carry no Origin header and pass regardless.
 

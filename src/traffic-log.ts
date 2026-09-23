@@ -4,8 +4,8 @@ import * as path from 'path';
 import type { RequestHandler, Request, Response, NextFunction } from 'express';
 
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024;   
-const LOG_BODY_MAX = 200;                 
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const LOG_BODY_MAX = 200;
 
 let trafficFile = '';
 let rotating = false;
@@ -21,7 +21,7 @@ export function initTrafficLog(banner: string): void {
         trafficFile = trafficLogPath();
         fs.mkdirSync(path.dirname(trafficFile), { recursive: true });
     } catch {
-        
+
         trafficFile = '';
         return;
     }
@@ -40,10 +40,10 @@ export function writeLine(line: string): void {
                     try {fs.renameSync(trafficFile, `${trafficFile}.1`);} catch {}
                     rotating = false;
                 }
-            } catch { /* fichier pas encore créé */ }
+            } catch {  }
         }
         fs.appendFileSync(trafficFile, `${new Date().toISOString()} ${line}\n`);
-    } catch { /* le logging ne doit jamais casser le serveur */ }
+    } catch {  }
 }
 
 function trunc(s: string, n: number): string {
@@ -126,7 +126,7 @@ export function trafficNoteBody(req: Request, body: unknown): void {
         const flat = JSON.stringify(body).replace(/\s+/g, ' ');
         notedBodies.set(req, trunc(flat, LOG_BODY_MAX));
         writeLine(`↳ ${req.method} ${redactUrl(req.originalUrl ?? req.url)} body='${trunc(flat, LOG_BODY_MAX)}'`);
-    } catch { /* jamais bloquer */ }
+    } catch {  }
 }
 
 
@@ -137,12 +137,12 @@ export function attachTrafficHooks(server: import('http').Server): void {
             conns += 1;
             const s = socket as import('net').Socket;
             writeLine(`⚡ TCP #${conns} depuis ${s.remoteAddress}:${s.remotePort}`);
-        } catch { /* ignore */ }
+        } catch {  }
     });
     server.on('clientError', (err, socket) => {
         const code = (err as NodeJS.ErrnoException).code;
         writeLine(`⚠ clientError: ${code ?? err.message}`);
-        try {socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');} catch { /* ignore */ }
+        try {socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');} catch {  }
     });
 }
 

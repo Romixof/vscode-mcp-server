@@ -6,6 +6,9 @@ import { resolveInputPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspac
 import { executeShellCommand } from './shell-tools';
 
 const DEFAULT_SKILLS_ROOT = '.claude/skills';
+
+
+export const SKILLS_ROOT_CANDIDATES = ['skills', DEFAULT_SKILLS_ROOT];
 const DEFAULT_EXCLUDES = ['*.bak', '.DS_Store', 'node_modules/*', '__pycache__/*'];
 
 function shellSingleQuote(value: string): string {
@@ -56,71 +59,72 @@ async function readTextFile(uri: vscode.Uri): Promise<string> {
     return Buffer.from(bytes).toString('utf-8');
 }
 
+export async function collectSkillsList(root: string | undefined, workspace?: string): Promise<string> {
+    const roots = root ? [root] : SKILLS_ROOT_CANDIDATES;
+    const found: Array<{ rootLabel: string; relPath: string; name?: string; description?: string }> = [];
+    const scanned: string[] = [];
+    for (const r of roots) {
+        let rootUri: vscode.Uri;
+        try {
+            rootUri = resolveInputPath(r, workspace);
+        } catch {
+            continue;
+        }
+        if (!(await pathExists(rootUri))) {
+            scanned.push(`${r} (missing)`);
+            continue;
+        }
+        scanned.push(r);
+        async function walk(dirUri: vscode.Uri): Promise<void> {
+            let entries: [string, vscode.FileType][];
+            try {
+                entries = await vscode.workspace.fs.readDirectory(dirUri);
+            } catch {
+                return;
+            }
+            for (const [name, type] of entries) {
+                const childUri = vscode.Uri.joinPath(dirUri, name);
+                if (type & vscode.FileType.Directory) {
+                    await walk(childUri);
+                } else if (name === 'SKILL.md') {
+                    const content = await readTextFile(childUri);
+                    const fm = parseFrontmatter(content);
+                    found.push({
+                        rootLabel: r,
+                        relPath: path.relative(rootUri.fsPath, childUri.fsPath).replace(/\\/g, '/'),
+                        name: fm?.data.name,
+                        description: fm?.data.description
+                    });
+                }
+            }
+        }
+        await walk(rootUri);
+    }
+    if (found.length === 0) {
+        return `No skills found. Scanned: ${scanned.length > 0 ? scanned.join(', ') : '(nothing)'}${root ? '' : '. Pass root="<folder>" to scan another location.'}`;
+    }
+    found.sort((a, b) => `${a.rootLabel}/${a.relPath}`.localeCompare(`${b.rootLabel}/${b.relPath}`));
+    const lines = found.map(s => {
+        const desc = s.description
+            ? (s.description.length > 220 ? s.description.slice(0, 220) + '…' : s.description)
+            : '(no description in frontmatter)';
+        return `- **${s.name || '(unnamed)'}** — \`${s.rootLabel}/${s.relPath}\`\n  ${desc}`;
+    });
+    const where = root ? `"${root}"` : `auto-detected roots (${scanned.join(', ')})`;
+    return `${found.length} skill(s) found under ${where}:\n\n${lines.join('\n\n')}`;
+}
+
 export function registerSkillsTools(server: McpServer): void {
 
     server.tool('list_skills_code', `Lists every agent skill found under a root folder, by recursively finding each SKILL.md and reading its frontmatter (name, description).
 
 WHEN TO USE: Getting an overview of installed skills before deciding whether to reuse, extend, or create a new one. Faster and more reliable than browsing folders by hand — especially once a skill has annex files (scripts, templates) sitting next to it that would otherwise clutter a plain file listing.
 
-Read-only. Never executes any code found inside a skill.`, {
-        root: z.string().optional().default(DEFAULT_SKILLS_ROOT).describe(`Folder to scan for SKILL.md files, relative to the workspace root (or absolute). Defaults to "${DEFAULT_SKILLS_ROOT}".`),
+When root is OMITTED the tool auto-detects: it scans "skills" then ".claude/skills" and reports every SKILL.md it finds, so you no longer need to know where skills live before calling. Read-only. Never executes any code found inside a skill.`, {
+        root: z.string().optional().describe(`Folder to scan for SKILL.md files, relative to the workspace root (or absolute). When omitted, auto-detects: scans "${SKILLS_ROOT_CANDIDATES.join('" then "')}".`),
         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-    }, async ({ root = DEFAULT_SKILLS_ROOT, workspace }) => {
-        try {
-            const rootUri = resolveInputPath(root, workspace);
-            if (!(await pathExists(rootUri))) {
-                return { content: [{ type: 'text', text: `No such folder: "${root}".` }] };
-            }
-
-            const found: Array<{ relPath: string; name?: string; description?: string }> = [];
-
-            async function walk(dirUri: vscode.Uri): Promise<void> {
-                let entries: [string, vscode.FileType][];
-                try {
-                    entries = await vscode.workspace.fs.readDirectory(dirUri);
-                } catch {
-                    return;
-                }
-                for (const [name, type] of entries) {
-                    const childUri = vscode.Uri.joinPath(dirUri, name);
-                    if (type & vscode.FileType.Directory) {
-                        await walk(childUri);
-                    } else if (name === 'SKILL.md') {
-                        const content = await readTextFile(childUri);
-                        const fm = parseFrontmatter(content);
-                        found.push({
-                            relPath: path.relative(rootUri.fsPath, childUri.fsPath).replace(/\\/g, '/'),
-                            name: fm?.data.name,
-                            description: fm?.data.description
-                        });
-                    }
-                }
-            }
-
-            await walk(rootUri);
-
-            if (found.length === 0) {
-                return { content: [{ type: 'text', text: `No SKILL.md found under "${root}".` }] };
-            }
-
-            found.sort((a, b) => a.relPath.localeCompare(b.relPath));
-            const lines = found.map(s => {
-                const desc = s.description
-                    ? (s.description.length > 220 ? s.description.slice(0, 220) + '…' : s.description)
-                    : '(no description in frontmatter)';
-                return `- **${s.name || '(unnamed)'}** — \`${s.relPath}\`\n  ${desc}`;
-            });
-
-            return {
-                content: [{
-                    type: 'text',
-                    text: `${found.length} skill(s) found under "${root}":\n\n${lines.join('\n\n')}`
-                }]
-            };
-        } catch (error) {
-            console.error('[list_skills_code] Error:', error);
-            throw error;
-        }
+    }, async ({ root, workspace }) => {
+        return { content: [{ type: 'text', text: await collectSkillsList(root, workspace) }] };
     });
 
     server.tool('validate_skill_code', `Validates a SKILL.md: checks frontmatter completeness, balanced code fences, that referenced sibling files actually exist next to it, and does a non-executing syntax check of embedded JavaScript blocks.
@@ -183,7 +187,9 @@ Read-only. Python blocks are NOT syntax-checked (no Python interpreter is assume
             }
 
             const jsBlocks = [...content.matchAll(/```(?:javascript|js)\r?\n([\s\S]*?)```/g)].map(x => x[1]);
-            const scriptTags = [...content.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(x => x[1]);
+
+
+            const scriptTags = [...content.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)].map(x => x[1]);
             let jsIndex = 0;
             for (const js of [...jsBlocks, ...scriptTags]) {
                 jsIndex++;
@@ -293,7 +299,9 @@ WHEN TO USE: Starting a brand-new skill from scratch, so the frontmatter is well
                 };
             }
 
-            const escapedDescription = description.replace(/"/g, '\\"');
+
+
+            const escapedDescription = description.replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
             const scaffold = `---
 name: ${slug}
 description: "${escapedDescription}"

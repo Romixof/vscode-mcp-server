@@ -72,8 +72,8 @@ export function extractToken(headers: Record<string, string | string[] | undefin
         }
         const alt = headers['x-mcp-token'];
         if (typeof alt === 'string' && alt.trim()) {return alt.trim();}
-        
-        
+
+
         const apiKey = headers['x-api-key'];
         if (typeof apiKey === 'string' && apiKey.trim()) {return apiKey.trim();}
         return undefined;
@@ -117,15 +117,15 @@ export function originGuard(getCfg: () => AuthConfig, selfPort: number): Request
 export function bearerAuth(getExpected: () => string | string[] | undefined): RequestHandler {
         return (req: Request, res: Response, next: NextFunction) => {
                 const expected = getExpected();
-                
-                
+
+
                 const candidates = Array.isArray(expected)
                         ? expected.filter((c): c is string => typeof c === 'string' && c.length > 0)
                         : (expected ? [expected] : []);
                 const presented = extractToken(req.headers as Record<string, string | string[] | undefined>);
-                
-                
-                
+
+
+
                 if (!presented || candidates.length === 0 || !candidates.some(c => tokensMatch(presented, c))) {
                         const ip = req.socket.remoteAddress?.replace('::ffff:', '') ?? 'unknown';
                         logger.warn(`[auth] 401 bearer — ${req.method} ${req.path} from ${ip} (${presented ? 'token mismatch' : 'no token'}, ${candidates.length} candidate(s))`);

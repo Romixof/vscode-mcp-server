@@ -8,6 +8,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveInputPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { executeShellCommand } from './shell-tools';
 import { compactOcrText, rememberOriginal, formatCompactionNotice } from '../utils/token-efficiency';
+import { assertUrlSafe } from '../utils/security-helpers';
 
 const DEFAULT_MIN_CHARS_PER_PAGE = 20;
 const DEFAULT_DPI = 300;
@@ -18,8 +19,8 @@ const DEFAULT_OLLAMA_URL = 'http://localhost:11434';
 const DEFAULT_OLLAMA_VISION_MODEL = 'llama3.2-vision';
 const DEFAULT_VISION_CONFIDENCE_THRESHOLD = 70;
 const MAX_PAGES_PER_CALL = {
-    tesseract: 15, // fast, local, no inference — a full shell round-trip per page is the only cost
-    auto: 6, // mostly Tesseract-fast, but an unknown number of pages may escalate to vision
+    tesseract: 15,
+    auto: 6,
     vision: 3
 };
 const DEFAULT_OCR_TIMEOUT_MS = 25000;
@@ -74,6 +75,7 @@ async function resolveBinary(terminal: vscode.Terminal, cwd: string, bin: string
     }
     for (const dir of WINDOWS_FALLBACK_DIRS[bin] || []) {
         const exePath = `${dir}/${bin}.exe`;
+
         const probe = await executeShellCommand(terminal, `test -f ${shellSingleQuote(exePath)}`, cwd, 5000).catch(() => ({ output: '', exitCode: 1 }));
         if (probe.exitCode === 0) {
             return exePath;
@@ -380,6 +382,9 @@ Token efficiency: the returned text is lightly compacted (blank/duplicate-line c
             let visionReady = false;
             let visionUnavailableReason = '';
             if (engine === 'vision' || engine === 'auto') {
+
+
+                await assertUrlSafe(ollamaUrl, { allowLoopback: true, allowPrivateNetwork: true });
                 const check = await checkOllamaModel(ollamaUrl, visionModel);
                 visionReady = check.ok;
                 visionUnavailableReason = check.reason || '';

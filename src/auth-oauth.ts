@@ -26,6 +26,13 @@ interface PendingGrant {
 
 const AUTH_CODE_TTL_MS = 5 * 60 * 1000;
 
+
+
+
+function queryStr(v: unknown): string | undefined {
+        return typeof v === 'string' ? v : undefined;
+}
+
 export interface OAuthHub {
 
         getAccessToken(): string | undefined;
@@ -177,7 +184,13 @@ export function createOAuthRouter(selfPort: number, hub: OAuthHub): OAuthRouter 
         });
 
         router.get('/authorize', async (req, res) => {
-                const { response_type, client_id, redirect_uri, code_challenge, code_challenge_method, state } = req.query as Record<string, string | undefined>;
+                const q = req.query as Record<string, unknown>;
+                const response_type = queryStr(q.response_type);
+                const client_id = queryStr(q.client_id);
+                const redirect_uri = queryStr(q.redirect_uri);
+                const code_challenge = queryStr(q.code_challenge);
+                const code_challenge_method = queryStr(q.code_challenge_method);
+                const state = queryStr(q.state);
                 if (response_type !== 'code') {
                         return res.status(400).json({ error: 'unsupported_response_type' });
                 }
