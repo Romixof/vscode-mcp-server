@@ -4,6 +4,7 @@ import { MCPServer, ToolConfiguration } from './server';
 import { listWorkspaceFiles } from './tools/file-tools';
 import { logger } from './utils/logger';
 import { setSandboxConfigProvider } from './utils/workspace';
+import { flushJournalNow } from './utils/workspace-state';
 import type { SandboxMode } from './utils/sandbox';
 import { initAudit } from './auth/audit';
 import { Dashboard, setDashboardRef } from './dashboard';
@@ -417,6 +418,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
+    flushJournalNow();
     if (statusBarItem) {
         statusBarItem.dispose();
         statusBarItem = undefined;

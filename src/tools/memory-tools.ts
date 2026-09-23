@@ -9,6 +9,7 @@ import {
         appendLogEntry,
         clip,
         clipLog,
+        projectLogPath,
         projectStatePath,
         readTextFile,
         renderState,
@@ -359,7 +360,7 @@ The summary is the part a tool cannot infer: the intent behind the work, the dec
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         }, async ({ summary, version, branch, status, inProgress, nextStep, workspace }) => {
                 const stateTarget = projectStatePath(workspace);
-                const logTarget = projectStatePath(workspace)?.replace(/_STATE\.md$/, '_LOG.md');
+                const logTarget = projectLogPath(workspace);
                 if (!stateTarget || !logTarget) {
                         throw new Error('No workspace open — session_end_code needs an open folder.');
                 }
@@ -388,7 +389,7 @@ WHEN TO USE: to recover detail that workspace_state_code does not carry — the 
                 count: z.number().int().min(1).max(20).optional().default(5).describe('How many recent entries to return (default 5)'),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         }, async ({ count = 5, workspace }) => {
-                const target = projectStatePath(workspace)?.replace(/_STATE\.md$/, '_LOG.md');
+                const target = projectLogPath(workspace);
                 if (!target) {
                         throw new Error('No workspace open — workspace log needs an open folder.');
                 }
