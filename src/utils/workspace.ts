@@ -216,4 +216,9 @@ export function resolveRelativeToolPath(
 }
 
 export const WORKSPACE_PARAM_DESCRIPTION =
-	'Which workspace root to use when multiple folders are open: folder name or 1-based index. Defaults to the first folder. A "Name/relpath" path resolves against Name even when this parameter points elsewhere. With several VS Code windows sharing this server, names and indexes span every window — list_workspace_folders_code is authoritative.';
+	'Workspace root: name or 1-based index. See list_workspace_folders_code.';
+
+export const WORKSPACE_PARAM_LONG_DESCRIPTION =
+	'Which workspace root to use when multiple folders are open: folder name or 1-based index. Defaults to the first folder. ' +
+	'A "Name/relpath" path resolves against Name even when this parameter points elsewhere. ' +
+	'With several VS Code windows sharing this server, names and indexes span every window — list_workspace_folders_code is authoritative.';

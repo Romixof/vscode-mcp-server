@@ -25,10 +25,10 @@ function head(url: string, redirects = 3): Promise<{ status: number; type: strin
         });
 }
 
-describe('MCP server metadata', () => {
+suite('MCP server metadata', () => {
         let serverInfo: { title?: string; icons?: Array<{ src: string; mimeType?: string; sizes?: string[] }>; websiteUrl?: string; description?: string } | undefined;
 
-        before(async () => {
+        suiteSetup(async () => {
                 const server = new McpServer({
                         name: 'vscode-mcp-server',
                         version: '0.20.0',
@@ -49,41 +49,41 @@ describe('MCP server metadata', () => {
                 await server.close();
         });
 
-        it('carries a human title in the initialize response', () => {
+        test('carries a human title in the initialize response', () => {
                 assert.strictEqual(serverInfo?.title, 'VSCodium MCP Server');
         });
 
-        it('carries a websiteUrl', () => {
+        test('carries a websiteUrl', () => {
                 assert.strictEqual(serverInfo?.websiteUrl, 'https://github.com/Romixof/vscode-mcp-server');
         });
 
-        it('carries a description', () => {
+        test('carries a description', () => {
                 assert.ok((serverInfo?.description ?? '').length > 0);
         });
 
-        it('advertises at least one icon', () => {
+        test('advertises at least one icon', () => {
                 assert.ok(Array.isArray(serverInfo?.icons));
                 assert.ok((serverInfo?.icons?.length ?? 0) >= 1);
         });
 
-        it('uses absolute https URLs so a cloud client can fetch them', () => {
+        test('uses absolute https URLs so a cloud client can fetch them', () => {
                 for (const icon of serverInfo?.icons ?? []) {
                         assert.ok(icon.src.startsWith('https://'), `not https: ${icon.src}`);
                 }
         });
 
-        it('declares a mimeType for every icon', () => {
+        test('declares a mimeType for every icon', () => {
                 for (const icon of serverInfo?.icons ?? []) {
                         assert.ok(icon.mimeType && icon.mimeType.length > 0, `missing mimeType: ${icon.src}`);
                 }
         });
 
-        it('declares sizes only on the raster icon, matching the file', () => {
+        test('declares sizes only on the raster icon, matching the file', () => {
                 const png = (serverInfo?.icons ?? []).find(i => i.mimeType === 'image/png');
                 assert.deepStrictEqual(png?.sizes, ['256x256']);
         });
 
-        it('serves the advertised PNG from the repository', async function () {
+        test('serves the advertised PNG from the repository', async function () {
                 this.timeout(30000);
                 const icon = (serverInfo?.icons ?? []).find(i => i.mimeType === 'image/png');
                 assert.ok(icon, 'no png icon advertised');
@@ -93,7 +93,7 @@ describe('MCP server metadata', () => {
                 assert.ok(res!.type.includes('image/png'), `content-type was ${res!.type}`);
         });
 
-        it('serves the advertised SVG from the repository', async function () {
+        test('serves the advertised SVG from the repository', async function () {
                 this.timeout(30000);
                 const icon = (serverInfo?.icons ?? []).find(i => i.mimeType === 'image/svg+xml');
                 assert.ok(icon, 'no svg icon advertised');

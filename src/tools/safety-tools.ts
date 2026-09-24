@@ -168,17 +168,16 @@ Ops mirror the real tools: "replace_lines" (path, startLine, endLine, content, o
 
     server.tool(
         'checkpoint_code',
-        `One-call undo point for the working tree: "annuler tout".
+        `One-call undo point for uncommitted tracked changes, using git stash.
 
-WHEN TO USE: save BEFORE a large refactor, a batch of automated edits, or any risky command; restore to roll the workspace back.
+- save: records the current diff as a named checkpoint. NON-destructive, your working tree keeps its changes.
+- list: checkpoints and whether their stash is still alive
+- restore: re-applies a checkpoint (requires confirm=true). Kept afterwards, so it can be restored repeatedly.
+- drop: removes it.
 
-Actions:
-- save: snapshots UNCOMMITTED TRACKED changes as a named checkpoint (git stash created NON-destructively, working tree keeps its changes; clean trees record HEAD). Untracked files are listed but not captured.
-- list: shows checkpoints and whether their stash still exists.
-- restore: reapplies the checkpoint stash to the working tree (stash is kept; requires confirm=true because it overwrites current uncommitted changes on conflict).
-- drop: removes a checkpoint.
+WHEN TO USE: before a refactor you might regret, so undo is one call instead of a stash archaeology session. Outside git only metadata is saved.
 
-Checkpoints are recorded in .vscode-mcp/checkpoints.json; outside a git repo only metadata is stored (no restore).`,
+Always diff_preview_code a change before checkpointing it.`,
         {
             action: z.enum(['save', 'list', 'restore', 'drop']).describe('Checkpoint action'),
             name: z.string().optional().describe('Checkpoint name (save/restore/drop). Defaults to cp-<timestamp> on save.'),
