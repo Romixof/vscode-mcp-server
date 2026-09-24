@@ -1,6 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { TOOL_HINTS } from './tool-annotations';
 
-export const AGENT_INSTRUCTIONS_VERSION = '7';
+const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
+
+export const AGENT_INSTRUCTIONS_VERSION = '8';
 
 export const DEFAULT_AGENT_INSTRUCTIONS = [
     'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response.',
@@ -11,7 +14,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '1. memory_load_code() at the very start of the conversation to restore persistent context, then work from this map.',
     '2. Explore with list_files_code(path=".") (never recursive on the root). Read with read_file_code(path, startLine, endLine) using ranges for large files. Prefer structure first: get_document_symbols_code(path) for an outline, search_symbols_code(query) to locate a function or class, get_symbol_definition_code(path, line, symbol) for its definition and type.',
     '3. Search text with search_workspace_code(pattern, glob) - NEVER use shell commands to read or search files.',
-    '4. Edit with replace_lines_code(path, startLine, endLine, content, originalCode) for small changes (10 lines or fewer; originalCode must match the current file content exactly) or create_file_code(path, content, overwrite=true) for new files and full rewrites. Rename code symbols only with rename_symbol_code(oldName, newName), never by manual search/replace.',
+    '4. Edit existing code with edit_file_code(path, old_string, new_string): it matches the text you quote, so it cannot break when the file shifts under it. It refuses to guess when old_string appears more than once and hands you every location instead. Reach for create_file_code(path, content, overwrite=true) only for a new file or a whole-file rewrite, and replace_lines_code only for a pure insertion or deletion at a known line. Rename code symbols only with rename_symbol_code(oldName, newName), never by manual search/replace.',
     '5. After EVERY batch of changes run get_diagnostics_code(). Before ANY commit run find_secrets_code() then security_scan_code() and fix what they flag.',
     '6. Builds and tests go through run_task_code / run_tests_code / build_project_code. execute_shell_command_code is the LAST RESORT for anything else - never for reading.',
     '7. When a unit of work finishes, is handed off, or is abandoned, close it with ONE session_end_code(summary, version, branch, status, inProgress, nextStep) as your last tool call. The summary is the part no tool can infer: intent, decisions and why, and what you deliberately skipped. Write it for someone with no memory of this conversation. Update workspace_state_code(action="write") mid-task only when the working state changes materially.',
@@ -23,7 +26,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '- Copy annex files (scripts, templates) with copy_file_code or shell cp - never retype them.',
     '- Write deliverables FIRST (create_file_code), verify after: if the budget runs out mid-task, the files must already exist.',
     '',
-    'FULL TOOL CATALOG (85 tools):',
+    `FULL TOOL CATALOG (${TOOL_CATALOG_SIZE} tools):`,
     '',
     'FILES AND WORKSPACE:',
     '[RO] list_workspace_folders_code() - list open workspace folders.',
@@ -45,7 +48,8 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '[RO] migration_diff_code(base, head="HEAD") - two revisions: files changed, declarations added, BREAKING removals.',
     '',
     'EDITS AND REFACTORING:',
-    '[MUT] replace_lines_code(path, startLine, endLine, content, originalCode) - surgical edit; originalCode must match exactly or the edit is rejected.',
+    '[MUT] edit_file_code(path, old_string, new_string, replace_all) - THE way to change existing code: finds the exact text, no line numbers to go stale. Fails on 0 matches; refuses and lists every location on 2+ matches unless replace_all.',
+    '[MUT] replace_lines_code(path, startLine, endLine, content, originalCode) - pure insertion or deletion at a known line; originalCode must match exactly.',
     '[MUT] create_file_code(path, content, overwrite, ignoreIfExists) - new file or complete rewrite.',
     '[MUT] rename_symbol_code(oldName, newName, dryRun, exclude) - workspace-wide rename with word-boundary matching; use dryRun=true to preview.',
     '[MUT] extract_function_code(path, startLine, endLine, functionName, params) - extract a line range into a new function.',
@@ -137,7 +141,8 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     'COMMON RECIPES:',
     '- Understand the project: session_bootstrap_code() (memory + layout + skills + guide in one call) -> get_project_context_code() only if the stack is still unknown.',
     '- Locate an implementation: search_workspace_code(pattern) -> get_symbol_definition_code(...) -> read_file_code(...) on the exact range.',
-    '- Change code safely: read the exact lines -> diff_preview_code(op="replace_lines", ...) -> replace_lines_code(...) -> get_diagnostics_code() -> test_impact_code() -> run_tests_code(...).',
+    '- Change code safely: diff_preview_code(op="edit", path, old_string, new_string) -> edit_file_code(path, old_string, new_string) -> get_diagnostics_code() -> test_impact_code() -> run_tests_code(...).',
+    '- When the user says "this" or "here", call get_active_editor_code() before guessing a path; list_open_tabs_code() when they name a file by role.',
     '- Big refactor: checkpoint_code(action="save") first; restore with confirm=true if it went wrong.',
     '- Risky commands: plan_mode_code(enabled=true) -> draft the calls (they only describe) -> present the plan -> enabled=false.',
     '- Long build/test (>10s): background_task_code(action="start", command) -> poll action="output".',

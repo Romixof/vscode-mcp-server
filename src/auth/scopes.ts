@@ -14,6 +14,7 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
     'fs:read': [
         'read_file_code', 'list_files_code', 'find_todo_code',
         'get_diagnostics_code', 'search_symbols_code', 'get_document_symbols_code',
+        'get_active_editor_code', 'list_open_tabs_code',
         'get_symbol_definition_code', 'list_workspace_folders_code',
         'get_git_diff_code', 'get_blame_code', 'get_file_history_code', 'list_conflicts_code',
         'check_env_vars_code', 'list_extensions_code', 'list_snippets_code',
@@ -34,6 +35,7 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
     ],
     'fs:write': [
         'create_file_code', 'move_file_code', 'copy_file_code', 'rename_file_code',
+        'edit_file_code',
         'replace_lines_code', 'format_document_code', 'generate_docstring_code',
         'generate_ics_code', 'rename_symbol_code',
         'memory_save_code',
