@@ -4,6 +4,18 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.1] - 2026-09-25
+### Changed
+- Tool schema payload cut by 20% (32,828 to 26,243 tokens) with no tool or parameter removed. The largest single saving came from `WORKSPACE_PARAM_DESCRIPTION`, which repeated 340 characters of multi-root explanation across 76 tools (6,460 tokens, 20% of the payload); it is now 71 characters pointing at `list_workspace_folders_code`, which carries the full text in its own description. Tool descriptions for `ocr_pdf_code`, `execute_shell_command_code`, `search_workspace_code`, `scope_keys_code`, `background_task_code`, `checkpoint_code`, `validate_skill_code` and `pdf_needs_ocr_code` were trimmed to what constrains a call, dropping repetition of parameter docs and workflow tutorials. Facts that prevent a wasted step are kept: the client 30s ceiling and per-engine OCR page caps, the read-only-tool preference on the shell, and the append-to-accumulate pattern.
+- `list_workspace_folders_code` now carries the full multi-root resolution explanation it used to only hint at.
+
+### Added
+- `schema-weight` test measures the real `tools/list` round trip and fails above 26,500 tokens, if the repeated workspace parameter description exceeds 90 characters, or if any single tool reaches Mammouth's 32 KB per-tool cap.
+- `registry-integrity` test fails when a tool is registered without a scope mapping (the class of bug fixed in 0.19.18), without annotations, or when a scope entry points at a tool that no longer exists.
+
+### Fixed
+- Test files that used mocha's BDD globals (`describe`/`it`) are converted to the `suite`/`test` interface the VS Code test runner expects, matching the pre-existing `extension.test.ts`.
+
 ## [0.20.0] - 2026-09-23
 ### Added
 - Workspace state snapshot (`<workspace>_STATE.md`): a small, always-overwritten file holding the version, branch, status, what is in progress and the single next step. Unlike memory it never accumulates, so the model always resumes knowing which version it was working on instead of re-deriving it.
