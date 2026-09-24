@@ -21,55 +21,55 @@ const calendar = (): CalendarExports =>
 const frontend = (): FrontendExports =>
         loadFresh<FrontendExports>(path.join(__dirname, '../../out/tools/frontend-tools.js'));
 
-describe('decodeXmlEntities', () => {
-        it('leaves text without entities unchanged', () => {
+suite('decodeXmlEntities', () => {
+        test('leaves text without entities unchanged', () => {
                 assert.strictEqual(calendar().decodeXmlEntities('plain text'), 'plain text');
         });
 
-        it('decodes lt and gt in a single pass', () => {
+        test('decodes lt and gt in a single pass', () => {
                 assert.strictEqual(calendar().decodeXmlEntities('&lt;b&gt;'), '<b>');
         });
 
-        it('decodes quot and apos to their quote characters', () => {
+        test('decodes quot and apos to their quote characters', () => {
                 assert.strictEqual(calendar().decodeXmlEntities('&quot;x&quot;'), '"x"');
                 assert.strictEqual(calendar().decodeXmlEntities('&apos;x&apos;'), "'x'");
         });
 
-        it('decodes a double-encoded tag so no residual entity survives', () => {
+        test('decodes a double-encoded tag so no residual entity survives', () => {
                 assert.strictEqual(calendar().decodeXmlEntities('&amp;lt;script&amp;gt;'), '<script>');
         });
 
-        it('terminates on a self-referential amp run', () => {
+        test('terminates on a self-referential amp run', () => {
                 const input = '&amp;'.repeat(200);
                 assert.ok(calendar().decodeXmlEntities(input).length <= input.length);
         });
 });
 
-describe('stripHtmlComments', () => {
-        it('removes a single well-formed comment', () => {
+suite('stripHtmlComments', () => {
+        test('removes a single well-formed comment', () => {
                 assert.strictEqual(frontend().stripHtmlComments('a<!-- x -->b'), 'ab');
         });
 
-        it('removes a nested comment so no opener survives', () => {
+        test('removes a nested comment so no opener survives', () => {
                 assert.ok(!frontend().stripHtmlComments('<!<!--- x --->>').includes('<!--'));
         });
 
-        it('removes a comment terminated with the bang form', () => {
+        test('removes a comment terminated with the bang form', () => {
                 assert.ok(!frontend().stripHtmlComments('a<!-- x --!>b').includes('<!--'));
         });
 
-        it('spans newlines inside a comment', () => {
+        test('spans newlines inside a comment', () => {
                 assert.strictEqual(frontend().stripHtmlComments('a<!-- x\ny -->b'), 'ab');
         });
 
-        it('leaves markup without comments untouched', () => {
+        test('leaves markup without comments untouched', () => {
                 const html = '<div class="x"><p>text</p></div>';
                 assert.strictEqual(frontend().stripHtmlComments(html), html);
         });
 });
 
-describe('migration diff tab normalization', () => {
-        it('replaces every tab in a line, not only the first', () => {
+suite('migration diff tab normalization', () => {
+        test('replaces every tab in a line, not only the first', () => {
                 assert.strictEqual('a\tb\tc'.replace(/\t/g, '  '), 'a  b  c');
         });
 });

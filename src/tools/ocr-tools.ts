@@ -208,11 +208,11 @@ async function runPool(tasks: Array<() => Promise<void>>, limit: number): Promis
     await Promise.all(workers);
 }
 export function registerOcrTools(server: McpServer): void {
-    server.tool('pdf_needs_ocr_code', `Checks whether a PDF already has extractable text or is (fully or partially) a scanned/image-only document that would need OCR — without running OCR itself.
+    server.tool('pdf_needs_ocr_code', `Decides whether a PDF needs OCR, without running it.
 
-WHEN TO USE: Before deciding to OCR a PDF, or before feeding a PDF into a text-extraction pipeline (e.g. summarizing a scanned course handout). Scanned pages report ~0 characters from a plain text extraction even though they clearly have content, so this catches that case up front instead of the caller silently getting an empty/garbled result. Also useful for mixed documents (e.g. a mostly-typed report with one scanned signature page) — reports which specific pages look scanned.
+WHEN TO USE: before ocr_pdf_code, so you do not pay for OCR on a PDF that already has a text layer. Returns a per-page verdict plus the page ranges that actually need OCR.
 
-Requires "pdftotext" (poppler-utils) on PATH — that's the only hard dependency. "pdfinfo" is used opportunistically for an authoritative page count when it's also available, but its absence never blocks the check (page count then falls back to counting page breaks in pdftotext's own output). Entirely local — no network calls.`, {
+If most pages report text, read them with pdftotext (or a pdf skill) instead — faster and lossless.`, {
         pdfPath: z.string().describe('Path to the PDF to inspect'),
         minCharsPerPage: z.number().optional().default(DEFAULT_MIN_CHARS_PER_PAGE).describe(`A page with fewer extracted characters than this is considered "likely scanned". Defaults to ${DEFAULT_MIN_CHARS_PER_PAGE}.`),
         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
@@ -275,7 +275,7 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
         pdfPath: z.string().describe('Path to the PDF'),
         firstPage: z.number().optional().default(1).describe('First page to render (1-indexed). Defaults to 1.'),
         lastPage: z.number().optional().describe('Last page to render (1-indexed, inclusive). Defaults to firstPage (a single page) if omitted.'),
-        dpi: z.number().optional().default(DEFAULT_RENDER_DPI).describe(`Rasterization resolution. ${DEFAULT_RENDER_DPI} is usually enough for a model to read comfortably; go higher (300+) only for very small or faint handwriting — larger images take longer and cost more to send.`),
+        dpi: z.number().optional().default(DEFAULT_RENDER_DPI).describe(`Rasterization resolution. Higher is sharper but slower.`),
         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
     }, async ({ pdfPath, firstPage = 1, lastPage, dpi = DEFAULT_RENDER_DPI, workspace }): Promise<CallToolResult> => {
         let tmpDir: string | undefined;
@@ -331,32 +331,30 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
             }
         }
     });
-    server.tool('ocr_pdf_code', `Runs OCR on a scanned/image-only PDF and returns the extracted text. Entirely local — no data ever leaves the machine, for any engine.
+    server.tool('ocr_pdf_code', `Runs OCR on a scanned/image-only PDF and returns the extracted text.
 
-WHEN TO USE: After pdf_needs_ocr_code (or otherwise knowing) confirms a PDF has no extractable text layer. Do NOT run this on a PDF that already has a text layer: it's slow and lossy compared to just reading the text directly (pdftotext, or the pdf/pdf-reading skill if this environment has one).
+WHEN TO USE: after pdf_needs_ocr_code confirms there is no text layer. Do NOT run it on a PDF that already has one, it is slower and lossier than reading the text directly.
 
-⚠️ THE CALLING CLIENT ENFORCES ITS OWN ~30-SECOND CEILING ON A SINGLE TOOL CALL, regardless of the timeoutMs given here — raising timeoutMs only controls this tool's own internal budget, it CANNOT extend the client's limit, and a call that gets killed client-side can leave the shared OCR terminal busy for the next call. For anything beyond a couple of pages, call this tool REPEATEDLY with small page ranges (firstPage/lastPage) and outputPath+append:true to accumulate results, rather than one call over the whole document. To stay under that ceiling, a single call is capped at ${MAX_PAGES_PER_CALL.tesseract} pages for engine "tesseract", ${MAX_PAGES_PER_CALL.auto} for "auto", ${MAX_PAGES_PER_CALL.vision} for "vision" — exceeding the cap is rejected immediately (no wasted attempt) with a message to split the range.
+PAGE CAPS: the calling client enforces its own ~30s ceiling per tool call and timeoutMs cannot extend it. A call that dies client-side can leave the OCR terminal busy for the next call. So one call is capped at ${MAX_PAGES_PER_CALL.tesseract} pages for "tesseract", ${MAX_PAGES_PER_CALL.auto} for "auto", ${MAX_PAGES_PER_CALL.vision} for "vision", and a wider range is rejected immediately with the split instruction. For anything longer, call repeatedly over small consecutive ranges with the same outputPath and append:true.
 
-THREE ENGINES, pick with "engine":
-- "tesseract" (default): fast, lightweight — but weak on handwriting, faint scans, or unusual fonts.
-- "vision": sends each page image to a LOCAL vision model served by Ollama (http://localhost:11434 by default) and asks for a verbatim transcription — much better on handwriting and poor-quality scans, but each page can take several seconds to over a minute depending on the model and hardware (CPU vs GPU). Requires Ollama installed (https://ollama.com) and a vision-capable model already pulled (e.g. "ollama pull llama3.2-vision"). Nothing is sent over the internet — it's a local HTTP call to your own machine. Prefer render_pdf_pages_code instead if you'd rather have the calling model read the pages itself with zero local setup and no per-call page cap.
-- "auto": runs Tesseract first (fast, lightweight); for any page where Tesseract's own confidence falls below visionConfidenceThreshold (or it recognizes almost nothing), automatically retries that specific page with the local vision engine if Ollama and the model are available. Best default when some pages are clean print and others are handwritten/faint — but a batch where MANY pages escalate to vision can still be slow, so keep batches small.
+ENGINES:
+- "tesseract" (default): fast, needs pdftoppm and the language trained data. Weak on handwriting, faint scans, unusual fonts.
+- "vision": sends page images to a local Ollama model (visionModel, default ${DEFAULT_OLLAMA_VISION_MODEL}) for verbatim transcription. Better on handwriting and poor scans, but seconds to a minute per page. Nothing leaves the machine. Prefer render_pdf_pages_code if you would rather read the pages yourself with no local setup.
+- "auto": tesseract first, then retries just the low-confidence pages with the vision engine. Good for mixed clean/handwritten batches; keep them small.
 
-Requires "pdftoppm" (poppler-utils) always. "tesseract" (with the requested language's trained data) is required for the "tesseract" and "auto" engines. For a big scanned document, a good pattern is: pdf_needs_ocr_code to find which pages need OCR, then one ocr_pdf_code call per small consecutive range of those pages (engine "tesseract" for clean scans, "vision" for handwriting), each with the same outputPath and append:true, in page order.
-
-Token efficiency: the returned text is lightly compacted (blank/duplicate-line collapse) and a retrieve_output_code handle in the trailing notice always gives access to the full uncompacted text when no outputPath was set. Vision pages run 2 at a time; pages that don't fit the internal budget are returned as [Skipped …] markers (with the exact range to re-run) instead of the whole call dying at the client's ceiling.`, {
+The returned text is compacted, and a retrieve_output_code handle in the notice gives the full text when no outputPath was set.`, {
         pdfPath: z.string().describe('Path to the scanned PDF'),
         engine: z.enum(['tesseract', 'vision', 'auto']).optional().default('tesseract').describe('OCR engine — see the tool description for the trade-offs of each.'),
-        language: z.string().optional().default('eng').describe('Tesseract language code (or "+"-joined combo, e.g. "fra+eng"). The matching trained-data file must be installed. Also passed to the vision engine as a hint. Defaults to "eng".'),
+        language: z.string().optional().default('eng').describe('Tesseract language code or "+"-joined combo, e.g. "fra+eng". The trained-data file must be installed locally.'),
         firstPage: z.number().optional().describe('First page to OCR (1-indexed). Omit to start at page 1.'),
-        lastPage: z.number().optional().describe('Last page to OCR (1-indexed, inclusive). Omit to go to the last page. See the per-engine page cap in the tool description — a wide, unset range on a long document will be rejected.'),
-        dpi: z.number().optional().default(DEFAULT_DPI).describe(`Rasterization resolution. Higher improves accuracy on small print but is slower — for the "vision"/"auto" engines, a lower value (e.g. 150) noticeably speeds up local model inference. Defaults to ${DEFAULT_DPI}.`),
+        lastPage: z.number().optional().describe('Last page (1-indexed, inclusive). Omit for the last page. The per-engine page cap still applies.'),
+        dpi: z.number().optional().default(DEFAULT_DPI).describe('Rasterization resolution. Higher is more accurate on small print but slower; 150 speeds up the vision engines.'),
         ollamaUrl: z.string().optional().default(DEFAULT_OLLAMA_URL).describe(`Base URL of the local Ollama server, used by the "vision"/"auto" engines. Defaults to "${DEFAULT_OLLAMA_URL}".`),
-        visionModel: z.string().optional().default(DEFAULT_OLLAMA_VISION_MODEL).describe(`Ollama vision model to use, must already be pulled locally ("ollama pull <model>"). Defaults to "${DEFAULT_OLLAMA_VISION_MODEL}" — other options include "qwen2.5vl", "minicpm-v", or any other vision-capable model you've pulled.`),
-        visionConfidenceThreshold: z.number().optional().default(DEFAULT_VISION_CONFIDENCE_THRESHOLD).describe(`Only used by engine "auto": a page whose average Tesseract word confidence (0-100) falls below this is retried with the local vision engine. Defaults to ${DEFAULT_VISION_CONFIDENCE_THRESHOLD}.`),
-        outputPath: z.string().optional().describe('If set, saves the extracted text to this .txt path (recommended for multi-page documents). The tool result always shows a preview either way.'),
-        append: z.boolean().optional().default(false).describe('When outputPath is set: append to the file instead of overwriting it. Use this to accumulate results across several calls (one per small page range) into one combined file, in page order.'),
-        timeoutMs: z.number().optional().default(DEFAULT_OCR_TIMEOUT_MS).describe(`Internal budget for this tool's own processing, in milliseconds. Defaults to ${DEFAULT_OCR_TIMEOUT_MS} — deliberately kept under the calling client's own ~30s per-call ceiling (see the tool description), since raising this past that ceiling has no effect and just delays a clean failure. Lower it further for a faster failure on very slow hardware.`),
+        visionModel: z.string().optional().default(DEFAULT_OLLAMA_VISION_MODEL).describe('Ollama vision model, must already be pulled locally.'),
+        visionConfidenceThreshold: z.number().optional().default(DEFAULT_VISION_CONFIDENCE_THRESHOLD).describe('Engine "auto" only: Tesseract confidence (0-100) below which a page is retried with vision.'),
+        outputPath: z.string().optional().describe('Save the extracted text to this .txt path. Recommended for multi-page runs.'),
+        append: z.boolean().optional().default(false).describe('With outputPath: append instead of overwriting, to accumulate several calls into one file.'),
+        timeoutMs: z.number().optional().default(DEFAULT_OCR_TIMEOUT_MS).describe('Internal processing budget in ms. Kept under the client ceiling on purpose; raising it past that ceiling has no effect.'),
         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
     }, async ({ pdfPath, engine = 'tesseract', language = 'eng', firstPage, lastPage, dpi = DEFAULT_DPI, ollamaUrl = DEFAULT_OLLAMA_URL, visionModel = DEFAULT_OLLAMA_VISION_MODEL, visionConfidenceThreshold = DEFAULT_VISION_CONFIDENCE_THRESHOLD, outputPath, append = false, timeoutMs = DEFAULT_OCR_TIMEOUT_MS, workspace }) => {
         let tmpDir: string | undefined;

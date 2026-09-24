@@ -121,17 +121,17 @@ export function registerSkillsTools(server: McpServer): void {
 WHEN TO USE: Getting an overview of installed skills before deciding whether to reuse, extend, or create a new one. Faster and more reliable than browsing folders by hand — especially once a skill has annex files (scripts, templates) sitting next to it that would otherwise clutter a plain file listing.
 
 When root is OMITTED the tool auto-detects: it scans "skills" then ".claude/skills" and reports every SKILL.md it finds, so you no longer need to know where skills live before calling. Read-only. Never executes any code found inside a skill.`, {
-        root: z.string().optional().describe(`Folder to scan for SKILL.md files, relative to the workspace root (or absolute). When omitted, auto-detects: scans "${SKILLS_ROOT_CANDIDATES.join('" then "')}".`),
+        root: z.string().optional().describe(`Skills root folder. Omit to auto-detect "skills" then ".claude/skills".`),
         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
     }, async ({ root, workspace }) => {
         return { content: [{ type: 'text', text: await collectSkillsList(root, workspace) }] };
     });
 
-    server.tool('validate_skill_code', `Validates a SKILL.md: checks frontmatter completeness, balanced code fences, that referenced sibling files actually exist next to it, and does a non-executing syntax check of embedded JavaScript blocks.
+    server.tool('validate_skill_code', `Validates a SKILL.md: frontmatter completeness, balanced code fences, referenced sibling files that exist, and a non-executing syntax check of embedded JavaScript and script tags.
 
-WHEN TO USE: Before deploying, committing, or packaging a skill — especially right after editing embedded code blocks or splitting a skill into annex files. Catches the class of mistake that only surfaces once an agent actually tries to use the skill: a missing required frontmatter field, an unbalanced \`\`\` fence, a referenced .py/.html annex that was never created, or broken JS inside a \`\`\`javascript block or <script> tag.
+WHEN TO USE: before packaging or sharing a skill. The check parses, it never runs, so a hostile skill cannot execute anything here.
 
-Read-only. Python blocks are NOT syntax-checked (no Python interpreter is assumed to be on PATH) — only reported if referenced-but-missing as a file.`, {
+Returns every problem with its line number.`, {
         path: z.string().describe('Path to a SKILL.md file, or to the folder that directly contains it'),
         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
     }, async ({ path: inputPath, workspace }) => {

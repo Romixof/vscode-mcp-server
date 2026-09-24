@@ -179,14 +179,14 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         Supports all HTTP methods, headers, body, auth. Returns status, headers, body, timing.
         Follows redirects by default.`,
         {
-            url: z.string().describe('API endpoint URL (e.g., http://localhost:3000/api/users). SSRF-guarded: private/link-local/metadata IPs blocked unless allowPrivateNetwork=true.'),
+            url: z.string().describe('Endpoint URL. http/https only; private and link-local targets need allowPrivateNetwork.'),
             method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']).optional().default('GET').describe('HTTP method'),
             headers: z.record(z.string()).optional().describe('Request headers'),
             body: z.string().optional().describe('Request body (JSON, form data, etc.)'),
             timeout: z.number().optional().default(10000).describe('Request timeout in ms'),
             followRedirects: z.boolean().optional().default(true).describe('Follow redirects'),
             validateStatus: z.boolean().optional().default(false).describe('Throw on non-2xx status'),
-            allowPrivateNetwork: z.boolean().optional().default(false).describe('Allow private-network targets (RFC1918, tailnet 100.64/10). Loopback (localhost/127.0.0.1) is always allowed; link-local/metadata (169.254.0.0/16) is never allowed.')
+            allowPrivateNetwork: z.boolean().optional().default(false).describe('Allow private and link-local targets. Loopback is always allowed.')
         },
         async ({ url, method = 'GET', headers = {}, body, timeout = 10000, followRedirects = true, validateStatus = false, allowPrivateNetwork = false }): Promise<CallToolResult> => {
             try {
@@ -277,7 +277,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
             checkCodeUsage: z.boolean().optional().default(true).describe('Scan code for process.env.VAR references'),
             envFiles: z.array(z.string()).optional().default(['.env', '.env.local', '.env.example']).describe('Env files to check (relative to workspace)'),
             ignorePatterns: z.array(z.string()).optional().default(['node_modules', '.git', 'dist', 'build']).describe('Glob patterns to ignore'),
-            revealValues: z.boolean().optional().default(false).describe('Show raw .env values. Default false: values redacted to length + sha fingerprint (drift still detected). Only enable when you actually need the plaintext.'),
+            revealValues: z.boolean().optional().default(false).describe('false (default) shows value length and a hash; true returns plaintext and is marked secret.'),
             workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
         async ({ checkCodeUsage = true, envFiles = ['.env', '.env.local', '.env.example'], ignorePatterns = ['node_modules', '.git', 'dist', 'build'], revealValues = false, workspace }): Promise<CallToolResult> => {

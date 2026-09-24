@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
-import { resolveInputPath, listWorkspaceFolders, findOwningFolder, prefixDisplay, displayLabelFor, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
+import { resolveInputPath, listWorkspaceFolders, findOwningFolder, prefixDisplay, displayLabelFor, WORKSPACE_PARAM_DESCRIPTION, WORKSPACE_PARAM_LONG_DESCRIPTION } from '../utils/workspace';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 export type FileListingResult = Array<{path: string, type: 'file' | 'directory'}>;
@@ -143,7 +143,9 @@ export function registerFileTools(
         'list_workspace_folders_code',
         `Lists every root folder open in the window with its 1-based index and name.
 
-WHEN TO USE: multi-root workspaces. The names and indices returned here are the values accepted by the optional "workspace" parameter of path-based tools.`,
+WHEN TO USE: multi-root workspaces. The names and indices returned here are the values accepted by the optional "workspace" parameter of path-based tools.
+
+${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
         {},
         async (): Promise<CallToolResult> => {
             const folders = listWorkspaceFolders();

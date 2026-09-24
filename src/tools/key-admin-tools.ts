@@ -14,16 +14,11 @@ export function registerKeyAdminTools(server: McpServer): void {
 
     server.tool(
         'scope_keys_code',
-        `Administers SCOPED API keys (mcpk_...) for the api-key auth mode.
+        `Creates, lists and revokes scoped API keys (mcpk_ro_ / mcpk_std_ / mcpk_full_), which map to the existing OAuth presets: read-only is fs:read only, standard adds edits and shell, full adds network and memory. Administration is never granted to a scoped key.
 
-WHEN TO USE: hand a restricted key to a remote client or funnel instead of the primary key — "read-only" keys can only read (no shell, no edits, no SQL), "standard" adds edits and shell, "full" matches the primary key minus administration. This is the fix for "one leaked funnel key = full RCE".
+WHEN TO USE: handing a remote client or a funnel a key that cannot do more than it needs. A leaked read-only key is an information leak, not remote code execution.
 
-Actions:
-- create {scope, label}: generates a key, shown ONCE in the response. Stored hashed only (SecretStorage), safe to display the prefix later.
-- list: ids, scopes, prefixes, labels, status.
-- revoke {key_id}: invalidates immediately.
-
-Scope rules: read-only = fs:read; standard = fs:read, fs:write, shell:exec; full = standard + network + memory. Administration (scope_keys_code, secret_rotate_code, get_audit_log_code) is NEVER included — only the primary key keeps it.`,
+The secret is shown once and stored hashed. Key creation and revocation are audited.`,
         {
             action: z.enum(['create', 'list', 'revoke']).describe('Key administration action'),
             scope: z.enum(['read-only', 'standard', 'full']).optional().describe('create: access level of the new key'),

@@ -76,15 +76,15 @@ function walk(root: string, rel: string, files: string[], state: ScanState, skip
 export function registerSearchTools(server: McpServer, resolveRoot: (inputPath: string, workspace?: string) => string): void {
     server.tool(
         'search_workspace_code',
-        `Searches the workspace for lines matching a regular expression and returns the matches grouped by file with 1-based line numbers. Strictly read-only: it never writes, moves or opens anything, so MCP clients can auto-approve it.
+        `Regex search across the workspace, grouped by file with 1-based line numbers. Strictly read-only, so it auto-approves.
 
-WHEN TO USE: finding where a symbol/string/config is used, locating a definition by name, auditing occurrences before an edit. This replaces grep/rg through the shell tool — no manual approval is needed for this tool.
+WHEN TO USE: finding where something is used, defined or referenced. Never reach for the shell to grep.
 
-Scope: starts at "path" (default: workspace root). Common vendor/build directories (node_modules, dist, out, build, .git, dot-directories, ...) are skipped unless skipCommon=false. Files above 1.5 MB and binary-looking files are ignored. Use "glob" to restrict by file name or relative path (e.g. "*.ts", "src/**/*.py"). Results are capped (default 50, max 200); narrow the pattern, set a glob or a more specific path when the cap is hit.`,
+Results are capped (default 50, max 200) and raise the cap only when you need the full list.`,
         {
             pattern: z.string().describe('Regular expression to match against each line (e.g. "function\\s+parse", "TODO|FIXME")'),
             path: z.string().optional().default('.').describe('Directory or file to search in, relative to the workspace root (default: ".")'),
-            glob: z.string().optional().describe('Restrict to files matching this glob: a pattern without "/" (e.g. "*.ts") matches the file NAME at any depth; a pattern with "/" (e.g. "src/**/*.py") matches the relative path — "**" matches any depth'),
+            glob: z.string().optional().describe('Glob filter: "*.py" matches by file name, "src/**/*.ts" by relative path. Omit for all.'),
             caseSensitive: z.boolean().optional().default(false).describe('Case-sensitive matching (default: insensitive)'),
             maxResults: z.number().int().optional().default(DEFAULT_MAX_RESULTS).describe(`Max matched lines returned (1-${HARD_MAX_RESULTS}, default ${DEFAULT_MAX_RESULTS})`),
             skipCommon: z.boolean().optional().default(true).describe('Skip common vendor/build/dot directories (default: true)'),

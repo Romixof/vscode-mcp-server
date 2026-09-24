@@ -50,17 +50,16 @@ function taskLine(t: BackgroundTask): string {
 export function registerBackgroundTools(server: McpServer): void {
     server.tool(
         'background_task_code',
-        `Runs a long shell command (builds, test suites, installs, dev servers) DETACHED and returns immediately with a task id; the MCP call is never blocked and nothing is truncated by the 10s terminal timeout.
+        `Runs a long command detached and returns a task id immediately, so the call is never blocked and nothing is truncated by the 10s terminal timeout.
 
-WHEN TO USE: any command that outlives a normal execute_shell_command_code timeout. For quick commands keep execute_shell_command_code.
+WHEN TO USE: builds, test suites, installs, dev servers — anything that outlives a normal execute_shell_command_code. For quick commands keep that tool.
 
-Actions:
-- start {command, cwd}: launches via the system shell, returns task id at once. Shell policy (shellguard) still applies.
-- list: all tasks with state, duration, output size.
-- output {task_id, offset, maxChars}: polls a task — running tasks return the tail so far plus byte offset; finished tasks return exit code and paged output.
-- kill {task_id}: terminates a running task.
+- start {command, cwd}: launches through the system shell, still subject to the shell policy
+- list: every task with state, duration, output size
+- output {task_id, offset, maxChars}: polls a running task (tail so far) or pages a finished one
+- kill {task_id}: terminates it
 
-Finished tasks are kept for 1 hour. Output is capped at 200 KB (tail kept).`,
+8 concurrent max. Finished tasks are kept 1 hour, output capped at 200 KB with the tail kept.`,
         {
             action: z.enum(['start', 'list', 'output', 'kill']).describe('Task action'),
             command: z.string().optional().describe('start: the command to run'),
