@@ -5,7 +5,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { MCPServer, ToolConfiguration } from '../server';
 
 const EXPECTED_TOOL_COUNT = 91;
-const PER_TOOL_TOKEN_BUDGET = 300;
+const MAX_TOKENS_PER_TOOL = 950;
+const P95_TOKENS_PER_TOOL = 480;
 const PAYLOAD_CEILING = 27200;
 const WORKSPACE_DESC_MAX_CHARS = 90;
 const MAMMOTH_PER_TOOL_CAP = 32768;
@@ -49,12 +50,21 @@ suite('tools/list payload budget', () => {
                 assert.strictEqual(tools.length, EXPECTED_TOOL_COUNT, `tool count changed; re-size the payload budget deliberately`);
         });
 
-        test('average cost per tool stays flat as tools are added', async () => {
+        test('no single tool carries a runaway description', async () => {
                 const tools = await fetchToolList();
-                const tokens = Math.round(JSON.stringify(tools).length / 4);
-                const perTool = Math.round(tokens / tools.length);
-                console.log(`  tools: ${tools.length}, payload ~${tokens} tok, ~${perTool} tok/tool`);
-                assert.ok(perTool <= PER_TOOL_TOKEN_BUDGET, `average ${perTool} tok/tool exceeds ${PER_TOOL_TOKEN_BUDGET}`);
+                const worst = tools
+                        .map(t => ({ name: t.name, tok: Math.round(JSON.stringify(t).length / 4) }))
+                        .sort((a, b) => b.tok - a.tok)[0];
+                console.log(`  largest tool: ${worst.name} ~${worst.tok} tok`);
+                assert.ok(worst.tok <= MAX_TOKENS_PER_TOOL, `${worst.name} is ${worst.tok} tok, cap ${MAX_TOKENS_PER_TOOL}`);
+        });
+
+        test('the expensive tail does not creep up', async () => {
+                const tools = await fetchToolList();
+                const costs = tools.map(t => Math.round(JSON.stringify(t).length / 4)).sort((a, b) => b - a);
+                const p95 = costs[Math.floor(costs.length * 0.05)];
+                console.log(`  p95 ~${p95} tok/tool`);
+                assert.ok(p95 <= P95_TOKENS_PER_TOOL, `p95 is ${p95} tok, budget ${P95_TOKENS_PER_TOOL}`);
         });
 
         test('the total payload stays under the ceiling', async () => {

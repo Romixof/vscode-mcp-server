@@ -197,6 +197,8 @@ function buildFullCommandFor(kind: ShellKind, command: string, cwd?: string): st
     return lines.join('\n');
 }
 
+export const SHELL_TIMEOUT_MS = 25000;
+
 export async function waitForShellIntegration(terminal: vscode.Terminal, timeout = 5000): Promise<boolean> {
     if (terminal.shellIntegration) {
         return true;
@@ -346,7 +348,7 @@ export async function executeShellCommand(
     terminal: vscode.Terminal,
     command: string,
     cwd?: string,
-    timeout: number = 10000
+    timeout: number = SHELL_TIMEOUT_MS
 ): Promise<{ output: string; exitCode: number }> {
     if (!terminal.shellIntegration) {
         const available = await waitForShellIntegration(terminal);
@@ -391,7 +393,7 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
 
 WHEN TO USE: builds, tests, installs, git operations, anything that actually mutates. For reads (file contents, listings, text search, git status/diff/log, diagnostics) prefer the dedicated read-only tools — they auto-approve without a prompt, so keeping this tool for real mutations makes approval the exception.
 
-Timeout: default 10s. A command that exceeds it returns the output captured so far with exit code 124 and a note; the process keeps running. Pass a larger timeout explicitly for slow builds or installs, or use background_task_code for anything long.
+Timeout: default 25s, chosen to finish just under the calling client's own ~30s ceiling so you get the partial output instead of a dead call. A command that exceeds it returns what was captured with exit code 124 and the process keeps running. Anything that legitimately takes minutes (builds, test suites, installs) belongs in background_task_code, which detaches and never blocks.
 
 Token efficiency: output is compacted by default (progress bars stripped, repeated lines collapsed, long lines truncated, head+tail capped, with category filters for git, installs, test runners and builds). A notice carries a retrieve_output_code handle for the full original. Pass outputMode "raw" to skip compaction.
 
@@ -399,11 +401,11 @@ cwd defaults to the workspace root.`,
         {
             command: z.string().describe('The shell command to execute'),
             cwd: z.string().optional().default('.').describe('Optional working directory for the command'),
-            timeout: z.number().optional().default(10000).describe('Command timeout in milliseconds (default: 10000)'),
+            timeout: z.number().optional().default(SHELL_TIMEOUT_MS).describe(`Command timeout in milliseconds (default: ${SHELL_TIMEOUT_MS})`),
             outputMode: z.enum(['compact', 'raw']).optional().default('compact').describe('"compact" filters output and stays retrievable via retrieve_output_code; "raw" is untouched.'),
             workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ command, cwd, timeout = 10000, outputMode = 'compact', workspace }): Promise<CallToolResult> => {
+        async ({ command, cwd, timeout = SHELL_TIMEOUT_MS, outputMode = 'compact', workspace }): Promise<CallToolResult> => {
             try {
                 const pm = planModeIntercept('execute_shell_command_code', `{ command: ${JSON.stringify(command.slice(0, 160))}${cwd && cwd !== '.' ? `, cwd: ${JSON.stringify(cwd)}` : ''} }`);
                 if (pm) { return pm; }
