@@ -74,6 +74,15 @@ function resolveExtVersion(): string {
 
 const EXT_VERSION = resolveExtVersion();
 
+const SERVER_TITLE = "VSCodium MCP Server";
+const SERVER_DESCRIPTION = "Turn VS Code into an MCP server: file ops, symbols, diagnostics, tests, git, terminal, persistent memory and session state for AI coding assistants.";
+const SERVER_WEBSITE = "https://github.com/Romixof/vscode-mcp-server";
+const REPO_RAW_BASE = "https://raw.githubusercontent.com/Romixof/vscode-mcp-server/master";
+const SERVER_ICONS = [
+        { src: `${REPO_RAW_BASE}/media/icon-256.png`, mimeType: "image/png", sizes: ["256x256"], theme: "dark" as const },
+        { src: `${REPO_RAW_BASE}/media/logo.svg`, mimeType: "image/svg+xml", theme: "dark" as const }
+];
+
 export async function refreshApiKeyCache(): Promise<void> {
         setApiKeyCache(await getStoredApiKey());
 }
@@ -243,6 +252,10 @@ export class MCPServer {
         const server = new McpServer({
             name: "vscode-mcp-server",
             version: EXT_VERSION,
+            title: SERVER_TITLE,
+            description: SERVER_DESCRIPTION,
+            websiteUrl: SERVER_WEBSITE,
+            icons: SERVER_ICONS
         }, {
             capabilities: {
                 logging: {},
