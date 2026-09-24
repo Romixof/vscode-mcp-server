@@ -10,6 +10,7 @@ import { Request, Response } from 'express';
 import { initTrafficLog, trafficMiddleware, attachTrafficHooks, readTrafficTail, writeLine as trafficWriteLine, trafficNoteBody } from './traffic-log';
 import { registerFileTools, FileListingCallback } from './tools/file-tools';
 import { registerEditTools } from './tools/edit-tools';
+import { registerEditorTools } from './tools/editor-tools';
 import { registerShellTools } from './tools/shell-tools';
 import { Dashboard, estimateTokens } from './dashboard';
 import { registerDiagnosticsTools } from './tools/diagnostics-tools';
@@ -351,6 +352,7 @@ export class MCPServer {
         }
 
         registerCoffeeTools(server);
+        registerEditorTools(server);
         registerTokenEfficiencyTools(server);
         registerSearchTools(server, (inputPath: string, workspace?: string) => resolveInputPath(inputPath, workspace).fsPath);
         registerSafetyTools(server);

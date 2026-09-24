@@ -4,7 +4,9 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { MCPServer, ToolConfiguration } from '../server';
 
-const PAYLOAD_BUDGET_TOKENS = 26500;
+const EXPECTED_TOOL_COUNT = 91;
+const PER_TOOL_TOKEN_BUDGET = 300;
+const PAYLOAD_CEILING = 27200;
 const WORKSPACE_DESC_MAX_CHARS = 90;
 const MAMMOTH_PER_TOOL_CAP = 32768;
 
@@ -42,11 +44,23 @@ async function fetchToolList(): Promise<ListedTool[]> {
 }
 
 suite('tools/list payload budget', () => {
-        test('the whole tool list stays under the token budget', async () => {
+        test('the tool count is what this budget was sized for', async () => {
+                const tools = await fetchToolList();
+                assert.strictEqual(tools.length, EXPECTED_TOOL_COUNT, `tool count changed; re-size the payload budget deliberately`);
+        });
+
+        test('average cost per tool stays flat as tools are added', async () => {
                 const tools = await fetchToolList();
                 const tokens = Math.round(JSON.stringify(tools).length / 4);
-                console.log(`  tools: ${tools.length}, payload ~${tokens} tok`);
-                assert.ok(tokens <= PAYLOAD_BUDGET_TOKENS, `payload ${tokens} tok exceeds ${PAYLOAD_BUDGET_TOKENS}`);
+                const perTool = Math.round(tokens / tools.length);
+                console.log(`  tools: ${tools.length}, payload ~${tokens} tok, ~${perTool} tok/tool`);
+                assert.ok(perTool <= PER_TOOL_TOKEN_BUDGET, `average ${perTool} tok/tool exceeds ${PER_TOOL_TOKEN_BUDGET}`);
+        });
+
+        test('the total payload stays under the ceiling', async () => {
+                const tools = await fetchToolList();
+                const tokens = Math.round(JSON.stringify(tools).length / 4);
+                assert.ok(tokens <= PAYLOAD_CEILING, `payload ${tokens} tok exceeds ceiling ${PAYLOAD_CEILING}`);
         });
 
         test('the repeated workspace parameter description stays short', async () => {
