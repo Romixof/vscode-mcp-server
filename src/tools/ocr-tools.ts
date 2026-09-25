@@ -207,6 +207,23 @@ async function runPool(tasks: Array<() => Promise<void>>, limit: number): Promis
     });
     await Promise.all(workers);
 }
+function renderSummary(fileName: string, firstPage: number, lastPage: number, dpi: number, totalPages: number | undefined): string {
+    const range = firstPage === lastPage ? `${firstPage}` : `${firstPage}–${lastPage}`;
+    const readHint = 'Read each image directly, including any handwriting or faint text.';
+    const moreHint = 'Call again with a different firstPage/lastPage range to read the rest.';
+    if (totalPages === undefined) {
+        return `Page${firstPage === lastPage ? '' : 's'} ${range} rendered from "${fileName}" (${dpi} DPI) — total page count unknown (pdfinfo not found), so do not assume this is the whole document. ${moreHint} ${readHint}`;
+    }
+    if (firstPage === 1 && lastPage === totalPages) {
+        return `All ${totalPages} page(s) of "${fileName}" rendered (${dpi} DPI) — this is the whole document. ${readHint}`;
+    }
+    const remaining = totalPages - (lastPage - firstPage + 1);
+    const label = firstPage === lastPage ? 'Page' : 'Pages';
+    if (remaining <= 0) {
+        return `${label} ${range} of ${totalPages} rendered from "${fileName}" (${dpi} DPI) — this is the end of the document. ${readHint}`;
+    }
+    return `${label} ${range} of ${totalPages} rendered from "${fileName}" (${dpi} DPI) — ${remaining} page(s) of this document were not rendered. ${moreHint} ${readHint}`;
+}
 export function registerOcrTools(server: McpServer): void {
     server.tool('pdf_needs_ocr_code', `Decides whether a PDF needs OCR, without running it.
 
@@ -311,8 +328,18 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
             if (images.length === 0) {
                 return { content: [{ type: 'text' as const, text: 'pdftoppm produced no page images — check the page range is within the document.' }], isError: true };
             }
+            let totalPages: number | undefined;
+            const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo');
+            if (pdfinfoBin) {
+                const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(fileUri.fsPath)}`, cwd, Math.min(8000, CLIENT_BUDGET_MS)).catch(() => ({ output: '', exitCode: 1 }));
+                const pagesMatch = infoResult.output.match(/^Pages:\s*(\d+)/m);
+                const parsed = pagesMatch ? parseInt(pagesMatch[1], 10) : NaN;
+                if (Number.isFinite(parsed) && parsed > 0) {
+                    totalPages = parsed;
+                }
+            }
             const content: CallToolResult['content'] = [
-                { type: 'text', text: `${images.length} page(s) rendered from "${path.basename(fileUri.fsPath)}" (pages ${firstPage}–${effectiveLast}, ${dpi} DPI). Read each image directly, including any handwriting or faint text.` }
+                { type: 'text', text: renderSummary(path.basename(fileUri.fsPath), firstPage, effectiveLast, dpi, totalPages) }
             ];
             images.forEach((image, i) => {
                 const bytes = fs.readFileSync(path.join(tmpDir!, image));
