@@ -4,6 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.7] - 2026-09-25
+### Fixed
+- The queue no longer refuses a long request when the terminal is free. Admission compared the requested timeout against the client budget without ever checking whether anything was actually running, so a 60s render on an idle terminal was rejected with a message claiming the terminal was busy. The rejection now happens at enqueue time and only when real work is ahead of the call, so a free terminal always runs the command and returns partial output instead of refusing outright.
+- `render_pdf_pages_code` and the OCR rasterizer cap their shell timeout at the client budget rather than a hardcoded 60s that could never return before the client disconnected.
+
 ## [0.20.6] - 2026-09-25
 ### Fixed
 - `execute_shell_command_code` pins the working directory to the workspace root when `cwd` is omitted. It previously emitted no `cd` at all, so a command inherited whatever directory the previous call had left the shared terminal in. A `cd subdir && build` followed by `ls subdir` failed on a path that plainly existed, and the tool description promised a default the code did not implement.
