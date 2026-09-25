@@ -74,14 +74,16 @@ export function detectShellKind(terminal: vscode.Terminal): ShellKind {
         return verified;
     }
 
-    const forced = forcedShellKinds.get(terminal);
-    if (forced) {
-        return forced;
-    }
     const explicit = explicitShellKind(terminal);
     if (explicit) {
         return explicit;
     }
+
+    const forced = forcedShellKinds.get(terminal);
+    if (forced) {
+        return forced;
+    }
+
     for (const hint of shellHints()) {
         const fromHint = matchShellKind(hint);
         if (fromHint) {
@@ -413,12 +415,18 @@ export async function executeShellCommand(
         let result = await executeAndWait(terminal, fullCommand, timeout);
 
         if (looksLikeWrongWrap(result.output)) {
-            logger.info(`[execute_shell_command] Terminal rejected ${usedKind} syntax — retrying once with the other family`);
-            forcedShellKinds.set(terminal, usedKind === 'bash' ? 'powershell' : 'bash');
-            const retried = await executeAndWait(terminal, buildFullCommandFor(forcedShellKinds.get(terminal)!, command, cwd), timeout);
+            const opposite = usedKind === 'bash' ? 'powershell' : 'bash';
+            logger.info(`[execute_shell_command] Terminal rejected ${usedKind} syntax — retrying once as ${opposite}`);
+            forcedShellKinds.set(terminal, opposite);
+            const retried = await executeAndWait(terminal, buildFullCommandFor(opposite, command, cwd), timeout);
             if (!looksLikeWrongWrap(retried.output)) {
                 result = retried;
+                if (!explicitShellKind(terminal)) {
+                    verifiedShellKinds.set(terminal, opposite);
+                }
+                return result;
             }
+            forcedShellKinds.delete(terminal);
         }
 
         return result;
@@ -429,7 +437,7 @@ function looksLikeWrongWrap(output: string): boolean {
     if (output.includes(EXIT_MARKER)) {
         return false;
     }
-    return /(?:^|\n)\s*\$ok = \$true|(?:^|\n)\s*& \{|bash: (?:syntax error|command not found)|unexpected token|is not recognized|ParserError/i.test(output);
+    return /(?:^|\n)\s*\$ok = \$true|(?:^|\n)\s*& \{|bash: syntax error|unexpected token|is not recognized as the name of a cmdlet|ParserError/i.test(output);
 }
 
 export function registerShellTools(server: McpServer, terminal?: vscode.Terminal): void {
