@@ -31,7 +31,7 @@ export function detectRuntimeFacts(): RuntimeFacts {
         if (cachedRuntime) {
                 return cachedRuntime;
         }
-        const facts: RuntimeFacts = { platform: process.platform, python: 'not found' };
+        const facts: RuntimeFacts = { platform: process.platform, python: 'not on the extension host PATH' };
         const { execFileSync } = require('child_process') as typeof import('child_process');
         try {
                 const raw = execFileSync('python', ['-c', PROBE_SCRIPT], {
@@ -54,7 +54,9 @@ export function detectRuntimeFacts(): RuntimeFacts {
 
 export function runtimeSection(facts: RuntimeFacts): string {
         const lines = [
-                `Interpreter: python ${facts.python}`,
+                `Interpreter: ${facts.python === 'not on the extension host PATH'
+                        ? 'python is not on the extension host PATH. The integrated terminal usually still has it — run `command -v python` once, then use the absolute path.'
+                        : `python ${facts.python}`}`,
                 `Platform: ${facts.platform}`,
                 `CWD: ${process.cwd()}`
         ];
