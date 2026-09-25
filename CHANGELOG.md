@@ -4,6 +4,10 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.8] - 2026-09-25
+### Fixed
+- `render_pdf_pages_code` now states how many pages the document has in total. The summary read "2 page(s) rendered ... (pages 1–2)", which a model took as the length of the document: rendering pages 1–2 of a 5-page PDF came back with the confident claim "the PDF has 2 pages", and the three unread pages were never offered. The tool now reads the count from `pdfinfo` and reports "Pages 1–2 of 5 — 3 page(s) of this document were not rendered". When `pdfinfo` is unavailable it says the total is unknown rather than letting a partial render pass for the whole file, and the pages are still returned.
+
 ## [0.20.7] - 2026-09-25
 ### Fixed
 - The queue no longer refuses a long request when the terminal is free. Admission compared the requested timeout against the client budget without ever checking whether anything was actually running, so a 60s render on an idle terminal was rejected with a message claiming the terminal was busy. The rejection now happens at enqueue time and only when real work is ahead of the call, so a free terminal always runs the command and returns partial output instead of refusing outright.
