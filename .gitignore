@@ -9,3 +9,4 @@ plans
 CLAUDE.md
 *.test
 *_LOG.md
+RELEASE-NOTES-*.md
