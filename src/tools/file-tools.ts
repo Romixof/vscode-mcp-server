@@ -92,7 +92,7 @@ function imageCaption(name: string, bytes: number, mime: string, dimensions: { w
                 parts.push(`about ${estimatedImageTokens(dimensions)} tokens`);
         }
         parts.push('the bytes travel as a picture, not as text');
-        return `${parts.join(', ')}. Read it directly.`;
+        return `${parts.join(', ')}. It is attached to this reply: look at it here, do not re-read it.`;
 }
 
 function oversizedImageMessage(name: string, bytes: number): string {

@@ -213,7 +213,7 @@ type PageCountSource = 'pdfinfo' | 'missing' | 'out-of-budget';
 
 function renderSummary(fileName: string, firstPage: number, lastPage: number, dpi: number, totalPages: number | undefined, source: PageCountSource): string {
     const range = firstPage === lastPage ? `${firstPage}` : `${firstPage}–${lastPage}`;
-    const readHint = 'Read each image directly, including any handwriting or faint text.';
+    const readHint = 'The images are attached to this reply: look at them here, including any handwriting or faint text. They are already in this reply, so do not re-read them from disk.';
     const moreHint = 'Call again with a different firstPage/lastPage range to read the rest.';
     if (totalPages === undefined) {
         const why = source === 'out-of-budget'
