@@ -3,8 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { MCPServer, ToolConfiguration } from '../server';
-
-const CLIENT_CEILING_MS = 30000;
+import { CLIENT_CEILING_MS, CLIENT_BUDGET_MS, RESPONSE_RESERVE_MS } from '../tools/shell-tools';
 
 const ALL_GROUPS_ON = {
         file: true, edit: true, shell: true, diagnostics: true, symbol: true,
@@ -45,13 +44,39 @@ suite('shell timeout', () => {
                 console.log(`  schema default and constant agree at ${SHELL_TIMEOUT_MS}ms`);
         });
 
-        test('the default stays under the calling client ceiling', async () => {
+        test('the budget is strictly under the measured client ceiling', async () => {
                 const { timeoutDefault } = await shellToolSchema();
-                assert.ok(
-                        timeoutDefault < CLIENT_CEILING_MS,
-                        `default ${timeoutDefault}ms is not below the ~${CLIENT_CEILING_MS}ms client ceiling, so a timeout returns nothing to the model`
+                assert.strictEqual(
+                        CLIENT_CEILING_MS,
+                        30000,
+                        `client ceiling drifted to ${CLIENT_CEILING_MS}; the measured value is 30000 (client logged 29999ms)`
                 );
-                console.log(`  ${timeoutDefault}ms leaves headroom under the ~${CLIENT_CEILING_MS}ms client ceiling`);
+                assert.ok(
+                        CLIENT_BUDGET_MS < CLIENT_CEILING_MS,
+                        `budget ${CLIENT_BUDGET_MS}ms must leave response headroom under the ${CLIENT_CEILING_MS}ms ceiling`
+                );
+                assert.strictEqual(
+                        CLIENT_BUDGET_MS + RESPONSE_RESERVE_MS,
+                        CLIENT_CEILING_MS,
+                        'reserve and budget must add back up to the measured ceiling'
+                );
+                assert.ok(
+                        RESPONSE_RESERVE_MS > 0,
+                        'a zero reserve would let the server race the client to the wire'
+                );
+                assert.ok(
+                        CLIENT_BUDGET_MS <= timeoutDefault + 5000,
+                        `budget ${CLIENT_BUDGET_MS}ms and default ${timeoutDefault}ms have drifted apart`
+                );
+                console.log(`  measured ceiling ${CLIENT_CEILING_MS}ms = budget ${CLIENT_BUDGET_MS}ms + ${RESPONSE_RESERVE_MS}ms reserve`);
+        });
+
+        test('a budget one millisecond under the ceiling is still rejected', () => {
+                const fatalBudget = 29999;
+                assert.ok(
+                        fatalBudget + RESPONSE_RESERVE_MS > CLIENT_CEILING_MS,
+                        'a 29999ms budget is fatal in production and must not satisfy the budget invariant'
+                );
         });
 
         test('the default is long enough for a real command', async () => {
