@@ -49,11 +49,11 @@ suite('shell clamp and shell disclosure', () => {
                         'the handler must clamp the requested timeout to the client budget'
                 );
                 assert.ok(
-                        /executeShellCommand\(terminal, command, fullCwd, effectiveTimeout\)/.test(source),
+                        /executeShellCommand\(activeTerminal, command, fullCwd, effectiveTimeout\)/.test(source),
                         'the handler must pass the clamped timeout to executeShellCommand, never the raw request'
                 );
                 assert.ok(
-                        !/executeShellCommand\(terminal, command, fullCwd, timeout\)/.test(source),
+                        !/executeShellCommand\(activeTerminal, command, fullCwd, timeout\)/.test(source),
                         'the raw requested timeout still reaches executeShellCommand'
                 );
         });

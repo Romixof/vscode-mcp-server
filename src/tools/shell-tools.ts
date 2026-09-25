@@ -207,9 +207,26 @@ export const RESPONSE_RESERVE_MS = 3000;
 
 export const CLIENT_BUDGET_MS = CLIENT_CEILING_MS - RESPONSE_RESERVE_MS;
 
+export function resolveShellTerminal(
+        terminal?: vscode.Terminal,
+        provider?: () => vscode.Terminal | undefined
+): vscode.Terminal | undefined {
+        if (provider) {
+                const fresh = provider();
+                if (fresh) {
+                        return fresh;
+                }
+        }
+        return terminal;
+}
+
 export async function waitForShellIntegration(terminal: vscode.Terminal, timeout = 5000): Promise<boolean> {
     if (terminal.shellIntegration) {
         return true;
+    }
+
+    if (terminal.exitStatus !== undefined) {
+        return false;
     }
 
     return new Promise<boolean>(resolve => {
@@ -440,7 +457,7 @@ function looksLikeWrongWrap(output: string): boolean {
     return /(?:^|\n)\s*\$ok = \$true|(?:^|\n)\s*& \{|bash: syntax error|unexpected token|is not recognized as the name of a cmdlet|ParserError/i.test(output);
 }
 
-export function registerShellTools(server: McpServer, terminal?: vscode.Terminal): void {
+export function registerShellTools(server: McpServer, terminal?: vscode.Terminal, terminalProvider?: () => vscode.Terminal | undefined): void {
 
     server.tool(
         'execute_shell_command_code',
@@ -481,7 +498,8 @@ cwd defaults to the workspace root.`,
                         isError: true
                     } as unknown as CallToolResult;
                 }
-                if (!terminal) {
+                const activeTerminal = resolveShellTerminal(terminal, terminalProvider);
+                if (!activeTerminal) {
                     throw new Error('Terminal not available');
                 }
 
@@ -507,7 +525,7 @@ cwd defaults to the workspace root.`,
                         ? `Timeout clamped from ${requestedTimeout}ms to ${effectiveTimeout}ms: the calling client disconnects at ${CLIENT_CEILING_MS}ms regardless.\n\n`
                         : '';
 
-                const { output, exitCode } = await executeShellCommand(terminal, command, fullCwd, effectiveTimeout);
+                const { output, exitCode } = await executeShellCommand(activeTerminal, command, fullCwd, effectiveTimeout);
 
                 if (outputMode === 'compact') {
                     const compaction = compactCommandOutput(command, output);

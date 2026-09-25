@@ -126,7 +126,7 @@ async function startOrJoinServer(
     const host = config.get<string>('host') || '127.0.0.1';
     const terminal = getExtensionTerminal(context);
 
-    mcpServer = new MCPServer(port, host, terminal, getToolConfiguration());
+    mcpServer = new MCPServer(port, host, terminal, getToolConfiguration(), () => getExtensionTerminal(context));
     mcpServer.extensionContext = context;
     mcpServer.setFileListingCallback(async (path: string, recursive: boolean, workspace?: string) => {
         try {
