@@ -6,6 +6,14 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 ### Added
+- The agent guide now carries an ENVIRONMENT section stating what this machine actually has: on Windows the interpreter is `python` (there is no `python3`), search is `grep` (no `rg`), there is no `fc-list`, and paths are `d:/...` or `/d/...` rather than `/mnt/...`. Guide version moved to v9 so a session holding a cached v8 reloads it. The section is generated per platform, so a Linux or macOS host is never told Windows facts.
+- A dead integrated terminal is now detected immediately instead of waiting out the full 5s shell-integration timeout on every call, and the shell tools take a terminal provider so a terminated terminal is replaced rather than failing until the window reloads. A command using `set -e` was enough to kill the shared terminal and leave every later shell call stalling.
+
+### Fixed
+- `detectShellKind` no longer lets a failed wrap retry override an explicit `shellPath`. One PowerShell command arriving at a Git Bash terminal could pin the terminal to PowerShell for the rest of the session, wrapping every later command in `& { $ok = $true ... }` with no way back.
+- The wrap-mismatch detector no longer fires on a bare "not recognized", which only PowerShell emits for an unknown cmdlet.
+
+### Added
 - The shell queue is bounded. Commands on one terminal are still serialized, but a call that would still be waiting when the client budget runs out is now rejected immediately with a message naming `background_task_code`, instead of silently queueing until the client disconnects and returning nothing. Previously four commands arriving together could each hold a valid per-command timeout and still lose the race as a group.
 - An incoming `timeout` larger than the client budget is clamped, and the clamp is reported in the result text. A request for 120s used to be accepted and could never return anything, because the client disconnects first regardless.
 - The active terminal shell is published in two places the model reads without running a command: the `execute_shell_command_code` description and a new `- Shell:` line in `get_server_info_code`.
