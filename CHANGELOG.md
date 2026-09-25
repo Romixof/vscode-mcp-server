@@ -4,6 +4,12 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.11] - 2026-09-25
+### Fixed
+- `render_pdf_pages_code` and `read_file_code` now say the picture came back attached to the reply. This did not stop the duplicate: a model that receives both pages inline still announces it will open them and calls `read_file_code` on the PNGs, so the user sees every page twice. The wording is an attempt that failed, recorded here so the next one starts from what is known. The waste is two tool calls and about 2,000 tokens per render.
+- A page count that was skipped because the time budget ran out no longer reports "pdfinfo not found". 0.20.10 skips the lookup when the raster has used the available time, and reused the wording reserved for a real absence, so a machine with Poppler installed was told it was missing a tool. A missing binary now points at poppler-utils; an exhausted budget names the time.
+- The image caption names the format instead of repeating the mime type, which read "a image/png image".
+
 ## [0.20.10] - 2026-09-25
 ### Fixed
 - `render_pdf_pages_code` can no longer spend past the point where the client has already given up. The 27s figure is the whole budget a call gets before the client disconnects at 30s, but the tool was handing each of its shell calls that full figure in turn: four sequential calls could add up to 45s. A cold first `pdftoppm` took about 28s on its own, so the two metadata lookups added by 0.20.8 were enough to push the whole response past the ceiling. The tool now measures elapsed time from entry and gives each call only what is left, and skips the page count entirely when under a second remains, reporting the total as unknown instead. The rendered pages are never withheld to make room for metadata.
