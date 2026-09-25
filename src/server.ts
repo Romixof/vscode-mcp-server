@@ -177,6 +177,7 @@ export class MCPServer {
     private host: string;
     private fileListingCallback?: FileListingCallback;
     private terminal?: vscode.Terminal;
+    private terminalProvider?: () => vscode.Terminal | undefined;
     private toolConfig: ToolConfiguration;
 
     private invokeHandlers = new Map<string, (args: unknown, extra: unknown) => unknown>();
@@ -187,10 +188,11 @@ export class MCPServer {
         this.fileListingCallback = callback;
     }
 
-    constructor(port: number = 3400, host: string = '127.0.0.1', terminal?: vscode.Terminal, toolConfig?: ToolConfiguration) {
+    constructor(port: number = 3400, host: string = '127.0.0.1', terminal?: vscode.Terminal, toolConfig?: ToolConfiguration, terminalProvider?: () => vscode.Terminal | undefined) {
         this.port = port;
         this.host = host;
         this.terminal = terminal;
+        this.terminalProvider = terminalProvider;
         this.toolConfig = toolConfig || {
             file: true,
             edit: true,
@@ -316,7 +318,7 @@ export class MCPServer {
         const groups: Array<[string, boolean, () => void]> = [
             ['file', c.file, () => registerFileTools(server, fileListing, () => this.cluster.clusterFolderListing())],
             ['edit', c.edit, () => registerEditTools(server)],
-            ['shell', c.shell, () => registerShellTools(server, terminal)],
+            ['shell', c.shell, () => registerShellTools(server, terminal, this.terminalProvider)],
             ['diagnostics', c.diagnostics, () => registerDiagnosticsTools(server)],
             ['symbol', c.symbol, () => registerSymbolTools(server)],
             ['memory', c.memory, () => registerMemoryTools(server)],
