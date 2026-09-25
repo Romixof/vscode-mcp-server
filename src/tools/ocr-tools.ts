@@ -319,14 +319,14 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
             const pagePrefix = path.join(tmpDir, 'page');
             const rasterCmd = `${shellSingleQuote(pdftoppmBin)} -r ${dpi} -png -f ${firstPage} -l ${effectiveLast} ${shellSingleQuote(fileUri.fsPath)} ${shellSingleQuote(pagePrefix)}`;
             const rasterResult = await executeShellCommand(terminal, rasterCmd, cwd, Math.min(60000, CLIENT_BUDGET_MS));
-            if (rasterResult.exitCode !== 0) {
-                return { content: [{ type: 'text' as const, text: `pdftoppm failed:\n${rasterResult.output}` }], isError: true };
-            }
             const images = fs.readdirSync(tmpDir)
                 .filter(f => f.startsWith('page') && f.endsWith('.png'))
                 .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
             if (images.length === 0) {
-                return { content: [{ type: 'text' as const, text: 'pdftoppm produced no page images — check the page range is within the document.' }], isError: true };
+                const detail = rasterResult.exitCode !== 0
+                    ? `pdftoppm failed:\n${rasterResult.output}`
+                    : 'pdftoppm produced no page images — check the page range is within the document.';
+                return { content: [{ type: 'text' as const, text: detail }], isError: true };
             }
             let totalPages: number | undefined;
             const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo');
@@ -338,8 +338,12 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
                     totalPages = parsed;
                 }
             }
+            const summary = renderSummary(path.basename(fileUri.fsPath), firstPage, effectiveLast, dpi, totalPages);
+            const lateFinish = rasterResult.exitCode === 124
+                ? ' The shell call hit its deadline, but pdftoppm had already written these pages, so they are complete.'
+                : '';
             const content: CallToolResult['content'] = [
-                { type: 'text', text: renderSummary(path.basename(fileUri.fsPath), firstPage, effectiveLast, dpi, totalPages) }
+                { type: 'text', text: summary + lateFinish }
             ];
             images.forEach((image, i) => {
                 const bytes = fs.readFileSync(path.join(tmpDir!, image));
