@@ -4,6 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.9] - 2026-09-25
+### Fixed
+- `read_file_code` returns an image as a picture instead of decoding its bytes as text. A PNG used to come back as roughly 140 KB of mojibake, which cost about 35,000 tokens and showed the model nothing. It now comes back as an image block with a one-line caption giving the format, byte size, pixel dimensions and what the picture costs, which is about 1,000 tokens for a document page. An explicit `encoding: "base64"` still returns the raw string, line ranges on a bitmap are refused with an explanation instead of mojibake, and anything over 4 MB is refused with a pointer to a cheaper route.
+- `render_pdf_pages_code` no longer discards a rasterization that finished after the shell call gave up. A cold `pdftoppm` on Windows can overrun the 27s client budget, the tool saw a non-zero exit and reported a failure, and the pages it had already written were deleted with the temp directory. The tool now checks what landed on disk before declaring failure, and says so when the pages arrived after the deadline. A run that produced nothing still fails, with the shell output.
+
 ## [0.20.8] - 2026-09-25
 ### Fixed
 - `render_pdf_pages_code` now states how many pages the document has in total. The summary read "2 page(s) rendered ... (pages 1–2)", which a model took as the length of the document: rendering pages 1–2 of a 5-page PDF came back with the confident claim "the PDF has 2 pages", and the three unread pages were never offered. The tool now reads the count from `pdfinfo` and reports "Pages 1–2 of 5 — 3 page(s) of this document were not rendered". When `pdfinfo` is unavailable it says the total is unknown rather than letting a partial render pass for the whole file, and the pages are still returned.
