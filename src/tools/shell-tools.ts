@@ -226,7 +226,12 @@ export async function waitForShellIntegration(terminal: vscode.Terminal, timeout
     });
 }
 
-const terminalQueues = new WeakMap<vscode.Terminal, Promise<unknown>>();
+interface TerminalQueue {
+        tail: Promise<unknown>;
+        depth: number;
+}
+
+const terminalQueues = new WeakMap<vscode.Terminal, TerminalQueue>();
 
 const OSC_SEQUENCE_REGEX = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 const CSI_SEQUENCE_REGEX = /\x1b\[[0-9;?]*[A-Za-z]/g;
@@ -242,11 +247,47 @@ function stripControlSequences(text: string): string {
 
 const forcedShellKinds = new WeakMap<vscode.Terminal, ShellKind>();
 
-function queueOnTerminal<T>(terminal: vscode.Terminal, task: () => Promise<T>): Promise<T> {
-    const prev = terminalQueues.get(terminal) || Promise.resolve();
-    const run = prev.catch(() => undefined).then(task);
-    terminalQueues.set(terminal, run);
-    return run;
+export function terminalBusyError(waitedMs: number, requestedMs: number): Error {
+        return new Error(
+                `Shell terminal is busy — this call already waited ${waitedMs}ms in the queue and asked for ${requestedMs}ms, ` +
+                `which cannot finish inside the ${CLIENT_BUDGET_MS}ms budget before the client disconnects at ${CLIENT_CEILING_MS}ms. ` +
+                `Run it with background_task_code, or retry once the terminal is free.`
+        );
+}
+
+export function queueOnTerminal<T>(terminal: vscode.Terminal, task: () => Promise<T>, requestedTimeoutMs?: number): Promise<T> {
+        const entry = terminalQueues.get(terminal);
+        const previous = entry?.tail ?? Promise.resolve();
+        const depth = (entry?.depth ?? 0) + 1;
+        const enqueuedAt = Date.now();
+
+        const run = previous.catch(() => undefined).then(async () => {
+                if (requestedTimeoutMs !== undefined) {
+                        const waited = Date.now() - enqueuedAt;
+                        if (waited + requestedTimeoutMs > CLIENT_BUDGET_MS) {
+                                throw terminalBusyError(waited, requestedTimeoutMs);
+                        }
+                }
+                return task();
+        });
+
+        const tail = run.then(() => undefined, () => undefined);
+        terminalQueues.set(terminal, { tail, depth });
+
+        void tail.then(() => {
+                const current = terminalQueues.get(terminal);
+                if (!current || current.tail !== tail) {
+                        return;
+                }
+                const nextDepth = current.depth - 1;
+                if (nextDepth <= 0) {
+                        terminalQueues.delete(terminal);
+                } else {
+                        terminalQueues.set(terminal, { tail: current.tail, depth: nextDepth });
+                }
+        });
+
+        return run;
 }
 
 async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, timeout: number): Promise<{ output: string; exitCode: number }> {
@@ -381,7 +422,7 @@ export async function executeShellCommand(
         }
 
         return result;
-    });
+    }, timeout);
 }
 
 function looksLikeWrongWrap(output: string): boolean {
