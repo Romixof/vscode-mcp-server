@@ -149,6 +149,20 @@ suite('render_pdf_pages_code page count', () => {
                 );
         });
 
+        test('the summary says the images are already in the reply, so they are not re-read', async () => {
+                const pdf = fakePdf();
+                const { render } = loadOcrTools({ pdfinfoFound: true, documentPages: 5 });
+                const text = firstText(await render({ pdfPath: pdf, firstPage: 1, lastPage: 2, dpi: 100 }));
+                assert.ok(
+                        /attached to this reply|already in this reply|included in this reply/i.test(text),
+                        `the summary must say the pictures came back with the reply, or the model goes and opens the files again. Got: ${text}`
+                );
+                assert.ok(
+                        /do not re-read|don't re-read|no need to re-read/i.test(text),
+                        `the summary must rule out the redundant re-read. Got: ${text}`
+                );
+        });
+
         test('a slow raster drops the page count rather than overrunning the client', async () => {
                 const pdf = fakePdf();
                 const { render, executed } = loadOcrTools({ pdfinfoFound: true, documentPages: 5, raster: 'slow', budgetMs: 2000 });
