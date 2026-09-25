@@ -30,6 +30,71 @@ export function isNoiseEntry(name: string): boolean {
         return NOISE_ENTRIES.has(name) || name.endsWith('.pyc');
 }
 
+const IMAGE_FORMATS: Array<{ mime: string; match: (b: Buffer) => boolean }> = [
+        { mime: 'image/png', match: b => b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 },
+        { mime: 'image/jpeg', match: b => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+        { mime: 'image/gif', match: b => b.length >= 6 && /^GIF8[79]a$/.test(b.subarray(0, 6).toString('latin1')) },
+        { mime: 'image/webp', match: b => b.length >= 12 && b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP' },
+        { mime: 'image/bmp', match: b => b.length >= 2 && b[0] === 0x42 && b[1] === 0x4d }
+];
+
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']);
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const VISION_LONG_EDGE = 1568;
+
+export function detectImageMime(bytes: Buffer): string | undefined {
+        for (const format of IMAGE_FORMATS) {
+                if (format.match(bytes)) {
+                        return format.mime;
+                }
+        }
+        return undefined;
+}
+
+function imageDimensions(bytes: Buffer, mime: string): { width: number; height: number } | undefined {
+        if (mime === 'image/png' && bytes.length >= 24) {
+                return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+        }
+        if (mime === 'image/gif' && bytes.length >= 10) {
+                return { width: bytes.readUInt16LE(6), height: bytes.readUInt16LE(8) };
+        }
+        if (mime === 'image/bmp' && bytes.length >= 26) {
+                return { width: Math.abs(bytes.readInt32LE(18)), height: Math.abs(bytes.readInt32LE(22)) };
+        }
+        return undefined;
+}
+
+function estimatedImageTokens(dimensions: { width: number; height: number }): number {
+        const longEdge = Math.max(dimensions.width, dimensions.height);
+        const scale = longEdge > VISION_LONG_EDGE ? VISION_LONG_EDGE / longEdge : 1;
+        return Math.ceil((Math.round(dimensions.width * scale) * Math.round(dimensions.height * scale)) / 750);
+}
+
+function fileExtension(name: string): string {
+        const dot = name.lastIndexOf('.');
+        const separator = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        return dot > separator ? name.slice(dot).toLowerCase() : '';
+}
+
+function imageCaption(name: string, bytes: number, mime: string, dimensions: { width: number; height: number } | undefined): string {
+        const parts = [`${name} is a ${mime} image, ${formatSize(bytes)}`];
+        if (dimensions && dimensions.width > 0 && dimensions.height > 0) {
+                const downscaled = Math.max(dimensions.width, dimensions.height) > VISION_LONG_EDGE;
+                parts.push(`${dimensions.width}x${dimensions.height}px${downscaled ? `, downscaled to a ${VISION_LONG_EDGE}px long edge on arrival` : ''}`);
+                parts.push(`about ${estimatedImageTokens(dimensions)} tokens`);
+        }
+        parts.push('the bytes travel as a picture, not as text');
+        return `${parts.join(', ')}. Read it directly.`;
+}
+
+function oversizedImageMessage(name: string, bytes: number): string {
+        return `"${name}" is ${formatSize(bytes)}, over the ${formatSize(MAX_IMAGE_BYTES)} image limit, so it was not sent. Inlining it would spend a base64 blob on context. For a document page, render it at a lower dpi with render_pdf_pages_code. For anything else, downscale the file first, or pass encoding "base64" if you really want the raw string.`;
+}
+
+function rangedImageMessage(name: string): string {
+        return `"${name}" is a binary image, so startLine/endLine do not apply to it. Call it without a line range to get the picture.`;
+}
+
 function formatSize(bytes: number): string {
         if (bytes < 1024) {
                 return `${bytes} B`;
@@ -295,6 +360,8 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
         Encoding: Text encodings (utf-8, latin1, etc.) for text files, 'base64' for base64-encoded string.
         Line numbers: Use startLine/endLine (1-based) for large files to read specific sections only.
 
+        Images: a .png/.jpg/.gif/.webp/.bmp comes back as a picture you can look at, with its real pixel size and what it costs, so read it directly instead of asking for base64. Pass encoding "base64" only if you want the raw string.
+
         Files larger than maxCharacters are returned truncated, with a note at the end giving the full size — page through with startLine/endLine instead of retrying with a bigger limit.`,
         {
             path: z.string().describe('The path to the file to read'),
@@ -323,6 +390,25 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
                     const notice = unchangedReadNotice(cacheKey, fingerprint, readCache, startLine, endLine);
                     if (notice) {
                         return { content: [{ type: 'text', text: notice }] };
+                    }
+                }
+
+                if (encoding === 'utf-8' && IMAGE_EXTENSIONS.has(fileExtension(path))) {
+                    const bytes = Buffer.from(await vscode.workspace.fs.readFile(resolveInputPath(path, workspace)));
+                    const mime = detectImageMime(bytes);
+                    if (mime) {
+                        if (startLine > 0 || endLine > 0) {
+                            return { content: [{ type: 'text' as const, text: rangedImageMessage(path) }], isError: true };
+                        }
+                        if (bytes.length > MAX_IMAGE_BYTES) {
+                            return { content: [{ type: 'text' as const, text: oversizedImageMessage(path, bytes.length) }], isError: true };
+                        }
+                        return {
+                            content: [
+                                { type: 'text' as const, text: imageCaption(path, bytes.length, mime, imageDimensions(bytes, mime)) },
+                                { type: 'image' as const, data: bytes.toString('base64'), mimeType: mime }
+                            ]
+                        };
                     }
                 }
 
