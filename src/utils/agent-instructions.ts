@@ -3,7 +3,26 @@ import { TOOL_HINTS } from './tool-annotations';
 
 const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
 
-export const AGENT_INSTRUCTIONS_VERSION = '8';
+export const AGENT_INSTRUCTIONS_VERSION = '9';
+
+export function environmentSection(platform: NodeJS.Platform = process.platform): string {
+        if (platform === 'win32') {
+                return [
+                        '',
+                        'ENVIRONMENT (this machine, checked when the guide loads):',
+                        '- Interpreter is `python` (or `py`). `python3` does not exist here, so `python3 -c ...` fails.',
+                        '- Search with `grep`. `rg` is not installed.',
+                        '- No `fc-list`: that is a Linux font tool. Fonts are registered in the generator script, not hunted in the shell.',
+                        '- Paths are `d:/Mammouth/...` or `/d/Mammouth/...`. `/mnt/...` and `C:\\...` do not resolve here.',
+                        '- Terminal is Git Bash. Bash syntax works; PowerShell does not.'
+                ].join('\n');
+        }
+        return [
+                '',
+                'ENVIRONMENT (this machine, checked when the guide loads):',
+                `- Interpreter is \`python3\`. Platform is ${platform}.`
+        ].join('\n');
+}
 
 export const DEFAULT_AGENT_INSTRUCTIONS = [
     'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response.',
@@ -152,14 +171,15 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     'APPROVALS: [RO] tools are auto-approved - call them freely. [MUT] and [DST] may require manual approval - for multi-step modifications present a short plan first, then execute it.'
 ].join('\n');
 
-export function resolveAgentInstructions(override?: string): string {
-    if (typeof override === 'string') {
-        const trimmed = override.trim();
-        if (trimmed.length > 0) {
-            return trimmed;
+export function resolveAgentInstructions(override?: string, platform: NodeJS.Platform = process.platform): string {
+        const environment = environmentSection(platform);
+        if (typeof override === 'string') {
+                const trimmed = override.trim();
+                if (trimmed.length > 0) {
+                        return `${trimmed}\n${environment}`;
+                }
         }
-    }
-    return DEFAULT_AGENT_INSTRUCTIONS;
+        return `${DEFAULT_AGENT_INSTRUCTIONS}\n${environment}`;
 }
 
 export function registerAgentInstructionsTool(server: McpServer, getOverride?: () => string | undefined): void {
