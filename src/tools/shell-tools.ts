@@ -440,7 +440,9 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
 
 WHEN TO USE: builds, tests, installs, git operations, anything that actually mutates. For reads (file contents, listings, text search, git status/diff/log, diagnostics) prefer the dedicated read-only tools — they auto-approve without a prompt, so keeping this tool for real mutations makes approval the exception.
 
-Timeout: default 25s, chosen to finish just under the calling client's own ~30s ceiling so you get the partial output instead of a dead call. A command that exceeds it returns what was captured with exit code 124 and the process keeps running. Anything that legitimately takes minutes (builds, test suites, installs) belongs in background_task_code, which detaches and never blocks.
+Timeout: default ${SHELL_TIMEOUT_MS}ms. The calling client disconnects at ${CLIENT_CEILING_MS}ms whatever you pass, so a larger timeout returns nothing at all. A request over the ${CLIENT_BUDGET_MS}ms budget is clamped and the clamp is reported back. A command that runs past the budget returns what was captured with exit code 124. Anything that legitimately takes minutes (builds, test suites, installs) belongs in background_task_code, which detaches and never blocks. The terminal runs one command at a time: a call that would still be queued when the budget runs out is rejected, not waited on.
+
+Shell: ${terminal ? detectShellKind(terminal) : 'unknown'}. Write syntax for that shell. Sending the other family's syntax fails before your command runs.
 
 Token efficiency: output is compacted by default (progress bars stripped, repeated lines collapsed, long lines truncated, head+tail capped, with category filters for git, installs, test runners and builds). A notice carries a retrieve_output_code handle for the full original. Pass outputMode "raw" to skip compaction.
 
@@ -491,7 +493,13 @@ cwd defaults to the workspace root.`,
                     }
                 }
 
-                const { output, exitCode } = await executeShellCommand(terminal, command, fullCwd, timeout);
+                const requestedTimeout = timeout;
+                const effectiveTimeout = Math.min(requestedTimeout, CLIENT_BUDGET_MS);
+                const clampNotice = requestedTimeout > effectiveTimeout
+                        ? `Timeout clamped from ${requestedTimeout}ms to ${effectiveTimeout}ms: the calling client disconnects at ${CLIENT_CEILING_MS}ms regardless.\n\n`
+                        : '';
+
+                const { output, exitCode } = await executeShellCommand(terminal, command, fullCwd, effectiveTimeout);
 
                 if (outputMode === 'compact') {
                     const compaction = compactCommandOutput(command, output);
@@ -501,7 +509,7 @@ cwd defaults to the workspace root.`,
                             content: [
                                 {
                                     type: 'text',
-                                    text: `Command: ${command}\nExit code: ${exitCode}\n\nOutput (compacted):\n${compaction.text}\n\n${formatCompactionNotice(compaction, handle)}`
+                                    text: `${clampNotice}Command: ${command}\nExit code: ${exitCode}\n\nOutput (compacted):\n${compaction.text}\n\n${formatCompactionNotice(compaction, handle)}`
                                 }
                             ]
                         };
@@ -513,7 +521,7 @@ cwd defaults to the workspace root.`,
                     content: [
                         {
                             type: 'text',
-                            text: `Command: ${command}\nExit code: ${exitCode}\n\nOutput:\n${output}`
+                            text: `${clampNotice}Command: ${command}\nExit code: ${exitCode}\n\nOutput:\n${output}`
                         }
                     ]
                 };
