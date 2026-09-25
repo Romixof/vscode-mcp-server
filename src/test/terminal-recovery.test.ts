@@ -23,6 +23,34 @@ function deadTerminal(): FakeTerminal {
         } as unknown as FakeTerminal;
 }
 
+suite('queue admission only applies under load', () => {
+        test('a long request on a FREE terminal is admitted, not refused', async () => {
+                const terminal = liveTerminal();
+                const { queueOnTerminal } = require('../tools/shell-tools');
+                const result = await queueOnTerminal(terminal, async () => 'ran', 60000);
+                assert.strictEqual(
+                        result,
+                        'ran',
+                        'a free terminal must run the command; refusing here is what blocked render_pdf_pages_code'
+                );
+        });
+
+        test('a long request behind real work is still refused', async () => {
+                const terminal = liveTerminal();
+                const { queueOnTerminal } = require('../tools/shell-tools');
+                let release: () => void = () => {};
+                const gate = new Promise<void>(r => { release = r; });
+                const blocker = queueOnTerminal(terminal, () => gate);
+                await assert.rejects(
+                        () => queueOnTerminal(terminal, async () => 'never', 60000),
+                        /background_task_code/,
+                        'a call queued behind live work must still be turned away'
+                );
+                release();
+                await blocker;
+        });
+});
+
 suite('terminal recovery', () => {
         test('a dead terminal is detected without waiting', async () => {
                 const started = Date.now();

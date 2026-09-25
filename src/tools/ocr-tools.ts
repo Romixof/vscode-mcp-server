@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveInputPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
-import { executeShellCommand } from './shell-tools';
+import { executeShellCommand, CLIENT_BUDGET_MS } from './shell-tools';
 import { compactOcrText, rememberOriginal, formatCompactionNotice } from '../utils/token-efficiency';
 import { assertUrlSafe } from '../utils/security-helpers';
 
@@ -301,7 +301,7 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
             tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-render-'));
             const pagePrefix = path.join(tmpDir, 'page');
             const rasterCmd = `${shellSingleQuote(pdftoppmBin)} -r ${dpi} -png -f ${firstPage} -l ${effectiveLast} ${shellSingleQuote(fileUri.fsPath)} ${shellSingleQuote(pagePrefix)}`;
-            const rasterResult = await executeShellCommand(terminal, rasterCmd, cwd, 60000);
+            const rasterResult = await executeShellCommand(terminal, rasterCmd, cwd, Math.min(60000, CLIENT_BUDGET_MS));
             if (rasterResult.exitCode !== 0) {
                 return { content: [{ type: 'text' as const, text: `pdftoppm failed:\n${rasterResult.output}` }], isError: true };
             }
