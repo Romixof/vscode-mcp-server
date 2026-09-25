@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveWorkspaceFolder, listWorkspaceFolders, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { getUsageSnapshot, getTotalCalls, getServerStartTime } from '../utils/usage';
+import { detectRuntimeFacts, runtimeSection } from '../utils/runtime-facts';
 import { loadAllMemory } from './memory-tools';
 import { collectSkillsList } from './skills-tools';
 import { resolveAgentInstructions, AGENT_INSTRUCTIONS_VERSION } from '../utils/agent-instructions';
@@ -90,6 +91,7 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
                                 `- Node version: ${process.version}`,
                                 `- Platform: ${process.platform}`,
                                 `- Shell: ${shellInfo ? shellInfo() : 'unknown'}`,
+                                runtimeSection(detectRuntimeFacts()),
                                 `- Environment: ${remoteName ? `remote "${remoteName}" — clients on another machine need port forwarding or a connection inside this remote` : 'local'}`,
                                 ...(authInfo ? [`- Auth: ${authInfo()}`] : []),
                                 `- Open workspace folders (${folders.length}): ${folders.length ? folders.map((f, i) => `${i + 1}=${f.name}`).join(', ') : 'none'}`,

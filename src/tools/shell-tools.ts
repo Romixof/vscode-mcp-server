@@ -10,6 +10,7 @@ import { appendAudit } from '../auth/audit';
 import { currentScopes } from '../auth/toolgate';
 import { compactCommandOutput, rememberOriginal, formatCompactionNotice } from '../utils/token-efficiency';
 import { planModeIntercept } from './safety-tools';
+import { pythonCacheGuard } from '../utils/runtime-facts';
 
 export type ShellKind = 'bash' | 'powershell';
 
@@ -519,13 +520,15 @@ cwd defaults to the workspace root.`,
                     }
                 }
 
+                const guardedCommand = pythonCacheGuard(command) ?? command;
+
                 const requestedTimeout = timeout;
                 const effectiveTimeout = Math.min(requestedTimeout, CLIENT_BUDGET_MS);
                 const clampNotice = requestedTimeout > effectiveTimeout
                         ? `Timeout clamped from ${requestedTimeout}ms to ${effectiveTimeout}ms: the calling client disconnects at ${CLIENT_CEILING_MS}ms regardless.\n\n`
                         : '';
 
-                const { output, exitCode } = await executeShellCommand(activeTerminal, command, fullCwd, effectiveTimeout);
+                const { output, exitCode } = await executeShellCommand(activeTerminal, guardedCommand, fullCwd, effectiveTimeout);
 
                 if (outputMode === 'compact') {
                     const compaction = compactCommandOutput(command, output);

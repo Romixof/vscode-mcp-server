@@ -5,7 +5,58 @@ import { z } from 'zod';
 import { resolveInputPath, listWorkspaceFolders, findOwningFolder, prefixDisplay, displayLabelFor, WORKSPACE_PARAM_DESCRIPTION, WORKSPACE_PARAM_LONG_DESCRIPTION } from '../utils/workspace';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
-export type FileListingResult = Array<{path: string, type: 'file' | 'directory'}>;
+import { fileFingerprint, recentReads, unchangedReadNotice, recordRead } from '../utils/read-cache';
+
+const readCache = recentReads();
+
+export type FileListingResult = Array<{path: string, type: 'file' | 'directory', size?: number, modified?: number}>;
+
+const NOISE_ENTRIES = new Set([
+        '__pycache__',
+        'node_modules',
+        '.git',
+        '.venv',
+        'venv',
+        '.mypy_cache',
+        '.pytest_cache',
+        '.ruff_cache',
+        'dist',
+        'out',
+        '.next',
+        '.cache'
+]);
+
+export function isNoiseEntry(name: string): boolean {
+        return NOISE_ENTRIES.has(name) || name.endsWith('.pyc');
+}
+
+function formatSize(bytes: number): string {
+        if (bytes < 1024) {
+                return `${bytes} B`;
+        }
+        if (bytes < 1024 * 1024) {
+                return `${(bytes / 1024).toFixed(1)} KB`;
+        }
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(ms: number): string {
+        const d = new Date(ms);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${dd} ${hh}:${mm}`;
+}
+
+export function listingEntryLine(entry: { path: string; type: 'file' | 'directory'; size?: number; modified?: number }): string {
+        if (entry.type === 'directory') {
+                return `  ${entry.path}/`;
+        }
+        const size = typeof entry.size === 'number' ? formatSize(entry.size) : '';
+        const modified = typeof entry.modified === 'number' ? formatDate(entry.modified) : '';
+        const tail = [size, modified].filter(Boolean).join('  ');
+        return tail ? `  ${entry.path}  ${tail}` : `  ${entry.path}`;
+}
 
 export type FileListingCallback = (path: string, recursive: boolean, workspace?: string) => Promise<FileListingResult>;
 
@@ -30,11 +81,24 @@ export async function listWorkspaceFiles(workspacePath: string, recursive: boole
         const result: FileListingResult = [];
 
         for (const [name, type] of entries) {
+            if (isNoiseEntry(name)) {
+                continue;
+            }
 
             const entryPath = currentPath ? `${currentPath}/${name}` : name;
             const itemType: 'file' | 'directory' = (type & vscode.FileType.Directory) ? 'directory' : 'file';
+            const entry: FileListingResult[number] = { path: entryPath, type: itemType };
 
-            result.push({ path: entryPath, type: itemType });
+            if (itemType === 'file') {
+                try {
+                    const stat = await vscode.workspace.fs.stat(vscode.Uri.joinPath(dirUri, name));
+                    entry.size = stat.size;
+                    entry.modified = stat.mtime;
+                } catch {
+                }
+            }
+
+            result.push(entry);
 
             if (recursive && itemType === 'directory') {
                 const subDirUri = vscode.Uri.joinPath(dirUri, name);
@@ -175,7 +239,7 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
 
         CRITICAL: NEVER set recursive=true on root directory (.) - output too large. Use recursive only on specific subdirectories.
 
-        Returns files and directories at specified path. Start with path='.' to explore root, then dive into specific subdirectories with recursive=true. Supports pagination via limit/offset for large directories.`,
+        Returns one line per entry: path, then size and last-modified for files. Start with path='.' to explore root, then dive into specific subdirectories with recursive=true. Supports pagination via limit/offset for large directories. Build noise (__pycache__, node_modules, .git, dist, out, virtualenvs) is skipped — you never need to list it.`,
         {
             path: z.string().describe('The path to list files from'),
             recursive: z.boolean().optional().default(false).describe('Whether to list files recursively'),
@@ -200,9 +264,10 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
                 const capped = Math.min(Math.max(limit, 1), 500);
                 const slice = files.slice(offset, offset + capped);
                 const more = offset + slice.length < total;
-                const payload = !more && offset === 0 && total <= capped
-                    ? JSON.stringify(files, null, 2)
-                    : JSON.stringify({ files: slice, total, offset, limit: capped, hasMore: more }, null, 2);
+                const lines = slice.map(listingEntryLine).join('\n');
+                const payload = more
+                    ? `${lines}\n[${offset + slice.length}/${total} shown — call again with offset=${offset + slice.length} for more]`
+                    : lines;
 
                 const result: CallToolResult = {
                     content: [
@@ -246,8 +311,27 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
             const zeroBasedEndLine = endLine > 0 ? endLine - 1 : endLine;
 
             try {
+                const cacheKey = `${workspace ?? ''}|${path}`;
+                let fingerprint: string | undefined;
+                try {
+                    const stat = await vscode.workspace.fs.stat(resolveInputPath(path, workspace));
+                    fingerprint = fileFingerprint({ size: stat.size, mtime: stat.mtime });
+                } catch {
+                }
+
+                if (fingerprint) {
+                    const notice = unchangedReadNotice(cacheKey, fingerprint, readCache, startLine, endLine);
+                    if (notice) {
+                        return { content: [{ type: 'text', text: notice }] };
+                    }
+                }
+
                 console.log('[read_file] Reading file');
                 const content = await readWorkspaceFile(path, encoding, maxCharacters, zeroBasedStartLine, zeroBasedEndLine, workspace);
+
+                if (fingerprint && startLine <= 0 && endLine <= 0 && content.length > 800) {
+                    recordRead(readCache, cacheKey, fingerprint, content.length);
+                }
 
                 const result: CallToolResult = {
                     content: [
