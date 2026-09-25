@@ -76,8 +76,16 @@ function fileExtension(name: string): string {
         return dot > separator ? name.slice(dot).toLowerCase() : '';
 }
 
+const IMAGE_LABELS: Record<string, string> = {
+        'image/png': 'PNG',
+        'image/jpeg': 'JPEG',
+        'image/gif': 'GIF',
+        'image/webp': 'WebP',
+        'image/bmp': 'BMP'
+};
+
 function imageCaption(name: string, bytes: number, mime: string, dimensions: { width: number; height: number } | undefined): string {
-        const parts = [`${name} is a ${mime} image, ${formatSize(bytes)}`];
+        const parts = [`${name} is a ${IMAGE_LABELS[mime] ?? mime} image, ${formatSize(bytes)}`];
         if (dimensions && dimensions.width > 0 && dimensions.height > 0) {
                 const downscaled = Math.max(dimensions.width, dimensions.height) > VISION_LONG_EDGE;
                 parts.push(`${dimensions.width}x${dimensions.height}px${downscaled ? `, downscaled to a ${VISION_LONG_EDGE}px long edge on arrival` : ''}`);

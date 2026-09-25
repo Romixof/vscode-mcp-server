@@ -68,7 +68,7 @@ suite('read_file_code with images', () => {
                 const images = imagesOf(result);
                 assert.strictEqual(images.length, 1, `expected one image block, got ${textOf(result).slice(0, 200)}`);
                 assert.strictEqual(images[0].mimeType, 'image/png');
-                assert.ok(!textOf(result).includes('PNG'), 'the raw bytes leaked into the text blocks');
+                assert.ok(!textOf(result).includes('iVBORw0KGgo'), 'the raw bytes leaked into the text blocks');
         });
 
         test('the header states the dimensions and the token cost, and never repeats the payload', async () => {
@@ -79,6 +79,13 @@ suite('read_file_code with images', () => {
                 assert.ok(/token/i.test(header), `the header must state what the image costs. Got: ${header}`);
                 assert.ok(!header.includes('iVBORw0KGgo'), 'the base64 payload must never be echoed as text');
                 assert.ok(header.length < 400, `the header must stay a caption, not a payload copy. Got ${header.length} chars`);
+        });
+
+        test('the caption names a real format instead of repeating the mime type', async () => {
+                const file = fixturePath('grammar.png', pngBytes(745, 1053));
+                const header = textOf(await readFile({ path: file }));
+                assert.ok(/\bis a PNG image\b/.test(header), `expected a readable format name. Got: ${header}`);
+                assert.ok(!/\ba image\//.test(header), `the caption must not read "a image/png image". Got: ${header}`);
         });
 
         test('a JPEG is recognised too', async () => {
