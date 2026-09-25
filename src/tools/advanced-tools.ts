@@ -67,7 +67,7 @@ function formatExtensionList(title: string, extensions: ExtensionSummary[]): str
         return `${title} (${extensions.length}):\n${lines.join('\n')}`;
 }
 
-export function registerAdvancedTools(server: McpServer, endpoint: { host: string; port: number }, clusterInfo?: () => string | undefined, authInfo?: () => string): void {
+export function registerAdvancedTools(server: McpServer, endpoint: { host: string; port: number }, clusterInfo?: () => string | undefined, authInfo?: () => string, shellInfo?: () => string | undefined): void {
         server.tool(
                 'get_server_info_code',
                 `Reports this MCP server's own status: extension/VS Code/Node versions, platform, remote environment (devcontainer / WSL / SSH), open workspace folders, uptime, and how many times each tool has been called since activation.
@@ -89,6 +89,7 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
                                 `- VS Code version: ${vscode.version}`,
                                 `- Node version: ${process.version}`,
                                 `- Platform: ${process.platform}`,
+                                `- Shell: ${shellInfo ? shellInfo() : 'unknown'}`,
                                 `- Environment: ${remoteName ? `remote "${remoteName}" — clients on another machine need port forwarding or a connection inside this remote` : 'local'}`,
                                 ...(authInfo ? [`- Auth: ${authInfo()}`] : []),
                                 `- Open workspace folders (${folders.length}): ${folders.length ? folders.map((f, i) => `${i + 1}=${f.name}`).join(', ') : 'none'}`,
