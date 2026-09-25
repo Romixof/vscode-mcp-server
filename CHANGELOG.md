@@ -4,6 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.5] - 2026-09-25
+### Fixed
+- `get_server_info_code` no longer states an unverified shell as fact. A terminal restored by VS Code after a window reload comes back without `creationOptions`, so detection fell through to the Windows default profile and reported `powershell` while Git Bash was actually running. The server now labels that case as an assumption and points at the tool that confirms it.
+- The agent guide no longer claims "Terminal is Git Bash" on Windows. It cannot verify that, and the claim contradicted what `get_server_info_code` reported. It now directs the model to the tool.
+
 ## [Unreleased]
 ### Added
 - The agent guide now carries an ENVIRONMENT section stating what this machine actually has: on Windows the interpreter is `python` (there is no `python3`), search is `grep` (no `rg`), there is no `fc-list`, and paths are `d:/...` or `/d/...` rather than `/mnt/...`. Guide version moved to v9 so a session holding a cached v8 reloads it. The section is generated per platform, so a Linux or macOS host is never told Windows facts.
