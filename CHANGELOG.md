@@ -4,6 +4,30 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+### Added
+- The shell queue is bounded. Commands on one terminal are still serialized, but a call that would still be waiting when the client budget runs out is now rejected immediately with a message naming `background_task_code`, instead of silently queueing until the client disconnects and returning nothing. Previously four commands arriving together could each hold a valid per-command timeout and still lose the race as a group.
+- An incoming `timeout` larger than the client budget is clamped, and the clamp is reported in the result text. A request for 120s used to be accepted and could never return anything, because the client disconnects first regardless.
+- The active terminal shell is published in two places the model reads without running a command: the `execute_shell_command_code` description and a new `- Shell:` line in `get_server_info_code`.
+
+### Changed
+- The client ceiling is recorded as the measured 30000 ms rather than an approximation. Server logs show the disconnect landing at 29999 ms, so the budget is derived as the ceiling minus a named response reserve, and the schema default, the handler, and the tests all read the same constants.
+- Release notes and changelog entries that described the ceiling as "roughly 30s" now state the measured value.
+
+## [0.20.3] - 2026-09-25
+### Changed
+- `execute_shell_command_code` default timeout raised from 10s to 25s, finishing before the calling client's 30s cutoff so a slow command returns partial output and exit code 124 rather than nothing. The schema default and the handler default now read the same `SHELL_TIMEOUT_MS` constant, and a test asserts they agree, so the two can no longer drift apart silently.
+
+### Added
+- `shell-timeout` test gates the default against the client ceiling and checks the description documents the 124 recovery path and points at `background_task_code`.
+- `schema-weight` test measures the expensive tail rather than the mean: a max-per-tool cap of 950, a p95 cap of 480, and a total payload ceiling of 27,200 tokens. The previous mean-based check passed while one tool sat at 907 tokens and 36 exceeded 300.
+
+## [0.20.2] - 2026-09-25
+### Added
+- `edit_file_code` — exact string replacement that refuses to guess when the target appears more than once and reports the matching locations instead. Fixes two async bugs the tests caught: an unawaited `applyEdit` and an unawaited `save`, either of which could report success before the edit was on disk.
+- `get_active_editor_code` and `list_open_tabs_code` so the model can read the editor's current state without a shell round trip.
+- The agent guide's tool count is derived from `TOOL_HINTS`, with a test keeping the two in sync.
+
 ## [0.20.1] - 2026-09-25
 ### Changed
 - Tool schema payload cut by 20% (32,828 to 26,243 tokens) with no tool or parameter removed. The largest single saving came from `WORKSPACE_PARAM_DESCRIPTION`, which repeated 340 characters of multi-root explanation across 76 tools (6,460 tokens, 20% of the payload); it is now 71 characters pointing at `list_workspace_folders_code`, which carries the full text in its own description. Tool descriptions for `ocr_pdf_code`, `execute_shell_command_code`, `search_workspace_code`, `scope_keys_code`, `background_task_code`, `checkpoint_code`, `validate_skill_code` and `pdf_needs_ocr_code` were trimmed to what constrains a call, dropping repetition of parameter docs and workflow tutorials. Facts that prevent a wasted step are kept: the client 30s ceiling and per-engine OCR page caps, the read-only-tool preference on the shell, and the append-to-accumulate pattern.
@@ -133,7 +157,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   - New tool `retrieve_output_code`: headroom-style CCR — whenever a result is compacted or truncated, the FULL original is kept in memory and the result carries a handle (`[@vscode-mcp: ... retrieve_output_code "a1b2c3d4e5"]`). Call it to page back through the original (offset/maxChars). Handles live in the VS Code window's memory (most recent 40 stored outputs).
   - `ocr_pdf_code` result text is lightly compacted (blank/duplicate-line collapse, same 15% guard) and over-long previews now also carry a `retrieve_output_code` handle instead of being unrecoverably truncated.
 ### Changed
-- OCR "vision"/"auto" engines: pages are now processed 2 at a time (bounded concurrency) under a shared wall-clock deadline — roughly half the wall time for vision-heavy batches, and the call ALWAYS returns within its internal budget: pages that don't fit come back as explicit `[Skipped: ... firstPage=N lastPage=N]` markers (with a footer note and counts) instead of the whole call being killed client-side at the ~30s ceiling mid-flight.
+- OCR "vision"/"auto" engines: pages are now processed 2 at a time (bounded concurrency) under a shared wall-clock deadline — roughly half the wall time for vision-heavy batches, and the call ALWAYS returns within its internal budget: pages that don't fit come back as explicit `[Skipped: ... firstPage=N lastPage=N]` markers (with a footer note and counts) instead of the whole call being killed client-side at the 30s ceiling mid-flight.
 - Tesseract detection: added the per-user install locations (`%LOCALAPPDATA%\Programs\Tesseract-OCR`, e.g. winget user-scope installs) to the Windows fallback probe list, on top of `command -v` / `where.exe` / `C:\Program Files`.
 
 ## [0.19.7] - 2026-09-10
