@@ -209,12 +209,17 @@ async function runPool(tasks: Array<() => Promise<void>>, limit: number): Promis
     });
     await Promise.all(workers);
 }
-function renderSummary(fileName: string, firstPage: number, lastPage: number, dpi: number, totalPages: number | undefined): string {
+type PageCountSource = 'pdfinfo' | 'missing' | 'out-of-budget';
+
+function renderSummary(fileName: string, firstPage: number, lastPage: number, dpi: number, totalPages: number | undefined, source: PageCountSource): string {
     const range = firstPage === lastPage ? `${firstPage}` : `${firstPage}–${lastPage}`;
     const readHint = 'Read each image directly, including any handwriting or faint text.';
     const moreHint = 'Call again with a different firstPage/lastPage range to read the rest.';
     if (totalPages === undefined) {
-        return `Page${firstPage === lastPage ? '' : 's'} ${range} rendered from "${fileName}" (${dpi} DPI) — total page count unknown (pdfinfo not found), so do not assume this is the whole document. ${moreHint} ${readHint}`;
+        const why = source === 'out-of-budget'
+            ? 'the time budget ran out before the page count could be read, not because any tool is missing'
+            : 'pdfinfo is not installed, so install poppler-utils to get it';
+        return `Page${firstPage === lastPage ? '' : 's'} ${range} rendered from "${fileName}" (${dpi} DPI) — total page count unknown: ${why}. So do not assume this is the whole document. ${moreHint} ${readHint}`;
     }
     if (firstPage === 1 && lastPage === totalPages) {
         return `All ${totalPages} page(s) of "${fileName}" rendered (${dpi} DPI) — this is the whole document. ${readHint}`;
@@ -334,6 +339,7 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
                 return { content: [{ type: 'text' as const, text: detail }], isError: true };
             }
             let totalPages: number | undefined;
+            let pageCountSource: PageCountSource = remainingBudget() >= MIN_METADATA_BUDGET_MS ? 'missing' : 'out-of-budget';
             if (remainingBudget() >= MIN_METADATA_BUDGET_MS) {
                 const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo', bounded(5000));
                 if (pdfinfoBin) {
@@ -343,10 +349,11 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
                     const parsed = pagesMatch ? parseInt(pagesMatch[1], 10) : NaN;
                     if (Number.isFinite(parsed) && parsed > 0) {
                         totalPages = parsed;
+                        pageCountSource = 'pdfinfo';
                     }
                 }
             }
-            const summary = renderSummary(path.basename(fileUri.fsPath), firstPage, effectiveLast, dpi, totalPages);
+            const summary = renderSummary(path.basename(fileUri.fsPath), firstPage, effectiveLast, dpi, totalPages, pageCountSource);
             const lateFinish = rasterResult.exitCode === 124
                 ? ' The shell call hit its deadline, but pdftoppm had already written these pages, so they are complete.'
                 : '';

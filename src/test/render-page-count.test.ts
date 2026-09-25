@@ -135,6 +135,20 @@ suite('render_pdf_pages_code page count', () => {
                 assert.ok(/command not found/.test(firstText(result)), `the shell output should be surfaced. Got: ${firstText(result)}`);
         });
 
+        test('a skipped page count says the budget ran out, not that pdfinfo is missing', async () => {
+                const pdf = fakePdf();
+                const { render } = loadOcrTools({ pdfinfoFound: true, documentPages: 5, raster: 'slow', budgetMs: 2000 });
+                const text = firstText(await render({ pdfPath: pdf, firstPage: 1, lastPage: 2, dpi: 100 }));
+                assert.ok(
+                        !/not found/i.test(text),
+                        `pdfinfo is installed here, so claiming it is missing sends the reader down a pointless install. Got: ${text}`
+                );
+                assert.ok(
+                        /time budget|no time|ran out/i.test(text),
+                        `the reason must name the time budget. Got: ${text}`
+                );
+        });
+
         test('a slow raster drops the page count rather than overrunning the client', async () => {
                 const pdf = fakePdf();
                 const { render, executed } = loadOcrTools({ pdfinfoFound: true, documentPages: 5, raster: 'slow', budgetMs: 2000 });
@@ -152,6 +166,10 @@ suite('render_pdf_pages_code page count', () => {
                 assert.ok(
                         /total page count unknown/i.test(firstText(result)),
                         `with no budget left the tool must say the total is unknown. Got: ${firstText(result)}`
+                );
+                assert.ok(
+                        !/total page count unknown \(pdfinfo not found\)/i.test(firstText(result)),
+                        `the missing-binary wording is reserved for a real absence. Got: ${firstText(result)}`
                 );
         });
 });
