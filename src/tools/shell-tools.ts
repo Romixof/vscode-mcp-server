@@ -518,6 +518,11 @@ cwd defaults to the workspace root.`,
                 let fullCwd = cwd;
                 if (workspace !== undefined && workspace.trim() !== '') {
                     fullCwd = path.resolve(resolveWorkspaceFolder(workspace).uri.fsPath, cwd ?? '.');
+                } else if (cwd === '.' || cwd === './' || cwd === undefined) {
+                    const folders = listWorkspaceFolders();
+                    if (folders.length === 1) {
+                        fullCwd = folders[0].uri.fsPath;
+                    }
                 } else if (cwd && cwd !== '.' && cwd !== './' && listWorkspaceFolders().length > 1) {
 
                     const segments = cwd.trim().split(/[\\/]+/).filter(s => s !== '' && s !== '.');
