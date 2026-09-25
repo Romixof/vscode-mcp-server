@@ -289,32 +289,30 @@ export function terminalBusyError(waitedMs: number, requestedMs: number): Error 
 export function queueOnTerminal<T>(terminal: vscode.Terminal, task: () => Promise<T>, requestedTimeoutMs?: number): Promise<T> {
         const entry = terminalQueues.get(terminal);
         const previous = entry?.tail ?? Promise.resolve();
-        const depth = (entry?.depth ?? 0) + 1;
+        const busyAtEnqueue = entry !== undefined && entry.depth > 0;
         const enqueuedAt = Date.now();
 
-        const run = previous.catch(() => undefined).then(async () => {
-                if (requestedTimeoutMs !== undefined) {
-                        const waited = Date.now() - enqueuedAt;
-                        if (waited + requestedTimeoutMs > CLIENT_BUDGET_MS) {
-                                throw terminalBusyError(waited, requestedTimeoutMs);
-                        }
+        if (requestedTimeoutMs !== undefined && busyAtEnqueue) {
+                const waited = Date.now() - enqueuedAt;
+                if (waited + requestedTimeoutMs > CLIENT_BUDGET_MS) {
+                        return Promise.reject(terminalBusyError(waited, requestedTimeoutMs));
                 }
-                return task();
-        });
+        }
+
+        const run = previous.catch(() => undefined).then(() => task());
 
         const tail = run.then(() => undefined, () => undefined);
-        terminalQueues.set(terminal, { tail, depth });
+        terminalQueues.set(terminal, { tail, depth: busyAtEnqueue ? 2 : 1 });
 
         void tail.then(() => {
                 const current = terminalQueues.get(terminal);
                 if (!current || current.tail !== tail) {
                         return;
                 }
-                const nextDepth = current.depth - 1;
-                if (nextDepth <= 0) {
+                if (current.depth <= 1) {
                         terminalQueues.delete(terminal);
                 } else {
-                        terminalQueues.set(terminal, { tail: current.tail, depth: nextDepth });
+                        terminalQueues.set(terminal, { tail: current.tail, depth: current.depth - 1 });
                 }
         });
 
