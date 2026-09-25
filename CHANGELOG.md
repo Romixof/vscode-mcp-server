@@ -4,6 +4,10 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.10] - 2026-09-25
+### Fixed
+- `render_pdf_pages_code` can no longer spend past the point where the client has already given up. The 27s figure is the whole budget a call gets before the client disconnects at 30s, but the tool was handing each of its shell calls that full figure in turn: four sequential calls could add up to 45s. A cold first `pdftoppm` took about 28s on its own, so the two metadata lookups added by 0.20.8 were enough to push the whole response past the ceiling. The tool now measures elapsed time from entry and gives each call only what is left, and skips the page count entirely when under a second remains, reporting the total as unknown instead. The rendered pages are never withheld to make room for metadata.
+
 ## [0.20.9] - 2026-09-25
 ### Fixed
 - `read_file_code` returns an image as a picture instead of decoding its bytes as text. A PNG used to come back as roughly 140 KB of mojibake, which cost about 35,000 tokens and showed the model nothing. It now comes back as an image block with a one-line caption giving the format, byte size, pixel dimensions and what the picture costs, which is about 1,000 tokens for a document page. An explicit `encoding: "base64"` still returns the raw string, line ranges on a bitmap are refused with an explanation instead of mojibake, and anything over 4 MB is refused with a pointer to a cheaper route.
