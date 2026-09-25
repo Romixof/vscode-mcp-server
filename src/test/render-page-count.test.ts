@@ -12,14 +12,19 @@ type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
 interface ShellStubOptions {
         pdfinfoFound: boolean;
         documentPages: number;
+        raster?: 'ok' | 'timeout-after-writing' | 'hard-fail';
 }
 
 function loadOcrTools(options: ShellStubOptions): { render: ToolHandler; executed: string[] } {
         const executed: string[] = [];
+        const raster = options.raster ?? 'ok';
         const shellStub = {
                 CLIENT_BUDGET_MS: 27000,
                 async executeShellCommand(_terminal: unknown, command: string): Promise<{ output: string; exitCode: number }> {
                         executed.push(command);
+                        if (command === 'command -v pdftoppm' || command === 'where.exe pdftoppm') {
+                                return { output: '/usr/bin/pdftoppm\n', exitCode: 0 };
+                        }
                         if (command === 'command -v pdfinfo' || command === 'where.exe pdfinfo') {
                                 return options.pdfinfoFound
                                         ? { output: '/usr/bin/pdfinfo\n', exitCode: 0 }
@@ -29,10 +34,16 @@ function loadOcrTools(options: ShellStubOptions): { render: ToolHandler; execute
                                 return { output: `Title:           doc\nPages:           ${options.documentPages}\nPage size:      595 x 842 pts\n`, exitCode: 0 };
                         }
                         if (command.includes('pdftoppm')) {
+                                if (raster === 'hard-fail') {
+                                        return { output: 'bash: pdftoppm: command not found', exitCode: 127 };
+                                }
                                 const match = command.match(/'([^']+)'\s*$/);
                                 if (match) {
                                         fs.writeFileSync(`${match[1]}-1.png`, 'not-really-a-png');
                                         fs.writeFileSync(`${match[1]}-2.png`, 'not-really-a-png');
+                                }
+                                if (raster === 'timeout-after-writing') {
+                                        return { output: '\n\n[Timed out after 27000ms — showing the output captured so far.]', exitCode: 124 };
                                 }
                                 return { output: '', exitCode: 0 };
                         }
@@ -98,5 +109,25 @@ suite('render_pdf_pages_code page count', () => {
                         /do not assume this is the whole document/i.test(text),
                         `the wording must stop the model reading a partial render as the full document. Got: ${text}`
                 );
+        });
+
+        test('a slow raster that finished anyway is used instead of thrown away', async () => {
+                const pdf = fakePdf();
+                const { render } = loadOcrTools({ pdfinfoFound: true, documentPages: 5, raster: 'timeout-after-writing' });
+                const result = await render({ pdfPath: pdf, firstPage: 1, lastPage: 2, dpi: 100 });
+                assert.ok(!result.isError, `a run that wrote its images must not be reported as a failure: ${firstText(result)}`);
+                assert.strictEqual(
+                        result.content.filter(c => c.type === 'image').length,
+                        2,
+                        'both pages pdftoppm managed to write should come back'
+                );
+        });
+
+        test('a raster that produced nothing still fails, with the shell output', async () => {
+                const pdf = fakePdf();
+                const { render } = loadOcrTools({ pdfinfoFound: true, documentPages: 5, raster: 'hard-fail' });
+                const result = await render({ pdfPath: pdf, firstPage: 1, lastPage: 2, dpi: 100 });
+                assert.ok(result.isError, 'a genuine failure must not be reported as a success');
+                assert.ok(/command not found/.test(firstText(result)), `the shell output should be surfaced. Got: ${firstText(result)}`);
         });
 });
