@@ -1,4 +1,6 @@
 import * as assert from 'assert';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -38,6 +40,32 @@ suite('shell clamp and shell disclosure', () => {
                 assert.strictEqual(effective, CLIENT_BUDGET_MS, 'a 120s request must be clamped to the budget');
                 assert.ok(effective < CLIENT_CEILING_MS, 'the clamp must land under the client ceiling');
                 assert.ok(effective < requested, 'the clamp must actually reduce an oversized request');
+        });
+
+        test('the handler applies the clamp, not just the arithmetic', async () => {
+                const source = readFileSync(join(__dirname, '..', 'tools', 'shell-tools.js'), 'utf8');
+                assert.ok(
+                        /const effectiveTimeout = Math\.min\(requestedTimeout, (?:exports\.)?CLIENT_BUDGET_MS\)/.test(source),
+                        'the handler must clamp the requested timeout to the client budget'
+                );
+                assert.ok(
+                        /executeShellCommand\(terminal, command, fullCwd, effectiveTimeout\)/.test(source),
+                        'the handler must pass the clamped timeout to executeShellCommand, never the raw request'
+                );
+                assert.ok(
+                        !/executeShellCommand\(terminal, command, fullCwd, timeout\)/.test(source),
+                        'the raw requested timeout still reaches executeShellCommand'
+                );
+        });
+
+        test('the clamp notice is prepended to the model-visible result', async () => {
+                const source = readFileSync(join(__dirname, '..', 'tools', 'shell-tools.js'), 'utf8');
+                const clamped = (source.match(/\$\{clampNotice\}Command:/g) ?? []).length;
+                assert.strictEqual(clamped, 2, 'both the compact and raw result paths must carry the clamp notice');
+                assert.ok(
+                        /requestedTimeout > effectiveTimeout/.test(source),
+                        'the notice must be conditional on an actual clamp'
+                );
         });
 
         test('a timeout already inside the budget is left alone', () => {
