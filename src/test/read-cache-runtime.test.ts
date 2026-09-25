@@ -73,6 +73,24 @@ suite('read cache detects unchanged files', () => {
 });
 
 suite('runtime facts', () => {
+        test('the runtime probe stays far under the client ceiling', () => {
+                const { detectRuntimeFacts } = require('../utils/runtime-facts');
+                const started = Date.now();
+                detectRuntimeFacts();
+                const elapsed = Date.now() - started;
+                assert.ok(elapsed < 5000, `runtime probe took ${elapsed}ms; it must not eat the 30s client budget`);
+        });
+
+        test('the runtime probe spawns python once and caches', () => {
+                const { detectRuntimeFacts } = require('../utils/runtime-facts');
+                const again = Date.now();
+                const first = detectRuntimeFacts();
+                const second = detectRuntimeFacts();
+                const elapsed = Date.now() - again;
+                assert.strictEqual(first, second, 'the probe result must be cached, not recomputed per call');
+                assert.ok(elapsed < 50, `cached probe took ${elapsed}ms`);
+        });
+
         test('the runtime section names the interpreter and platform', () => {
                 const section = runtimeSection({ platform: 'win32', python: '3.11.9' });
                 assert.ok(/python/i.test(section), 'must name python');

@@ -14,31 +14,41 @@ const LIB_PROBES: Array<[string, string]> = [
         ['weasyprint', 'weasyprint']
 ];
 
+const PROBE_SCRIPT = [
+        'import json,platform',
+        `mods=${JSON.stringify(LIB_PROBES.map(p => p[1]))}`,
+        'out={}',
+        'for m in mods:',
+        '    try:',
+        '        __import__(m); out[m]=True',
+        '    except BaseException: out[m]=False',
+        'print(json.dumps({"python":platform.python_version(),"libs":out}))'
+].join('\n');
+
+let cachedRuntime: RuntimeFacts | undefined;
+
 export function detectRuntimeFacts(): RuntimeFacts {
+        if (cachedRuntime) {
+                return cachedRuntime;
+        }
         const facts: RuntimeFacts = { platform: process.platform, python: 'not found' };
         const { execFileSync } = require('child_process') as typeof import('child_process');
-        const probe = (code: string): boolean => {
-                try {
-                        execFileSync('python', ['-c', code], { stdio: 'ignore', timeout: 4000, windowsHide: true });
-                        return true;
-                } catch {
-                        return false;
-                }
-        };
         try {
-                facts.python = execFileSync('python', ['-c', 'import platform;print(platform.python_version())'], {
+                const raw = execFileSync('python', ['-c', PROBE_SCRIPT], {
                         stdio: ['ignore', 'pipe', 'ignore'],
                         timeout: 4000,
                         windowsHide: true
                 }).toString().trim();
+                const parsed = JSON.parse(raw) as { python: string; libs: Record<string, boolean> };
+                facts.python = parsed.python;
+                const libs: Record<string, boolean> = {};
+                for (const [label, module] of LIB_PROBES) {
+                        libs[label] = parsed.libs[module] === true;
+                }
+                facts.libs = libs;
         } catch {
-                return facts;
         }
-        const libs: Record<string, boolean> = {};
-        for (const [label, module] of LIB_PROBES) {
-                libs[label] = probe(`import ${module}`);
-        }
-        facts.libs = libs;
+        cachedRuntime = facts;
         return facts;
 }
 
