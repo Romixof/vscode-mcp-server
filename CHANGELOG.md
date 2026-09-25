@@ -4,6 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.6] - 2026-09-25
+### Fixed
+- `execute_shell_command_code` pins the working directory to the workspace root when `cwd` is omitted. It previously emitted no `cd` at all, so a command inherited whatever directory the previous call had left the shared terminal in. A `cd subdir && build` followed by `ls subdir` failed on a path that plainly existed, and the tool description promised a default the code did not implement.
+- The runtime probe no longer reports "python not found". It spawns `python` through the extension host, whose PATH differs from the integrated terminal's, so a machine with Python on PATH in the terminal was reported as having none. It now names the scope of the check and tells the model to run `command -v python`.
+
 ## [0.20.5] - 2026-09-25
 ### Fixed
 - `get_server_info_code` no longer states an unverified shell as fact. A terminal restored by VS Code after a window reload comes back without `creationOptions`, so detection fell through to the Windows default profile and reported `powershell` while Git Bash was actually running. The server now labels that case as an assumption and points at the tool that confirms it.
