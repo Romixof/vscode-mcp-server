@@ -24,6 +24,8 @@ const MAX_PAGES_PER_CALL = {
     vision: 3
 };
 const DEFAULT_OCR_TIMEOUT_MS = 25000;
+const MIN_METADATA_BUDGET_MS = 1000;
+const PDFINFO_TIMEOUT_MS = 2000;
 function winToBashPath(value: string): string {
     return value.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_: string, d: string) => `/${d.toLowerCase()}`);
 }
@@ -64,19 +66,19 @@ function getOcrTerminal(): vscode.Terminal {
         ? vscode.window.createTerminal({ name: OCR_TERMINAL_NAME, shellPath: bashPath })
         : vscode.window.createTerminal(OCR_TERMINAL_NAME);
 }
-async function resolveBinary(terminal: vscode.Terminal, cwd: string, bin: string): Promise<string | undefined> {
-    const check = await executeShellCommand(terminal, `command -v ${bin}`, cwd, 5000).catch(() => ({ output: '', exitCode: 1 }));
+async function resolveBinary(terminal: vscode.Terminal, cwd: string, bin: string, timeoutMs: number = 5000): Promise<string | undefined> {
+    const check = await executeShellCommand(terminal, `command -v ${bin}`, cwd, timeoutMs).catch(() => ({ output: '', exitCode: 1 }));
     if (check.exitCode === 0) {
         return bin;
     }
-    const winCheck = await executeShellCommand(terminal, `where.exe ${bin}`, cwd, 5000).catch(() => ({ output: '', exitCode: 1 }));
+    const winCheck = await executeShellCommand(terminal, `where.exe ${bin}`, cwd, timeoutMs).catch(() => ({ output: '', exitCode: 1 }));
     if (winCheck.exitCode === 0) {
         return bin;
     }
     for (const dir of WINDOWS_FALLBACK_DIRS[bin] || []) {
         const exePath = `${dir}/${bin}.exe`;
 
-        const probe = await executeShellCommand(terminal, `test -f ${shellSingleQuote(exePath)}`, cwd, 5000).catch(() => ({ output: '', exitCode: 1 }));
+        const probe = await executeShellCommand(terminal, `test -f ${shellSingleQuote(exePath)}`, cwd, timeoutMs).catch(() => ({ output: '', exitCode: 1 }));
         if (probe.exitCode === 0) {
             return exePath;
         }
@@ -311,14 +313,17 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
             }
             const terminal = getOcrTerminal();
             const cwd = path.dirname(fileUri.fsPath);
-            const pdftoppmBin = await resolveBinary(terminal, cwd, 'pdftoppm');
+            const startedAt = Date.now();
+            const remainingBudget = (): number => CLIENT_BUDGET_MS - (Date.now() - startedAt);
+            const bounded = (cap: number): number => Math.max(750, Math.min(cap, remainingBudget()));
+            const pdftoppmBin = await resolveBinary(terminal, cwd, 'pdftoppm', bounded(5000));
             if (!pdftoppmBin) {
                 return { content: [{ type: 'text' as const, text: missingBinaryMessage('pdftoppm', 'poppler-utils (e.g. "apt install poppler-utils" / "brew install poppler" / "winget install oschwartz10612.Poppler")') }], isError: true };
             }
             tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-render-'));
             const pagePrefix = path.join(tmpDir, 'page');
             const rasterCmd = `${shellSingleQuote(pdftoppmBin)} -r ${dpi} -png -f ${firstPage} -l ${effectiveLast} ${shellSingleQuote(fileUri.fsPath)} ${shellSingleQuote(pagePrefix)}`;
-            const rasterResult = await executeShellCommand(terminal, rasterCmd, cwd, Math.min(60000, CLIENT_BUDGET_MS));
+            const rasterResult = await executeShellCommand(terminal, rasterCmd, cwd, Math.min(60000, remainingBudget()));
             const images = fs.readdirSync(tmpDir)
                 .filter(f => f.startsWith('page') && f.endsWith('.png'))
                 .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -329,13 +334,16 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
                 return { content: [{ type: 'text' as const, text: detail }], isError: true };
             }
             let totalPages: number | undefined;
-            const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo');
-            if (pdfinfoBin) {
-                const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(fileUri.fsPath)}`, cwd, Math.min(8000, CLIENT_BUDGET_MS)).catch(() => ({ output: '', exitCode: 1 }));
-                const pagesMatch = infoResult.output.match(/^Pages:\s*(\d+)/m);
-                const parsed = pagesMatch ? parseInt(pagesMatch[1], 10) : NaN;
-                if (Number.isFinite(parsed) && parsed > 0) {
-                    totalPages = parsed;
+            if (remainingBudget() >= MIN_METADATA_BUDGET_MS) {
+                const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo', bounded(5000));
+                if (pdfinfoBin) {
+                    const infoTimeout = Math.max(500, Math.min(PDFINFO_TIMEOUT_MS, remainingBudget() - MIN_METADATA_BUDGET_MS / 2));
+                    const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(fileUri.fsPath)}`, cwd, infoTimeout).catch(() => ({ output: '', exitCode: 1 }));
+                    const pagesMatch = infoResult.output.match(/^Pages:\s*(\d+)/m);
+                    const parsed = pagesMatch ? parseInt(pagesMatch[1], 10) : NaN;
+                    if (Number.isFinite(parsed) && parsed > 0) {
+                        totalPages = parsed;
+                    }
                 }
             }
             const summary = renderSummary(path.basename(fileUri.fsPath), firstPage, effectiveLast, dpi, totalPages);

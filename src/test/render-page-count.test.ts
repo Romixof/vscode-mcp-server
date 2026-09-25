@@ -12,14 +12,15 @@ type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolResult>;
 interface ShellStubOptions {
         pdfinfoFound: boolean;
         documentPages: number;
-        raster?: 'ok' | 'timeout-after-writing' | 'hard-fail';
+        raster?: 'ok' | 'timeout-after-writing' | 'hard-fail' | 'slow';
+        budgetMs?: number;
 }
 
 function loadOcrTools(options: ShellStubOptions): { render: ToolHandler; executed: string[] } {
         const executed: string[] = [];
         const raster = options.raster ?? 'ok';
         const shellStub = {
-                CLIENT_BUDGET_MS: 27000,
+                CLIENT_BUDGET_MS: options.budgetMs ?? 27000,
                 async executeShellCommand(_terminal: unknown, command: string): Promise<{ output: string; exitCode: number }> {
                         executed.push(command);
                         if (command === 'command -v pdftoppm' || command === 'where.exe pdftoppm') {
@@ -44,6 +45,9 @@ function loadOcrTools(options: ShellStubOptions): { render: ToolHandler; execute
                                 }
                                 if (raster === 'timeout-after-writing') {
                                         return { output: '\n\n[Timed out after 27000ms — showing the output captured so far.]', exitCode: 124 };
+                                }
+                                if (raster === 'slow') {
+                                        await new Promise(resolve => setTimeout(resolve, (options.budgetMs ?? 27000) * 0.75));
                                 }
                                 return { output: '', exitCode: 0 };
                         }
@@ -129,5 +133,25 @@ suite('render_pdf_pages_code page count', () => {
                 const result = await render({ pdfPath: pdf, firstPage: 1, lastPage: 2, dpi: 100 });
                 assert.ok(result.isError, 'a genuine failure must not be reported as a success');
                 assert.ok(/command not found/.test(firstText(result)), `the shell output should be surfaced. Got: ${firstText(result)}`);
+        });
+
+        test('a slow raster drops the page count rather than overrunning the client', async () => {
+                const pdf = fakePdf();
+                const { render, executed } = loadOcrTools({ pdfinfoFound: true, documentPages: 5, raster: 'slow', budgetMs: 2000 });
+                const result = await render({ pdfPath: pdf, firstPage: 1, lastPage: 2, dpi: 100 });
+                assert.ok(!result.isError, `the pages must still come back: ${firstText(result)}`);
+                assert.strictEqual(
+                        result.content.filter(c => c.type === 'image').length,
+                        2,
+                        'a metadata lookup must never cost us the rendered pages'
+                );
+                assert.ok(
+                        !executed.some(c => c.includes('pdfinfo') && !c.startsWith('command -v')),
+                        `pdfinfo must not run once the budget is spent, or the response arrives after the client gave up. Ran: ${executed.join(' | ')}`
+                );
+                assert.ok(
+                        /total page count unknown/i.test(firstText(result)),
+                        `with no budget left the tool must say the total is unknown. Got: ${firstText(result)}`
+                );
         });
 });
