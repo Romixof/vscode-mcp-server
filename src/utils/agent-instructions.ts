@@ -14,7 +14,7 @@ export function environmentSection(platform: NodeJS.Platform = process.platform)
                         '- Search with `grep`. `rg` is not installed.',
                         '- No `fc-list`: that is a Linux font tool. Fonts are registered in the generator script, not hunted in the shell.',
                         '- Paths are `d:/Mammouth/...` or `/d/Mammouth/...`. `/mnt/...` and `C:\\...` do not resolve here.',
-                        '- Terminal is Git Bash. Bash syntax works; PowerShell does not.'
+                        '- Shell: read it, do not assume it. `get_server_info_code` reports the live one. A restored terminal can report the Windows default before it is probed, so trust the tool over this line.'
                 ].join('\n');
         }
         return [

@@ -94,6 +94,17 @@ export function detectShellKind(terminal: vscode.Terminal): ShellKind {
     return process.platform === 'win32' ? 'powershell' : 'bash';
 }
 
+export function isShellKindVerified(terminal: vscode.Terminal): boolean {
+        return verifiedShellKinds.has(terminal) || explicitShellKind(terminal) !== undefined;
+}
+
+export function describeShellKind(terminal: vscode.Terminal): string {
+        const kind = detectShellKind(terminal);
+        return isShellKindVerified(terminal)
+                ? kind
+                : `${kind} (assumed from the Windows default profile; not yet confirmed against the running terminal — call get_server_info_code again after any shell command, or just write bash and the server will adapt)`;
+}
+
 const verifiedShellKinds = new WeakMap<vscode.Terminal, ShellKind>();
 
 function probeCommand(): string {

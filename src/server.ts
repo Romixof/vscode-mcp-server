@@ -11,7 +11,7 @@ import { initTrafficLog, trafficMiddleware, attachTrafficHooks, readTrafficTail,
 import { registerFileTools, FileListingCallback } from './tools/file-tools';
 import { registerEditTools } from './tools/edit-tools';
 import { registerEditorTools } from './tools/editor-tools';
-import { registerShellTools, detectShellKind } from './tools/shell-tools';
+import { registerShellTools, detectShellKind, describeShellKind } from './tools/shell-tools';
 import { Dashboard, estimateTokens } from './dashboard';
 import { registerDiagnosticsTools } from './tools/diagnostics-tools';
 import { registerSymbolTools } from './tools/symbol-tools';
@@ -342,7 +342,7 @@ export class MCPServer {
                 if (mode === 'oauth') {return 'MCP OAuth 2.1 (dynamic client registration) — remote clients authenticate through the /authorize and /token endpoints';}
                 if (mode === 'api-key') {return 'api key — clients send Authorization: Bearer <key>. Key is auto-generated and stored in VS Code SecretStorage on first activation';}
                 return `session token — clients send Authorization: Bearer <token> or X-MCP-Token. Token for this installation: ${this.authToken}`;
-            }, terminal ? () => detectShellKind(terminal) : undefined)],
+            }, terminal ? () => describeShellKind(terminal) : undefined)],
             ['skills', c.skills, () => registerSkillsTools(server)],
             ['ocr', c.ocr, () => registerOcrTools(server)]
         ];
