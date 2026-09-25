@@ -23,6 +23,15 @@ suite('agent guide environment section', () => {
                 assert.ok(/fc-list/.test(section), 'must mention fc-list so the model stops trying it');
         });
 
+        test('the guide never hardcodes which shell is running', () => {
+                const section = environmentSection('win32');
+                assert.ok(
+                        !/Terminal is Git Bash/.test(section),
+                        `the guide must not assert a shell it cannot verify: ${section}`
+                );
+                assert.ok(/get_server_info_code/.test(section), 'the guide must point at the authoritative shell source');
+        });
+
         test('the Windows section states the real path shape', () => {
                 const section = environmentSection('win32');
                 assert.ok(/\/mnt\/|C:/.test(section), 'must warn that Linux and drive-letter paths are wrong here');
