@@ -14,6 +14,81 @@ export interface TextMatch {
 const MAX_REPORTED_MATCHES = 10;
 const CONTEXT_LINES = 2;
 
+export interface NearMiss {
+        line: number;
+        score: number;
+        escaped: boolean;
+        context: string;
+}
+
+const NEAR_MISS_PROBE_LINES = 3;
+const ESCAPE = /\\([\s\S])/g;
+
+function unescapeLoose(text: string): string {
+        return text.replace(ESCAPE, '$1');
+}
+
+function loose(text: string): string {
+        return unescapeLoose(text).replace(/\s+/g, ' ').trim();
+}
+
+function commonPrefixLength(a: string, b: string): number {
+        const max = Math.min(a.length, b.length);
+        let i = 0;
+        while (i < max && a[i] === b[i]) { i += 1; }
+        return i;
+}
+
+export function findNearMiss(content: string, needle: string): NearMiss | null {
+        const probes = needle.split('\n').slice(0, NEAR_MISS_PROBE_LINES)
+                .map(l => l.trim()).filter(l => l.length > 0);
+        if (probes.length === 0) {
+                return null;
+        }
+        const wanted = loose(needle);
+        const lines = content.split('\n');
+        const window = (i: number): string => lines.slice(Math.max(0, i - 1), i + 2).join('\n');
+
+        if (content.includes(needle)) {
+                return null;
+        }
+
+        for (let i = 0; i < lines.length; i += 1) {
+                const relaxed = loose(lines[i]);
+                if (relaxed !== '' && (relaxed === wanted || probes.some(p => loose(p) === relaxed))) {
+                        return { line: i + 1, score: probes.length, escaped: true, context: window(i) };
+                }
+        }
+
+        const floor = Math.max(8, Math.ceil(probes[0].length * 0.4));
+        let best: NearMiss | null = null;
+        for (let i = 0; i < lines.length; i += 1) {
+                const trimmed = lines[i].trim();
+                if (trimmed.length === 0) {
+                        continue;
+                }
+                let score = 0;
+                for (const p of probes) {
+                        score = Math.max(score, commonPrefixLength(p, trimmed));
+                }
+                if (score >= floor && (best === null || score > best.score)) {
+                        best = { line: i + 1, score, escaped: false, context: window(i) };
+                }
+        }
+        return best;
+}
+
+export function noMatchMessage(path: string, lineCount: number, content: string, needle: string): string {
+        const near = findNearMiss(content, needle);
+        if (near) {
+                const why = near.escaped
+                        ? 'Quote it exactly as printed, with no backslashes added in front of quotes.'
+                        : 'Match the text as it stands, character for character.';
+                return `No match for old_string in ${path}. The file has ${lineCount} lines.\n\nThe closest line is ${near.line}:\n\n${near.context}\n\n${why}`;
+        }
+        return `No match for old_string in ${path}. The file has ${lineCount} lines and now reads:\n\n${content.split('\n').slice(0, 20).join('\n')}\n\nRead the file again, then retry with the current text.`;
+}
+
 export function findTextMatches(content: string, needle: string): TextMatch[] {
         const out: TextMatch[] = [];
         if (needle.length === 0) {
@@ -92,11 +167,11 @@ export function registerEditTools(server: McpServer): void {
                 'edit_file_code',
                 `Replaces an exact string in a file. This is the default way to change existing code.
 
-WHEN TO USE: any edit to existing code, because it does not depend on line numbers. Line numbers go stale the moment anything else touches the file, and a stale line number silently edits the wrong lines.
+WHEN TO USE: any edit to existing code, because it does not depend on line numbers, which go stale the moment anything else touches the file and silently edit the wrong lines.
 
 WHEN NOT TO USE: new files or whole-file rewrites (create_file_code), or a pure insertion where you know the anchor line but not the surrounding text (replace_lines_code).
 
-- 0 matches: fails and says the text was not found. Re-read the file, it moved.
+- 0 matches: fails and names the closest line, so a wrong quote is visible without re-reading.
 - 1 match: applies.
 - 2+ matches: does NOT apply, and returns every location with surrounding lines. Add context to old_string to disambiguate. A multi-site edit is a decision, not a guess.
 
@@ -123,9 +198,8 @@ Pass replace_all=true only when you mean every occurrence.`,
                         const matches = findTextMatches(before, old_string);
 
                         if (matches.length === 0) {
-                                const preview = before.split('\n').slice(0, 20).join('\n');
                                 return {
-                                        content: [{ type: 'text', text: `No match for old_string in ${path}. The file has ${document.lineCount} lines and now reads:\n\n${preview}\n\nRead the file again, then retry with the current text.` }],
+                                        content: [{ type: 'text', text: noMatchMessage(path, document.lineCount, before, old_string) }],
                                         isError: true
                                 };
                         }
