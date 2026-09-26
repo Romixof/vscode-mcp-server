@@ -4,6 +4,17 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.14] - 2026-09-26
+### Fixed
+- `edit_file_code` names the closest line when the text is not found, instead of the head of the file. A miss returned the first 20 lines, so a wrong quote deep in a file was invisible: a model editing line 378 of a 618-line file was shown lines 1 to 20 and told to re-read, and had no way to see the difference. In the case that prompted this, the whole difference was one backslash inside a character class, written `[^\"]` where the file holds `[^"]`. The tool now looks for the line that matches once backslashes and spacing are ignored, reports that line with one line either side, and says the difference is an added escape. Without a near miss it keeps the old 20-line head and the old advice.
+- A near miss can no longer be reported when the text is actually present, so the function is honest for any caller. A needle that is a prefix of a line is a real match, not a near miss.
+
+### Changed
+- The `edit_file_code` description says what a zero-match failure returns. The tools/list payload came down to 27,191 of 27,200 tokens, the wording of the `WHEN TO USE` paragraph carried the same advice in fewer words.
+
+### Not fixed
+- A client returned two different sets of 11 tools in one conversation, and the two sets shared exactly one tool. A task that needed `edit_file_code` from the first set and `execute_shell_command_code` from the second could not be carried out: the file could be written or the generator could be run, never both. The model diagnosed the fault correctly and reported that no repair had been made. The selection is relevant to the request in both cases, so the ranking is not the problem; the set changing between turns is.
+
 ## [0.20.13] - 2026-09-26
 ### Fixed
 - Output compaction no longer folds a command that reports several statements. `&&`, `||` and `;` are not recognised as statement boundaries, so a chain was categorised `generic` and then reduced by duplicate-line collapsing and a head+tail cap. A single `python generate_pdf.py` chained with a second one produced 1,101 characters of output that compaction returned as 49: the two scripts print a near-identical `PDF genere` line and the WeasyPrint `GLib-GIO-WARNING` notices repeat across both processes, so the first statement's entire output was attributed to the second. The model then reported a success it had not observed. A command containing a statement separator now returns its output untouched and labels the reason, because a result covering N operations cannot be folded without making it unattributable. A lone `|` is still one stream and still folds, and a separator inside quotes costs the saving but never loses output.
