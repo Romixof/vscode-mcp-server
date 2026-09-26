@@ -4,6 +4,21 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.12] - 2026-09-26
+### Fixed
+- A repeat read no longer costs a second copy of the file. The cache refused a full re-read but stepped aside for any line range, so the escape route it advertised — "read a line range" — handed back the whole file when the range happened to cover it. A model told to page through a large file asked for `startLine: 1, endLine: 100000` and got all 197 KB of four course transcripts again, about 50,000 tokens, after the cache had already reported them as present. A range that covers the file is now recognised as that same read, a section that was already read is refused on the second attempt, and the notice states the line count so the size of a real section can be judged before asking for it. A section read no longer makes a later full read look cached. The cache is bounded at 256 entries, which it was not before.
+- A binary file is refused with a route instead of decoded as text. `read_file_code` only recognised images; a PDF fell through to the text path and came back as compressed bytes, about 70,000 characters for one course document, and the model concluded the document was unreadable while `render_pdf_pages_code` and `ocr_pdf_code` sat unused. A PDF, and any other file carrying a NUL byte in its first 8 KB, now returns a message naming the tool that reads it. A text file is unaffected and `encoding: "base64"` still returns the raw string.
+
+### Changed
+- The start-up log no longer reports success twice. The extension and the server each logged `MCP Server started successfully` at the same millisecond on every activation.
+- `read_file_code` states that a PDF is refused, that a repeat read costs nothing, and that a tool list showing 11 of 91 tools is partial with `session_bootstrap_code` holding the rest. The wording was cut to fit the tools/list payload budget, which was 5 tokens from its ceiling.
+
+### Measured
+- Every refused repeat is written to the traffic log with the running count, so the tokens not spent are countable after the fact rather than inferred: `read_file_code repeat refused path=… — N refused this session, M characters not re-sent`.
+
+### Not fixed
+- The client advertised 11 of the 91 registered tools, and a different 11 on the next request in the same conversation. `server.ts` registers all of them and the extension log shows every category enabled, so the cap and its instability are in the client. A model that saw only the first list reported having no way to write a file while `create_file_code` was registered. Until the cap is lifted, the redirect in `read_file_code` is the only lever available from this side.
+
 ## [0.20.11] - 2026-09-25
 ### Fixed
 - `render_pdf_pages_code` and `read_file_code` now say the picture came back attached to the reply. This did not stop the duplicate: a model that receives both pages inline still announces it will open them and calls `read_file_code` on the PNGs, so the user sees every page twice. The wording is an attempt that failed, recorded here so the next one starts from what is known. The waste is two tool calls and about 2,000 tokens per render.
