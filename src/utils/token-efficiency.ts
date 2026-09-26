@@ -190,7 +190,12 @@ function categorize(command: string): string {
     return 'generic';
 }
 
+const STATEMENT_SEPARATOR = /&&|\|\||;/;
+
 export function compactCommandOutput(command: string, output: string): CompactionResult {
+    if (STATEMENT_SEPARATOR.test(command)) {
+        return { text: output, originalChars: output.length, compactChars: output.length, strategy: 'skipped:chained' };
+    }
     const category = categorize(command);
     const withoutProgress = stripProgressRedraws(output);
     let normalized = withoutProgress.replace(/\r/g, '\n');
