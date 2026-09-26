@@ -14,6 +14,17 @@ suite('agent guide', () => {
                 console.log(`  guide count ${claimed} matches registry`);
         });
 
+        test('tells the model that its callable tool list may be partial', () => {
+                assert.ok(
+                        /name it in your reply/i.test(guide),
+                        'guide does not tell the model to name a tool it cannot call'
+                );
+                assert.ok(
+                        /never silently skip/i.test(guide),
+                        'guide does not forbid silently dropping the step'
+                );
+        });
+
         test('carries a version tag', () => {
                 assert.ok(/^\d+$/.test(AGENT_INSTRUCTIONS_VERSION), `version looks wrong: ${AGENT_INSTRUCTIONS_VERSION}`);
         });

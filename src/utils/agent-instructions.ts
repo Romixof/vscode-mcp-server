@@ -3,7 +3,7 @@ import { TOOL_HINTS } from './tool-annotations';
 
 const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
 
-export const AGENT_INSTRUCTIONS_VERSION = '9';
+export const AGENT_INSTRUCTIONS_VERSION = '10';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -39,6 +39,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '7. When a unit of work finishes, is handed off, or is abandoned, close it with ONE session_end_code(summary, version, branch, status, inProgress, nextStep) as your last tool call. The summary is the part no tool can infer: intent, decisions and why, and what you deliberately skipped. Write it for someone with no memory of this conversation. Update workspace_state_code(action="write") mid-task only when the working state changes materially.',
     '',
     'TOOL BUDGET (clients cap tool calls per response - make every call count):',
+    '- Your client may expose only a SUBSET of these tools as callable, and which ones changes between requests. If a tool you need is missing from your callable list, NAME IT in your reply and carry on with the rest - never substitute a worse tool and never silently skip the step.',
     '- Open with ONE session_bootstrap_code() call instead of memory_load + guide + folders + list_files. Do NOT reload memory or this guide again in the same conversation.',
     '- Never list a folder when the user already gave the path; never re-read a file you just wrote; never paste file contents into chat when a create_file_code call can carry them.',
     '- Chain shell steps into one call (cmd1 && cmd2): generate + verify (pdfinfo, ls) together.',
@@ -183,7 +184,7 @@ export function resolveAgentInstructions(override?: string, platform: NodeJS.Pla
 }
 
 export function registerAgentInstructionsTool(server: McpServer, getOverride?: () => string | undefined): void {
-    server.tool('get_agent_instructions_code', `Loads the vscode-mcp-server agent guide: the COMPLETE catalog of all 85 tools with their key parameters, grouped by task, plus workflow rules, common recipes and approval behavior. Strictly read-only: returns text, touches nothing, auto-approved. Prefer session_bootstrap_code() as the conversation opener - it bundles this guide with memory, workspace layout and skills in one call; call this tool alone when you only need the map, and re-run it after every server update.`, {}, async () => {
+    server.tool('get_agent_instructions_code', `Loads the vscode-mcp-server agent guide: the COMPLETE catalog of all ${TOOL_CATALOG_SIZE} tools with their key parameters, grouped by task, plus workflow rules, common recipes and approval behavior. Strictly read-only: returns text, touches nothing, auto-approved. Prefer session_bootstrap_code() as the conversation opener - it bundles this guide with memory, workspace layout and skills in one call; call this tool alone when you only need the map, and re-run it after every server update.`, {}, async () => {
         const override = getOverride ? getOverride() : undefined;
         const text = resolveAgentInstructions(override);
         return { content: [{ type: 'text', text: `${text}\n\n[vscode-mcp-server agent guide v${AGENT_INSTRUCTIONS_VERSION}]` }] };

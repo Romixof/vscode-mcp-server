@@ -2,8 +2,12 @@ import * as assert from 'assert';
 import { environmentSection, resolveAgentInstructions, AGENT_INSTRUCTIONS_VERSION } from '../utils/agent-instructions';
 
 suite('agent guide environment section', () => {
-        test('the guide version was bumped so cached v8 sessions reload it', () => {
-                assert.notStrictEqual(AGENT_INSTRUCTIONS_VERSION, '8', 'guide version must move off 8 once its content changes');
+        test('the guide version moved past the last published one', () => {
+                const minimum = 10;
+                assert.ok(
+                        Number(AGENT_INSTRUCTIONS_VERSION) >= minimum,
+                        `guide version is ${AGENT_INSTRUCTIONS_VERSION}, must be >= ${minimum} — bump it whenever the content changes`
+                );
         });
 
         test('the Windows section names the interpreter that actually exists', () => {
