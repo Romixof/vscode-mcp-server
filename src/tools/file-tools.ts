@@ -5,7 +5,9 @@ import { z } from 'zod';
 import { resolveInputPath, listWorkspaceFolders, findOwningFolder, prefixDisplay, displayLabelFor, WORKSPACE_PARAM_DESCRIPTION, WORKSPACE_PARAM_LONG_DESCRIPTION } from '../utils/workspace';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
-import { fileFingerprint, recentReads, unchangedReadNotice, recordRead } from '../utils/read-cache';
+import { fileFingerprint, recentReads, unchangedReadNotice, recordRead, repeatSavings } from '../utils/read-cache';
+import { looksBinary } from './safety-tools';
+import { writeLine as trafficWriteLine } from '../traffic-log';
 
 const readCache = recentReads();
 
@@ -101,6 +103,15 @@ function oversizedImageMessage(name: string, bytes: number): string {
 
 function rangedImageMessage(name: string): string {
         return `"${name}" is a binary image, so startLine/endLine do not apply to it. Call it without a line range to get the picture.`;
+}
+
+const BINARY_TEXT_ROUTES: Record<string, string> = {
+        '.pdf': 'render_pdf_pages_code returns its pages as pictures you can look at directly; for a scanned one, pdf_needs_ocr_code decides and ocr_pdf_code extracts the text.'
+};
+
+function binaryTextMessage(name: string): string {
+        const route = BINARY_TEXT_ROUTES[fileExtension(name)];
+        return `"${name}" is binary, not text, so reading it as a string returns compressed bytes rather than the document. ${route ?? 'No tool here decodes this format; convert or extract it first.'}`;
 }
 
 function formatSize(bytes: number): string {
@@ -211,7 +222,7 @@ export async function readWorkspaceFile(
     startLine: number = -1,
     endLine: number = -1,
     workspace?: string
-): Promise<string> {
+): Promise<{ text: string; totalLines: number }> {
     console.log(`[readWorkspaceFile] Starting with path: ${workspacePath}, encoding: ${encoding}, maxCharacters: ${maxCharacters}, startLine: ${startLine}, endLine: ${endLine}`);
 
     const fileUri = resolveInputPath(workspacePath, workspace);
@@ -221,6 +232,10 @@ export async function readWorkspaceFile(
 
         const fileContent = await vscode.workspace.fs.readFile(fileUri);
         console.log(`[readWorkspaceFile] File read successfully, size: ${fileContent.byteLength} bytes`);
+
+        if (encoding !== 'base64' && looksBinary(fileContent)) {
+            throw new Error(binaryTextMessage(workspacePath));
+        }
 
         if (encoding === 'base64') {
 
@@ -232,37 +247,37 @@ export async function readWorkspaceFile(
                 console.warn(`[readWorkspaceFile] Line numbers specified for base64 encoding, ignoring`);
             }
 
-            return Buffer.from(fileContent).toString('base64');
+            return { text: Buffer.from(fileContent).toString('base64'), totalLines: 0 };
         } else {
 
             const textDecoder = new TextDecoder(encoding);
-            let textContent = textDecoder.decode(fileContent);
+            const decoded = textDecoder.decode(fileContent);
+            const allLines = decoded.split('\n');
+            let textContent = decoded;
 
             if (startLine >= 0 || endLine >= 0) {
 
-                const lines = textContent.split('\n');
-
                 const effectiveStartLine = startLine >= 0 ? startLine : 0;
-                const effectiveEndLine = endLine >= 0 ? Math.min(endLine, lines.length - 1) : lines.length - 1;
+                const effectiveEndLine = endLine >= 0 ? Math.min(endLine, allLines.length - 1) : allLines.length - 1;
 
-                if (effectiveStartLine >= lines.length) {
-                    throw new Error(`Start line ${effectiveStartLine + 1} is out of range (1-${lines.length})`);
+                if (effectiveStartLine >= allLines.length) {
+                    throw new Error(`Start line ${effectiveStartLine + 1} is out of range (1-${allLines.length})`);
                 }
 
                 if (effectiveEndLine < effectiveStartLine) {
                     throw new Error(`End line ${effectiveEndLine + 1} is less than start line ${effectiveStartLine + 1}`);
                 }
 
-                textContent = lines.slice(effectiveStartLine, effectiveEndLine + 1).join('\n');
+                textContent = allLines.slice(effectiveStartLine, effectiveEndLine + 1).join('\n');
                 console.log(`[readWorkspaceFile] Returning lines ${effectiveStartLine + 1}-${effectiveEndLine + 1}, length: ${textContent.length} characters`);
             }
 
             if (maxCharacters > 0 && textContent.length > maxCharacters) {
                 const note = `\n\n[File truncated: showing characters 1-${maxCharacters} of ${textContent.length}. Raise maxCharacters (0 = no limit) or use startLine/endLine to read specific sections.]`;
-                return textContent.slice(0, maxCharacters) + note;
+                textContent = textContent.slice(0, maxCharacters) + note;
             }
 
-            return textContent;
+            return { text: textContent, totalLines: allLines.length };
         }
     } catch (error) {
         console.error('[readWorkspaceFile] Error:', error);
@@ -365,12 +380,16 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
 
         WHEN TO USE: Reading code, config files, analyzing implementations.
 
-        Encoding: Text encodings (utf-8, latin1, etc.) for text files, 'base64' for base64-encoded string.
-        Line numbers: Use startLine/endLine (1-based) for large files to read specific sections only.
+        Encoding: text encodings (utf-8, latin1, …) for text files, 'base64' for the raw string.
+        Line numbers: startLine/endLine (1-based) read a section of a large file.
 
-        Images: a .png/.jpg/.gif/.webp/.bmp comes back as a picture you can look at, with its real pixel size and what it costs, so read it directly instead of asking for base64. Pass encoding "base64" only if you want the raw string.
+        Images: a .png/.jpg/.gif/.webp/.bmp comes back as a picture you can look at, with its pixel size and token cost, so read it directly instead of asking for base64. Pass encoding "base64" only for the raw string.
 
-        Files larger than maxCharacters are returned truncated, with a note at the end giving the full size — page through with startLine/endLine instead of retrying with a bigger limit.`,
+        A PDF, .docx or .zip is binary and is refused with a pointer to the tool that reads it.
+
+        Re-reading: a file already in context comes back as a one-line notice, never a second copy. That includes a full read asked for as startLine 1 with an endLine past the last line.
+
+        Missing a tool? Your list is partial: session_bootstrap_code has the catalog.`,
         {
             path: z.string().describe('The path to the file to read'),
             encoding: z.string().optional().default('utf-8').describe('Encoding to convert the file content to a string. Use "base64" for base64-encoded string'),
@@ -397,6 +416,8 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
                 if (fingerprint) {
                     const notice = unchangedReadNotice(cacheKey, fingerprint, readCache, startLine, endLine);
                     if (notice) {
+                        const saved = repeatSavings();
+                        trafficWriteLine(`read_file_code repeat refused path="${path}" startLine=${startLine} endLine=${endLine} — ${saved.refused} refused this session, ${saved.chars} characters not re-sent`);
                         return { content: [{ type: 'text', text: notice }] };
                     }
                 }
@@ -421,10 +442,11 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
                 }
 
                 console.log('[read_file] Reading file');
-                const content = await readWorkspaceFile(path, encoding, maxCharacters, zeroBasedStartLine, zeroBasedEndLine, workspace);
+                const read = await readWorkspaceFile(path, encoding, maxCharacters, zeroBasedStartLine, zeroBasedEndLine, workspace);
+                const content = read.text;
 
-                if (fingerprint && startLine <= 0 && endLine <= 0 && content.length > 800) {
-                    recordRead(readCache, cacheKey, fingerprint, content.length);
+                if (fingerprint && (content.length > 200 || (startLine > 0 || endLine > 0))) {
+                    recordRead(readCache, cacheKey, fingerprint, content.length, read.totalLines, startLine, endLine);
                 }
 
                 const result: CallToolResult = {

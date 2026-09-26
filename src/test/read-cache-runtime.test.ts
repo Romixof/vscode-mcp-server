@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as path from 'path';
 import { isNoiseEntry, listingEntryLine } from '../tools/file-tools';
-import { unchangedReadNotice, fileFingerprint, recentReads } from '../utils/read-cache';
+import { unchangedReadNotice, fileFingerprint, recentReads, recordRead, repeatSavings, ReadCache } from '../utils/read-cache';
 import { runtimeSection, pythonCacheGuard } from '../utils/runtime-facts';
 
 suite('list listing carries size and date', () => {
@@ -32,6 +32,12 @@ suite('list listing carries size and date', () => {
 });
 
 suite('read cache detects unchanged files', () => {
+        function cached(chars: number, lines: number, fingerprint = 'fp1'): ReadCache {
+                const cache = recentReads();
+                cache.set('a.md', { fingerprint, at: new Date('2026-09-25T01:09:00Z'), chars, lines });
+                return cache;
+        }
+
         test('a fingerprint is stable for the same stat', () => {
                 const a = fileFingerprint({ size: 10, mtime: 5 });
                 const b = fileFingerprint({ size: 10, mtime: 5 });
@@ -44,31 +50,74 @@ suite('read cache detects unchanged files', () => {
         });
 
         test('a full re-read of an unchanged file yields a notice, not a second copy', () => {
-                const cache = recentReads();
-                cache.set('a.md', { fingerprint: 'fp1', at: new Date('2026-09-25T01:09:00Z'), chars: 3840 });
-                const hit = unchangedReadNotice('a.md', 'fp1', cache, -1, -1);
+                const hit = unchangedReadNotice('a.md', 'fp1', cached(3840, 120), -1, -1);
                 assert.ok(hit, 'a full unchanged re-read must be detected');
                 assert.ok(/unchanged/i.test(hit), hit);
                 assert.ok(/\d{2}:\d{2}/.test(hit), `must state a clock time: ${hit}`);
                 assert.ok(hit.includes('3840'), `must state the size already in context: ${hit}`);
+                assert.ok(hit.includes('120 lines'), `must state the line count: ${hit}`);
                 assert.ok(hit.includes('startLine'), `must point at the ranged-read escape hatch: ${hit}`);
         });
 
         test('a ranged read is never short-circuited', () => {
-                const cache = recentReads();
-                cache.set('a.md', { fingerprint: 'fp1', at: new Date('2026-09-25T01:09:00Z'), chars: 3840 });
+                const cache = cached(3840, 120);
                 assert.strictEqual(unchangedReadNotice('a.md', 'fp1', cache, 120, 130), null, 'a line range must still return content');
                 assert.strictEqual(unchangedReadNotice('a.md', 'fp1', cache, -1, 50), null, 'a partial read must still return content');
         });
 
         test('a changed file is never short-circuited', () => {
-                const cache = recentReads();
-                cache.set('a.md', { fingerprint: 'fp1', at: new Date(), chars: 10 });
-                assert.strictEqual(unchangedReadNotice('a.md', 'fp2', cache, -1, -1), null);
+                assert.strictEqual(unchangedReadNotice('a.md', 'fp2', cached(10, 3), -1, -1), null);
         });
 
         test('a first read is never short-circuited', () => {
                 assert.strictEqual(unchangedReadNotice('never-read.md', 'fp1', recentReads(), -1, -1), null);
+        });
+
+        test('a whole read asked for as a huge line range is still the whole read', () => {
+                const cache = cached(3840, 120);
+                for (const endLine of [120, 121, 1000, 100000]) {
+                        const hit = unchangedReadNotice('a.md', 'fp1', cache, 1, endLine);
+                        assert.ok(hit, `startLine 1 with endLine ${endLine} must not return the file a second time`);
+                }
+                assert.strictEqual(unchangedReadNotice('a.md', 'fp1', cache, 1, 119), null, 'a genuinely shorter range still returns content');
+        });
+
+        test('a section that was already read is not sent twice', () => {
+                const cache = recentReads();
+                recordRead(cache, 'a.md', 'fp1', 900, 400, 120, 130);
+                const hit = unchangedReadNotice('a.md', 'fp1', cache, 120, 130);
+                assert.ok(hit, 'the same section read twice must be refused');
+                assert.ok(hit.includes('120 to 130'), `must name the section: ${hit}`);
+                assert.strictEqual(unchangedReadNotice('a.md', 'fp1', cache, 200, 260), null, 'another section still returns content');
+                assert.strictEqual(unchangedReadNotice('a.md', 'fp1', cache, -1, -1), null, 'a partial read must not claim the whole file is present');
+        });
+
+        test('a section read does not poison a later whole read', () => {
+                const cache = recentReads();
+                recordRead(cache, 'a.md', 'fp1', 900, 400, 120, 130);
+                recordRead(cache, 'a.md', 'fp1', 3840, 400, -1, -1);
+                const hit = unchangedReadNotice('a.md', 'fp1', cache, 1, 100000);
+                assert.ok(hit && hit.includes('3840'), `a later whole read must be caught with its real size: ${hit}`);
+        });
+
+        test('a section of a changed file is not short-circuited', () => {
+                const cache = recentReads();
+                recordRead(cache, 'a.md', 'fp1', 900, 400, 120, 130);
+                assert.strictEqual(unchangedReadNotice('a.md', 'fp2', cache, 120, 130), null);
+        });
+
+        test('a refused repeat is counted, and a served read is not', () => {
+                const cache = recentReads();
+                const before = repeatSavings();
+                recordRead(cache, 'a.md', 'fp1', 3840, 400, -1, -1);
+
+                assert.strictEqual(unchangedReadNotice('a.md', 'fp1', cache, -1, -1) !== null, true, 'the full re-read must be refused');
+                assert.strictEqual(unchangedReadNotice('a.md', 'fp1', cache, 1, 100000) !== null, true, 'the same read as a range must be refused too');
+                assert.strictEqual(unchangedReadNotice('a.md', 'fp1', cache, 250, 260), null, 'a fresh section must be served');
+
+                const after = repeatSavings();
+                assert.strictEqual(after.refused - before.refused, 2, 'exactly the two refusals must be counted');
+                assert.strictEqual(after.chars - before.chars, 7680, 'both copies of the file must be counted as not re-sent');
         });
 });
 

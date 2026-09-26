@@ -36,7 +36,7 @@ export function planModeIntercept(toolName: string, detail: string): CallToolRes
 
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 
-function looksBinary(buf: Buffer): boolean {
+export function looksBinary(buf: Uint8Array): boolean {
     const probe = buf.subarray(0, 8192);
     return probe.includes(0);
 }
