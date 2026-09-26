@@ -319,11 +319,7 @@ export async function activate(context: vscode.ExtensionContext) {
         statusBarItem.command = 'vscode-mcp-server.toggleServer';
 
         if (serverEnabled) {
-            const started = await startOrJoinServer(context, { resetPersistedOnFailure: false });
-            if (started) {
-                logger.info('MCP Server started successfully');
-            }
-
+            await startOrJoinServer(context, { resetPersistedOnFailure: false });
         } else {
             logger.info('MCP Server is disabled by default');
         }
