@@ -4,6 +4,18 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.13] - 2026-09-26
+### Fixed
+- Output compaction no longer folds a command that reports several statements. `&&`, `||` and `;` are not recognised as statement boundaries, so a chain was categorised `generic` and then reduced by duplicate-line collapsing and a head+tail cap. A single `python generate_pdf.py` chained with a second one produced 1,101 characters of output that compaction returned as 49: the two scripts print a near-identical `PDF genere` line and the WeasyPrint `GLib-GIO-WARNING` notices repeat across both processes, so the first statement's entire output was attributed to the second. The model then reported a success it had not observed. A command containing a statement separator now returns its output untouched and labels the reason, because a result covering N operations cannot be folded without making it unattributable. A lone `|` is still one stream and still folds, and a separator inside quotes costs the saving but never loses output.
+- The agent guide no longer claims all 85 tools when 91 are registered. The count in the tool description was typed by hand and drifted from the registry; the guide body derived it from `TOOL_HINTS` and so had been correct all along, which is why the mismatch survived. Both read the registry now, and a test reads the description off a real `tools/list` to keep them equal.
+- The test that guards the guide version no longer checks a number that stopped being the previous one. It asserted the version differed from `8` while the version was `9`, so it could not fail. It asserts a floor instead, so forgetting to bump on a content change is now loud.
+
+### Changed
+- The agent guide states that the callable tool list may be partial and that the missing one should be named. Clients cap discovery and can change the selection between requests in the same conversation; a model that sees a tool named in the catalog it cannot call tends to report a wrong-tool mistake or to route around the gap, and the workaround is what burns the budget. Guide version 9 to 10.
+
+### Not fixed
+- The 11-tool discovery cap is the client's, and a `get more tools` tool was raised with the authors. The server cannot add a tool to the list the model is holding mid-turn: a discovery tool only helps if the client re-sends a widened `tools/list` after it is called, and only returns knowledge without that. Their answer decides whether it is worth building, and adding a tool costs about 50 tokens of the tools/list payload, which is 5 tokens from its ceiling.
+
 ## [0.20.12] - 2026-09-26
 ### Fixed
 - A repeat read no longer costs a second copy of the file. The cache refused a full re-read but stepped aside for any line range, so the escape route it advertised — "read a line range" — handed back the whole file when the range happened to cover it. A model told to page through a large file asked for `startLine: 1, endLine: 100000` and got all 197 KB of four course transcripts again, about 50,000 tokens, after the cache had already reported them as present. A range that covers the file is now recognised as that same read, a section that was already read is refused on the second attempt, and the notice states the line count so the size of a real section can be judged before asking for it. A section read no longer makes a later full read look cached. The cache is bounded at 256 entries, which it was not before.
