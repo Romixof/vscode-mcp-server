@@ -4,6 +4,14 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.15] - 2026-09-28
+### Fixed
+- The agent guide is sent once per session instead of once per call. `session_bootstrap_code` returned the full 91-tool catalog on every call, and one conversation called it three times with `guide: true`. A second call in the same VS Code session now returns a two-line notice naming the version and pointing at `get_agent_instructions_code`, so the model can get the catalog back if it is not in context. A guide whose content actually changed is sent again, so a version bump or a different `vscode-mcp-server.agentInstructions` value re-delivers it.
+- `search_workspace_code` searches a file when `path` names one, instead of refusing. The parameter was already documented as "Directory or file to search in" and the tool rejected every file, so a caller who knew the file had to fall back to the directory and lose the narrowing. Four calls were spent on this in one session, each returning the same refusal. A named file is searched on its own and `glob` is ignored for it, because a caller who names a file does not want it filtered away.
+
+### Changed
+- The `search_workspace_code` description lost two sentences that repeated what the tool already carries: that the tool is read-only, which the `readOnlyHint` and the guide legend both state, and a long form of the cap advice. This buys the headroom the new file behaviour needed. The tools/list payload is 27,189 of 27,200 tokens.
+
 ## [0.20.14] - 2026-09-26
 ### Fixed
 - `edit_file_code` names the closest line when the text is not found, instead of the head of the file. A miss returned the first 20 lines, so a wrong quote deep in a file was invisible: a model editing line 378 of a 618-line file was shown lines 1 to 20 and told to re-read, and had no way to see the difference. In the case that prompted this, the whole difference was one backslash inside a character class, written `[^\"]` where the file holds `[^"]`. The tool now looks for the line that matches once backslashes and spacing are ignored, reports that line with one line either side, and says the difference is an added escape. Without a near miss it keeps the old 20-line head and the old advice.
