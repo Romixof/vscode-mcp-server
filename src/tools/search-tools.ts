@@ -76,14 +76,14 @@ function walk(root: string, rel: string, files: string[], state: ScanState, skip
 export function registerSearchTools(server: McpServer, resolveRoot: (inputPath: string, workspace?: string) => string): void {
     server.tool(
         'search_workspace_code',
-        `Regex search across the workspace, grouped by file with 1-based line numbers. Strictly read-only, so it auto-approves.
+        `Regex search across the workspace, grouped by file with 1-based line numbers.
 
 WHEN TO USE: finding where something is used, defined or referenced. Never reach for the shell to grep.
 
-Results are capped (default 50, max 200) and raise the cap only when you need the full list.`,
+Results are capped (default 50, max 200); raise only for the full list.`,
         {
             pattern: z.string().describe('Regular expression to match against each line (e.g. "function\\s+parse", "TODO|FIXME")'),
-            path: z.string().optional().default('.').describe('Directory or file to search in, relative to the workspace root (default: ".")'),
+            path: z.string().optional().default('.').describe('Directory or file to search in, relative to the workspace root (default: "."). A file is searched on its own and glob is ignored.'),
             glob: z.string().optional().describe('Glob filter: "*.py" matches by file name, "src/**/*.ts" by relative path. Omit for all.'),
             caseSensitive: z.boolean().optional().default(false).describe('Case-sensitive matching (default: insensitive)'),
             maxResults: z.number().int().optional().default(DEFAULT_MAX_RESULTS).describe(`Max matched lines returned (1-${HARD_MAX_RESULTS}, default ${DEFAULT_MAX_RESULTS})`),
@@ -98,18 +98,22 @@ Results are capped (default 50, max 200) and raise the cap only when you need th
                 const message = e instanceof Error ? e.message : String(e);
                 return { content: [{ type: 'text' as const, text: `Invalid regular expression: ${message}. For a literal search, escape the special characters (e.g. use \\. instead of .).` }], isError: true };
             }
-            const root = resolveRoot(searchPath, workspace);
-            if (!fs.existsSync(root)) {
-                return { content: [{ type: 'text' as const, text: `Search path does not exist: "${searchPath}" -> ${root}` }], isError: true };
-            }
-            if (!fs.statSync(root).isDirectory()) {
-                return { content: [{ type: 'text' as const, text: `Search path is a file — searching it directly for pattern matches is not supported; use path pointing at a directory (rooted search) or read the file with read_file_code.` }], isError: true };
+            const resolvedRoot = resolveRoot(searchPath, workspace);
+            if (!fs.existsSync(resolvedRoot)) {
+                return { content: [{ type: 'text' as const, text: `Search path does not exist: "${searchPath}" -> ${resolvedRoot}` }], isError: true };
             }
             const started = Date.now();
             const files: string[] = [];
             const state: ScanState = { files: 0, skippedDirs: 0 };
-            walk(root, '', files, state, skipCommon);
-            const matcher = glob ? globToRegExp(glob) : undefined;
+            const singleFile = !fs.statSync(resolvedRoot).isDirectory();
+            const root = singleFile ? path.dirname(resolvedRoot) : resolvedRoot;
+            if (singleFile) {
+                files.push(path.basename(resolvedRoot));
+                state.files = 1;
+            } else {
+                walk(resolvedRoot, '', files, state, skipCommon);
+            }
+            const matcher = singleFile || !glob ? undefined : globToRegExp(glob);
             const baseOnly = glob !== undefined && !glob.includes('/');
             const cap = Math.min(Math.max(Math.trunc(maxResults), 1), HARD_MAX_RESULTS);
             const lines: string[] = [];
@@ -168,7 +172,8 @@ Results are capped (default 50, max 200) and raise the cap only when you need th
                     break;
                 }
             }
-            const header = `Search /${pattern}/${caseSensitive ? '' : 'i'} in ${root}${glob ? ` (glob: ${glob})` : ''} — ${matches} match(es) in ${matchedFiles} file(s), ${scanned} file(s) scanned, ${state.skippedDirs} dir(s) skipped, ${Date.now() - started}ms`;
+            const scope = singleFile ? resolvedRoot : root;
+            const header = `Search /${pattern}/${caseSensitive ? '' : 'i'} in ${scope}${singleFile || !glob ? '' : ` (glob: ${glob})`} — ${matches} match(es) in ${matchedFiles} file(s), ${scanned} file(s) scanned, ${state.skippedDirs} dir(s) skipped, ${Date.now() - started}ms`;
             const body = lines.length > 0 ? `\n${lines.join('\n')}` : '';
             const footer = capHit
                 ? `\n[Stopped early: hit the ${cap}-match cap — narrow the pattern, add a glob or a more specific path, or raise maxResults (max ${HARD_MAX_RESULTS}).]`
