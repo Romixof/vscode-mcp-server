@@ -151,6 +151,8 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
 }
 
 
+let deliveredGuide = '';
+
 export function registerSessionBootstrapTool(server: McpServer, guideOverride?: () => string | undefined): void {
         server.tool(
                 'session_bootstrap_code',
@@ -219,7 +221,13 @@ export function registerSessionBootstrapTool(server: McpServer, guideOverride?: 
                         }
                         if (guide) {
                                 const override = guideOverride ? guideOverride() : undefined;
-                                parts.push(`\n\n## Agent guide\n\n${resolveAgentInstructions(override)}\n\n[agent guide v${AGENT_INSTRUCTIONS_VERSION}]`);
+                                const text = resolveAgentInstructions(override);
+                                if (text === deliveredGuide) {
+                                        parts.push(`\n\n## Agent guide\n\nv${AGENT_INSTRUCTIONS_VERSION} was already sent in this VS Code session. If you do not have it in context, call get_agent_instructions_code() once.`);
+                                } else {
+                                        parts.push(`\n\n## Agent guide\n\n${text}\n\n[agent guide v${AGENT_INSTRUCTIONS_VERSION}]`);
+                                        deliveredGuide = text;
+                                }
                         }
                         return { content: [{ type: 'text', text: parts.join('\n') }] };
                 }
