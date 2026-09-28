@@ -4,6 +4,10 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.16] - 2026-09-28
+### Fixed
+- The already-delivered guide state belongs to the server that sent it. `deliveredGuide` was a module-level variable, so every server registered in one extension host shared it. A second server, which happens when the extension activates twice, answered `session_bootstrap_code` with the "already sent" notice on its very first call although it had never sent the guide, and the model on that side got no catalog and no way to know it was missing. The state is now a closure per registration, so a server only reports a guide it sent itself. The regression test drives two independently registered servers and asserts the second one carries the catalog.
+
 ## [0.20.15] - 2026-09-28
 ### Fixed
 - The agent guide is sent once per session instead of once per call. `session_bootstrap_code` returned the full 91-tool catalog on every call, and one conversation called it three times with `guide: true`. A second call in the same VS Code session now returns a two-line notice naming the version and pointing at `get_agent_instructions_code`, so the model can get the catalog back if it is not in context. A guide whose content actually changed is sent again, so a version bump or a different `vscode-mcp-server.agentInstructions` value re-delivers it.
