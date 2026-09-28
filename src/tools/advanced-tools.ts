@@ -151,9 +151,8 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
 }
 
 
-let deliveredGuide = '';
-
 export function registerSessionBootstrapTool(server: McpServer, guideOverride?: () => string | undefined): void {
+        let deliveredGuide = '';
         server.tool(
                 'session_bootstrap_code',
                 `ONE-CALL session start. Returns in a single response: persistent memory (global + project), the open workspace folders with the first folder's root layout, the skills list (auto-detected: "skills" then ".claude/skills"), and the full agent guide.
