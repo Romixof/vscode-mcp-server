@@ -8,6 +8,10 @@ tsconfig.json
 **/.vscode-mcp
 **/.swarm
 **/.omo
+**/.freebuff
+AUDIT-EXTENSION.md
+.vscode-test.mjs
+.gitignore
 *_LOG.md
 *_STATE.md
 COMMIT.md
