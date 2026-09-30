@@ -4,6 +4,20 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.18] - 2026-09-30
+### Fixed
+- Refusing a binary now ends with the call to make. A client handed a model ten tools, three of them PDF readers; the model called `read_file_code` on a PDF, received a refusal naming all three readers, and reported that the document was unreadable. Every other redirect this server emits is syntactic — compaction ends with `[@vscode-mcp: ... retrieve_output_code "handle"]` and `diff_preview_code` ends with the exact call that applies the diff — while the PDF refusal was prose. It now ends the same way, carrying the real path. `read_file_code`'s description names `ocr_pdf_code` and `render_pdf_pages_code` outright instead of promising "a pointer to the tool that reads it", which meant the destination could only be learned by failing first.
+- The conversation opener has a fallback. Five places named `session_bootstrap_code` and none named an alternative, so a client that omitted the opener from its callable list left every instruction the model could read pointing at a tool it did not have, while `get_agent_instructions_code` sat available and unmentioned. All five name the fallback now. Guide version 10 to 11. The guide body costs no payload, being returned by a tool call rather than carried in `tools/list`, so `get_agent_instructions_code` was rewritten shorter to pay for naming the readers.
+- `get_server_info_code` reports registered tools that were never called. The usage line listed only the tools that had been called, so the number needed to judge a 91-tool registry — which of them have never been touched — was the one number the output could not express. The line subtracts the called set from the registered one; both halves already existed, `callCounts` in `usage.ts` and the registered names behind `_registeredTools`. The catalog follows the registry rather than the static `TOOL_HINTS` list, so it agrees with `enabledTools`: with the `ocr` group off the three PDF readers leave the catalog although all three remain in `TOOL_HINTS`.
+
+### Changed
+- `get_server_info_code` keeps an empty input schema, so the tools/list payload is unchanged at 27,190 of 27,200 tokens. The never-called list is bounded at 20 names, alphabetical so two readings diff cleanly, and the line is omitted when nothing is missing.
+
+### Not fixed
+- Two tests fail intermittently on timing alone: `edit_file_code`, and the `server info shell report` timeout. Both predate this work and neither has been investigated. A suite that goes red without a code change undermines the revert-before-accept discipline the rest of this entry depends on.
+- The usage counters live in memory and reset on a window reload. Enough to spot dead weight in a day's work, not enough to justify removing tools from the registry; across users that is a telemetry decision.
+- A client still selects a small subset of the registered tools and can leave out the ones a task needs. Nothing in this release changes that, and it happens before any of this code runs.
+
 ## [0.20.17] - 2026-09-30
 ### Fixed
 - The api key commands are registered when the extension activates, not when the module loads. `copyApiKeyCommand` and `generateApiKeyCommand` sat at module scope, so `vscode.commands.registerCommand` ran at import, outside the `try/catch` in `activate()`, and a second load of the module threw `command 'vscode-mcp-server.copyApiKey' already exists`. A throw at that point is worse than a red test: it kills the extension before activation, so there is no status bar, no server and no message, because the handler that would report the failure has not been reached yet. Both now register inside `activate()`, beside the six that already did.
