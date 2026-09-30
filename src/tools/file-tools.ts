@@ -106,12 +106,16 @@ function rangedImageMessage(name: string): string {
 }
 
 const BINARY_TEXT_ROUTES: Record<string, string> = {
-        '.pdf': 'render_pdf_pages_code returns its pages as pictures you can look at directly; for a scanned one, pdf_needs_ocr_code decides and ocr_pdf_code extracts the text.'
+        '.pdf': 'ocr_pdf_code extracts its text; render_pdf_pages_code returns its pages as pictures you can look at directly, which is the better route for a diagram or a layout.'
 };
 
 function binaryTextMessage(name: string): string {
         const route = BINARY_TEXT_ROUTES[fileExtension(name)];
-        return `"${name}" is binary, not text, so reading it as a string returns compressed bytes rather than the document. ${route ?? 'No tool here decodes this format; convert or extract it first.'}`;
+        const why = `"${name}" is binary, not text, so reading it as a string returns compressed bytes rather than the document.`;
+        if (!route) {
+                return `${why} No tool here decodes this format; convert or extract it first.`;
+        }
+        return `${why} ${route}\n\n[@vscode-mcp: ${name} is unreadable as text — next call: ocr_pdf_code {"pdfPath": ${JSON.stringify(name)}}]`;
 }
 
 function formatSize(bytes: number): string {
@@ -383,13 +387,13 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
         Encoding: text encodings (utf-8, latin1, …) for text files, 'base64' for the raw string.
         Line numbers: startLine/endLine (1-based) read a section of a large file.
 
-        Images: a .png/.jpg/.gif/.webp/.bmp comes back as a picture you can look at, with its pixel size and token cost, so read it directly instead of asking for base64. Pass encoding "base64" only for the raw string.
+        Images: a .png/.jpg/.gif/.webp/.bmp comes back as a picture you can look at, with its pixel size and token cost. Pass encoding "base64" only for the raw string.
 
-        A PDF, .docx or .zip is binary and is refused with a pointer to the tool that reads it.
+        A PDF, .docx or .zip is binary and is refused. A PDF is read by ocr_pdf_code for its text, or render_pdf_pages_code for its pages as images.
 
-        Re-reading: a file already in context comes back as a one-line notice, never a second copy. That includes a full read asked for as startLine 1 with an endLine past the last line.
+        Re-reading: a file already in context comes back as a one-line notice, never a second copy, including a full read asked as startLine 1 with an endLine past the last line.
 
-        Missing a tool? Your list is partial: session_bootstrap_code has the catalog.`,
+        Missing a tool? session_bootstrap_code has the catalog; if it is not callable, get_agent_instructions_code does.`,
         {
             path: z.string().describe('The path to the file to read'),
             encoding: z.string().optional().default('utf-8').describe('Encoding to convert the file content to a string. Use "base64" for base64-encoded string'),

@@ -3,7 +3,7 @@ import { TOOL_HINTS } from './tool-annotations';
 
 const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
 
-export const AGENT_INSTRUCTIONS_VERSION = '10';
+export const AGENT_INSTRUCTIONS_VERSION = '11';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -25,7 +25,7 @@ export function environmentSection(platform: NodeJS.Platform = process.platform)
 }
 
 export const DEFAULT_AGENT_INSTRUCTIONS = [
-    'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response.',
+    'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response. That tool is absent from some client lists. When it is missing, ONE get_agent_instructions_code() call returns this same guide, so you are never left without it.',
     '',
     'LEGEND: [RO] = readOnlyHint, read-only, auto-approved, use freely. [MUT] modifies files or state, may need manual approval. [DST] destructive or runs arbitrary commands, needs approval. Multi-root: every path tool accepts workspace="<folder name or 1-based index>"; results come back as "FolderName/path" and resolve if you feed them back as-is.',
     '',
@@ -40,7 +40,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '',
     'TOOL BUDGET (clients cap tool calls per response - make every call count):',
     '- Your client may expose only a SUBSET of these tools as callable, and which ones changes between requests. If a tool you need is missing from your callable list, NAME IT in your reply and carry on with the rest - never substitute a worse tool and never silently skip the step.',
-    '- Open with ONE session_bootstrap_code() call instead of memory_load + guide + folders + list_files. Do NOT reload memory or this guide again in the same conversation.',
+    '- Open with ONE session_bootstrap_code() call instead of memory_load + guide + folders + list_files, or with ONE get_agent_instructions_code() call when session_bootstrap_code is not in your callable list. Do NOT reload memory or this guide again in the same conversation.',
     '- Never list a folder when the user already gave the path; never re-read a file you just wrote; never paste file contents into chat when a create_file_code call can carry them.',
     '- Chain shell steps into one call (cmd1 && cmd2): generate + verify (pdfinfo, ls) together.',
     '- Copy annex files (scripts, templates) with copy_file_code or shell cp - never retype them.',
@@ -159,7 +159,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '[MUT] plan_mode_code(enabled) - while ON, execution tools (shell, SQL, tasks, builds, tests, restarts, profiling, aliases) only DESCRIBE what they would run, nothing executes; reads keep working.',
     '',
     'COMMON RECIPES:',
-    '- Understand the project: session_bootstrap_code() (memory + layout + skills + guide in one call) -> get_project_context_code() only if the stack is still unknown.',
+    '- Understand the project: session_bootstrap_code() (memory + layout + skills + guide in one call), or get_agent_instructions_code() when that one is not callable -> get_project_context_code() only if the stack is still unknown.',
     '- Locate an implementation: search_workspace_code(pattern) -> get_symbol_definition_code(...) -> read_file_code(...) on the exact range.',
     '- Change code safely: diff_preview_code(op="edit", path, old_string, new_string) -> edit_file_code(path, old_string, new_string) -> get_diagnostics_code() -> test_impact_code() -> run_tests_code(...).',
     '- When the user says "this" or "here", call get_active_editor_code() before guessing a path; list_open_tabs_code() when they name a file by role.',
@@ -184,7 +184,7 @@ export function resolveAgentInstructions(override?: string, platform: NodeJS.Pla
 }
 
 export function registerAgentInstructionsTool(server: McpServer, getOverride?: () => string | undefined): void {
-    server.tool('get_agent_instructions_code', `Loads the vscode-mcp-server agent guide: the COMPLETE catalog of all ${TOOL_CATALOG_SIZE} tools with their key parameters, grouped by task, plus workflow rules, common recipes and approval behavior. Strictly read-only: returns text, touches nothing, auto-approved. Prefer session_bootstrap_code() as the conversation opener - it bundles this guide with memory, workspace layout and skills in one call; call this tool alone when you only need the map, and re-run it after every server update.`, {}, async () => {
+    server.tool('get_agent_instructions_code', `Loads the vscode-mcp-server agent guide: the COMPLETE catalog of all ${TOOL_CATALOG_SIZE} tools with their key parameters, grouped by task, plus workflow rules, common recipes and approval behavior. Read-only, auto-approved, returns text and touches nothing. Call it once at the start of a conversation when session_bootstrap_code() is not in your callable list - it is the same guide without the memory, workspace layout and skills. Re-run after every server update.`, {}, async () => {
         const override = getOverride ? getOverride() : undefined;
         const text = resolveAgentInstructions(override);
         return { content: [{ type: 'text', text: `${text}\n\n[vscode-mcp-server agent guide v${AGENT_INSTRUCTIONS_VERSION}]` }] };

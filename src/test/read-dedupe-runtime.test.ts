@@ -123,6 +123,35 @@ suite('a binary file is refused instead of decoded as text', () => {
                 );
         });
 
+        test('the refusal ends with the exact call to make', async () => {
+                const dir = path.join(__dirname, '..', '..', '.test-fixtures');
+                fs.mkdirSync(dir, { recursive: true });
+                fixtures.push(dir);
+                const file = path.join(dir, 'binary.pdf');
+                fs.writeFileSync(file, Buffer.concat([
+                        Buffer.from('%PDF-1.7\n'),
+                        Buffer.from([0x78, 0x9c, 0x00, 0x01, 0x02, 0x03]),
+                        Buffer.from('endobj\n')
+                ]));
+
+                await assert.rejects(
+                        () => readFile({ path: file }),
+                        (error: Error) => {
+                                const lines = error.message.trimEnd().split('\n');
+                                const last = lines[lines.length - 1];
+                                assert.ok(
+                                        last.includes('[@vscode-mcp:') && last.includes('ocr_pdf_code'),
+                                        `refusal must end with the machine-readable next call: ${last}`
+                                );
+                                assert.ok(
+                                        last.includes(JSON.stringify(file)),
+                                        `the next call must carry the real path, not a placeholder: ${last}`
+                                );
+                                return true;
+                        }
+                );
+        });
+
         test('a text file is unaffected', async () => {
                 const file = writeFixture('plain.txt', 'hello\nworld\n');
                 const result = await readFile({ path: file });
