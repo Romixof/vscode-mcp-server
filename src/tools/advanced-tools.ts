@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveWorkspaceFolder, listWorkspaceFolders, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
-import { getUsageSnapshot, getTotalCalls, getServerStartTime } from '../utils/usage';
+import { getUsageSnapshot, getTotalCalls, getServerStartTime, getNeverCalledTools, getNeverCalledCount } from '../utils/usage';
 import { detectRuntimeFacts, runtimeSection } from '../utils/runtime-facts';
 import { loadAllMemory } from './memory-tools';
 import { collectSkillsList } from './skills-tools';
@@ -60,6 +60,8 @@ function readWorkspaceRecommendations(root: string): string[] {
         }
 }
 
+const NEVER_CALLED_SHOWN = 20;
+
 function formatExtensionList(title: string, extensions: ExtensionSummary[]): string {
         if (extensions.length === 0) {
                 return `${title}: none.`;
@@ -100,6 +102,12 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
                         ];
                         if (usage.length > 0) {
                                 lines.push('- Top tools: ' + usage.map(u => `${u.tool} (${u.calls})`).join(', '));
+                        }
+                        const neverTotal = getNeverCalledCount();
+                        if (neverTotal > 0) {
+                                const shown = getNeverCalledTools(NEVER_CALLED_SHOWN).join(', ');
+                                const more = neverTotal > NEVER_CALLED_SHOWN ? `, and ${neverTotal - NEVER_CALLED_SHOWN} more` : '';
+                                lines.push(`- Registered but never called since activation (${neverTotal}): ${shown}${more}`);
                         }
                         const clusterLine = clusterInfo?.();
                         if (clusterLine) {

@@ -36,7 +36,7 @@ import { EXTENSION_ID } from './tools/advanced-tools';
 import { registerOcrTools } from './tools/ocr-tools';
 import { registerTokenEfficiencyTools } from './utils/token-efficiency';
 import { registerAgentInstructionsTool, resolveAgentInstructions } from './utils/agent-instructions';
-import { recordToolCall } from './utils/usage';
+import { recordToolCall, setRegisteredTools } from './utils/usage';
 import { logger } from './utils/logger';
 import { setClusterRootsProvider, resolveInputPath } from './utils/workspace';
 import { runWithScopes, checkToolAccess, currentScopes } from './auth/toolgate';
@@ -369,6 +369,8 @@ export class MCPServer {
             logger.warn(`Tool annotations missing for: ${annotationReport.unknown.join(', ')}`);
         }
         this.enforceScopesOn(server);
+        const registered = (server as unknown as { _registeredTools?: Record<string, unknown> })._registeredTools;
+        setRegisteredTools(registered ? Object.keys(registered) : []);
     }
 
     private enforceScopesOn(server: McpServer): void {
