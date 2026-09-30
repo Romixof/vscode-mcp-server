@@ -343,6 +343,7 @@ export class ClusterCoordinator {
                                 `${identity.extensionVersion ?? 'of a different version'} — reload or update both windows onto the same version to share the server.`
                         );
                 }
+                logger.warn(`[cluster] SPOKE — port ${this.preferredPort} was already in use and the holder answered as a cluster hub (extension ${this.extensionVersion}); joining it instead of hosting`);
                 await this.becomeSpoke(this.preferredPort);
         }
 
@@ -360,7 +361,7 @@ export class ClusterCoordinator {
                                 await this.registerOnce();
                                 this.startHeartbeat();
                                 this.emitState();
-                                logger.info(`[cluster] Joined as spoke "${this.selfLabel}" — hub at 127.0.0.1:${hubPort}, invoke on 127.0.0.1:${this.spokePort}`);
+                                logger.warn(`[cluster] SPOKE — window "${this.selfLabel}" joined a hub at 127.0.0.1:${hubPort} (extension ${this.extensionVersion}), invoke endpoint 127.0.0.1:${this.spokePort}. Tool calls for this window's folders are forwarded over HTTP to that hub; if this window was expected to host the server, something else already holds the port.`);
                                 return;
                         } catch (error) {
                                 lastError = error;
@@ -502,6 +503,7 @@ export class ClusterCoordinator {
                                 const identity = response.ok ? await response.json().catch(() => undefined) as { role?: string; protocol?: number; extensionVersion?: string } | undefined : undefined;
                                 if (identity?.role === 'hub' && identity.protocol === CLUSTER_PROTOCOL_VERSION && identity.extensionVersion === this.extensionVersion) {
                                         this.spokePort = undefined;
+                                        logger.warn(`[cluster] SPOKE — election found a hub already serving 127.0.0.1:${this.preferredPort} (extension ${this.extensionVersion}); yielding to it instead of hosting`);
                                         await this.becomeSpoke(this.preferredPort);
                                         return;
                                 }

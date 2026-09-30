@@ -22,6 +22,9 @@ let sharedTerminal: vscode.Terminal | undefined;
 
 let serverEnabled: boolean = false;
 
+let restartGeneration = 0;
+let restartChain: Promise<unknown> = Promise.resolve();
+
 const TERMINAL_NAME = 'MCP Shell Commands';
 
 function getToolConfiguration(): ToolConfiguration {
@@ -172,8 +175,58 @@ async function startOrJoinServer(
     return mcpServer;
 }
 
+async function restartServer(context: vscode.ExtensionContext): Promise<void> {
+    const generation = ++restartGeneration;
+    const queued = restartChain.then(
+        () => runRestart(context, generation),
+        () => runRestart(context, generation)
+    );
+    restartChain = queued;
+    try {
+        await queued;
+    } finally {
+        if (restartChain === queued) {
+            restartChain = Promise.resolve();
+        }
+    }
+}
+
+async function runRestart(context: vscode.ExtensionContext, generation: number): Promise<void> {
+    if (generation !== restartGeneration) {
+        logger.info('[runRestart] Superseded before it started — skipping');
+        return;
+    }
+    const current = mcpServer;
+    if (!serverEnabled || !current) {
+        return;
+    }
+
+    try {
+        await current.stop();
+    } catch (error) {
+        logger.error(`[runRestart] Stop failed before restart: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    if (generation !== restartGeneration) {
+        logger.info('[runRestart] Superseded while stopping — leaving the server to the newer restart');
+        return;
+    }
+    if (!serverEnabled) {
+        return;
+    }
+
+    mcpServer = undefined;
+    if (!(await startOrJoinServer(context, { resetPersistedOnFailure: true }))) {
+        return;
+    }
+    vscode.window.showInformationMessage('MCP Server restarted with updated configuration');
+}
+
 async function toggleServerState(context: vscode.ExtensionContext): Promise<void> {
     logger.info(`[toggleServerState] Starting toggle operation - changing from ${serverEnabled} to ${!serverEnabled}`);
+
+    restartGeneration++;
+    await restartChain.catch(() => undefined);
 
     serverEnabled = !serverEnabled;
 
@@ -253,30 +306,6 @@ async function ensureApiKey(context: vscode.ExtensionContext): Promise<string | 
     );
     return generated;
 }
-
-const copyApiKeyCommand = vscode.commands.registerCommand(
-    'vscode-mcp-server.copyApiKey',
-    async () => {
-        const key = await getStoredApiKey();
-        if (key) {
-            await vscode.env.clipboard.writeText(key);
-            vscode.window.showInformationMessage('API key copied to the clipboard.');
-        } else {
-            vscode.window.showInformationMessage('No API key found. Start the MCP server first, or use Generate API Key.');
-        }
-    }
-);
-
-const generateApiKeyCommand = vscode.commands.registerCommand(
-    'vscode-mcp-server.generateApiKey',
-    async () => {
-        await clearStoredApiKey();
-        const key = await generateAndStoreApiKey();
-        await vscode.env.clipboard.writeText(key);
-        await refreshApiKeyCache();
-        vscode.window.showInformationMessage('New API key generated and copied to the clipboard. The old key is now invalid.');
-    }
-);
 
 export async function activate(context: vscode.ExtensionContext) {
     logger.info('Activating vscode-mcp-server extension');
@@ -360,6 +389,30 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         );
 
+        const copyApiKeyCommand = vscode.commands.registerCommand(
+            'vscode-mcp-server.copyApiKey',
+            async () => {
+                const key = await getStoredApiKey();
+                if (key) {
+                    await vscode.env.clipboard.writeText(key);
+                    vscode.window.showInformationMessage('API key copied to the clipboard.');
+                } else {
+                    vscode.window.showInformationMessage('No API key found. Start the MCP server first, or use Generate API Key.');
+                }
+            }
+        );
+
+        const generateApiKeyCommand = vscode.commands.registerCommand(
+            'vscode-mcp-server.generateApiKey',
+            async () => {
+                await clearStoredApiKey();
+                const key = await generateAndStoreApiKey();
+                await vscode.env.clipboard.writeText(key);
+                await refreshApiKeyCache();
+                vscode.window.showInformationMessage('New API key generated and copied to the clipboard. The old key is now invalid.');
+            }
+        );
+
         const copyAgentInstructionsCommand = vscode.commands.registerCommand(
             'vscode-mcp-server.copyAgentInstructions',
             async () => {
@@ -379,14 +432,7 @@ export async function activate(context: vscode.ExtensionContext) {
             }
             logger.info('[configChangeListener] Server configuration changed - restarting if enabled');
             if (serverEnabled && mcpServer) {
-                await mcpServer.stop();
-                mcpServer = undefined;
-
-                if (!(await startOrJoinServer(context, { resetPersistedOnFailure: true }))) {
-                    return;
-                }
-
-                vscode.window.showInformationMessage('MCP Server restarted with updated configuration');
+                await restartServer(context);
             }
         });
 
