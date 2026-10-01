@@ -13,6 +13,7 @@ interface ShellStubOptions {
         pdfinfoFound: boolean;
         documentPages: number;
         raster?: 'ok' | 'timeout-after-writing' | 'hard-fail' | 'slow';
+        probe?: 'slow';
         budgetMs?: number;
 }
 
@@ -27,6 +28,9 @@ function loadOcrTools(options: ShellStubOptions): { render: ToolHandler; execute
                                 return { output: '/usr/bin/pdftoppm\n', exitCode: 0 };
                         }
                         if (command === 'command -v pdfinfo' || command === 'where.exe pdfinfo') {
+                                if (options.probe === 'slow') {
+                                        await new Promise(resolve => setTimeout(resolve, (options.budgetMs ?? 27000) * 0.75));
+                                }
                                 return options.pdfinfoFound
                                         ? { output: '/usr/bin/pdfinfo\n', exitCode: 0 }
                                         : { output: '', exitCode: 1 };
@@ -137,7 +141,7 @@ suite('render_pdf_pages_code page count', () => {
 
         test('a skipped page count says the budget ran out, not that pdfinfo is missing', async () => {
                 const pdf = fakePdf();
-                const { render } = loadOcrTools({ pdfinfoFound: true, documentPages: 5, raster: 'slow', budgetMs: 2000 });
+                const { render } = loadOcrTools({ pdfinfoFound: true, documentPages: 5, probe: 'slow', budgetMs: 2000 });
                 const text = firstText(await render({ pdfPath: pdf, firstPage: 1, lastPage: 2, dpi: 100 }));
                 assert.ok(
                         !/not found/i.test(text),
@@ -163,7 +167,7 @@ suite('render_pdf_pages_code page count', () => {
                 );
         });
 
-        test('a slow raster drops the page count rather than overrunning the client', async () => {
+        test('the page count is read before rasterizing, so a slow raster still reports it', async () => {
                 const pdf = fakePdf();
                 const { render, executed } = loadOcrTools({ pdfinfoFound: true, documentPages: 5, raster: 'slow', budgetMs: 2000 });
                 const result = await render({ pdfPath: pdf, firstPage: 1, lastPage: 2, dpi: 100 });
@@ -173,17 +177,23 @@ suite('render_pdf_pages_code page count', () => {
                         2,
                         'a metadata lookup must never cost us the rendered pages'
                 );
+                const text = firstText(result);
                 assert.ok(
-                        !executed.some(c => c.includes('pdfinfo') && !c.startsWith('command -v')),
-                        `pdfinfo must not run once the budget is spent, or the response arrives after the client gave up. Ran: ${executed.join(' | ')}`
+                        /of 5\b/.test(text),
+                        `with pdfinfo first the total is known even when the raster eats the budget. Got: ${text}`
                 );
                 assert.ok(
-                        /total page count unknown/i.test(firstText(result)),
-                        `with no budget left the tool must say the total is unknown. Got: ${firstText(result)}`
+                        !/total page count unknown/i.test(text),
+                        `the count must not be reported as unknown when pdfinfo already answered. Got: ${text}`
                 );
+                const runIndex = (needle: string) => executed.findIndex(c => c.includes(needle) && !c.startsWith('command -v') && !c.startsWith('where.exe'));
+                const pdfinfoRun = runIndex('pdfinfo');
+                const rasterRun = runIndex('pdftoppm');
+                assert.ok(pdfinfoRun >= 0, `pdfinfo must run. Ran: ${executed.join(' | ')}`);
+                assert.ok(rasterRun >= 0, `pdftoppm must run. Ran: ${executed.join(' | ')}`);
                 assert.ok(
-                        !/total page count unknown \(pdfinfo not found\)/i.test(firstText(result)),
-                        `the missing-binary wording is reserved for a real absence. Got: ${firstText(result)}`
+                        pdfinfoRun < rasterRun,
+                        `the page count must be read before the raster, not after. Ran: ${executed.join(' | ')}`
                 );
         });
 });

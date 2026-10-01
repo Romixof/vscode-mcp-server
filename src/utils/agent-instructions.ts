@@ -3,7 +3,7 @@ import { TOOL_HINTS } from './tool-annotations';
 
 const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
 
-export const AGENT_INSTRUCTIONS_VERSION = '11';
+export const AGENT_INSTRUCTIONS_VERSION = '12';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -147,7 +147,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     'PDF AND OCR (entirely local, nothing leaves the machine):',
     '[RO] pdf_needs_ocr_code(pdfPath, minCharsPerPage) - decide first: existing text layer or scanned document.',
     '[RO] render_pdf_pages_code(pdfPath, firstPage, lastPage, dpi) - page images the vision model reads directly.',
-    '[MUT] ocr_pdf_code(pdfPath, engine="auto"|"tesseract"|"vision", language, firstPage, lastPage, outputPath, timeoutMs) - extracted text; full text also written to outputPath when given.',
+    '[MUT] ocr_pdf_code(pdfPath, engine="auto"|"tesseract"|"vision", language, firstPage, lastPage, outputPath, timeoutMs) - extracted text; auto returns an existing text layer directly.',
     '',
     'NETWORK AND MISC:',
     '[MUT] test_api_endpoint_code(url, method, headers, body, timeout, validateStatus, allowPrivateNetwork=false) - live HTTP checks. Loopback always allowed; private/link-local/metadata IPs (169.254.169.254, RFC1918, tailnet 100.64/10) are blocked unless allowPrivateNetwork=true. Body capped at 1 MB.',
@@ -167,7 +167,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '- Risky commands: plan_mode_code(enabled=true) -> draft the calls (they only describe) -> present the plan -> enabled=false.',
     '- Long build/test (>10s): background_task_code(action="start", command) -> poll action="output".',
     '- Ship a change: find_secrets_code() -> security_scan_code() -> get_git_diff_code(staged=true) -> commit_changes_code(message).',
-    '- Read a scanned PDF: pdf_needs_ocr_code() -> render_pdf_pages_code() (vision reads images) or ocr_pdf_code() (returns text).',
+    '- Read a PDF: pdf_needs_ocr_code() -> text layer: ocr_pdf_code(engine="auto"); scanned: render_pdf_pages_code() (vision) or ocr_pdf_code(engine="tesseract").',
     '',
     'APPROVALS: [RO] tools are auto-approved - call them freely. [MUT] and [DST] may require manual approval - for multi-step modifications present a short plan first, then execute it.'
 ].join('\n');

@@ -209,6 +209,112 @@ async function runPool(tasks: Array<() => Promise<void>>, limit: number): Promis
     });
     await Promise.all(workers);
 }
+async function tryTextLayer(options: {
+    fileUri: vscode.Uri;
+    firstPage: number | undefined;
+    lastPage: number | undefined;
+    timeoutMs: number;
+    outputPath: string | undefined;
+    append: boolean;
+    workspace: string | undefined;
+}): Promise<CallToolResult | undefined> {
+    const { fileUri, firstPage, lastPage, timeoutMs, outputPath, append, workspace } = options;
+    const terminal = getOcrTerminal();
+    const cwd = path.dirname(fileUri.fsPath);
+    const pdftotextBin = await resolveBinary(terminal, cwd, 'pdftotext');
+    if (!pdftotextBin) {
+        return undefined;
+    }
+    const rangeArgs = [
+        firstPage !== undefined ? `-f ${firstPage}` : '',
+        lastPage !== undefined ? `-l ${lastPage}` : ''
+    ].filter(Boolean).join(' ');
+    const textResult = await executeShellCommand(
+        terminal,
+        `${shellSingleQuote(pdftotextBin)}${rangeArgs ? ` ${rangeArgs}` : ''} ${shellSingleQuote(fileUri.fsPath)} -`,
+        cwd,
+        Math.min(timeoutMs, 20000)
+    ).catch(() => ({ output: '', exitCode: 1 }));
+    if (textResult.exitCode !== 0 || !textResult.output.trim()) {
+        return undefined;
+    }
+    const pages = splitPages(textResult.output);
+    const firstPageNum = firstPage ?? 1;
+    const goodPages = pages.filter(p => p.trim().length >= DEFAULT_MIN_CHARS_PER_PAGE);
+    if (goodPages.length * 2 < pages.length) {
+        return undefined;
+    }
+    const scannedPages: number[] = [];
+    const combined = pages
+        .map((text, i) => {
+            const pageNum = firstPageNum + i;
+            if (text.trim().length >= DEFAULT_MIN_CHARS_PER_PAGE) {
+                return `--- Page ${pageNum} (text layer) ---\n${text.replace(/\n+$/, '')}`;
+            }
+            scannedPages.push(pageNum);
+            return `--- Page ${pageNum} (no text layer) ---\n[Page ${pageNum}: scanned, no usable text layer — render_pdf_pages_code (vision) or ocr_pdf_code(engine="tesseract", firstPage=${pageNum}, lastPage=${pageNum})]`;
+        })
+        .join('\n\n');
+    const scannedNote = scannedPages.length > 0
+        ? ` ${scannedPages.length} page(s) had no usable text layer and are marked below.`
+        : '';
+    const header = `Text layer found — ${pages.length} page(s) read directly with pdftotext, no OCR needed (${combined.length} characters).${scannedNote}`;
+    return finalizeOcrText({
+        combined,
+        header,
+        outputPath,
+        append,
+        workspace,
+        meta: `${path.basename(fileUri.fsPath)} pages ${firstPageNum}-${firstPageNum + pages.length - 1}`
+    });
+}
+async function finalizeOcrText(options: {
+    combined: string;
+    header: string;
+    tailNote?: string;
+    outputPath: string | undefined;
+    append: boolean;
+    workspace: string | undefined;
+    meta: string;
+}): Promise<CallToolResult> {
+    const { combined, header, tailNote = '', outputPath, append, workspace, meta } = options;
+    let savedNote = '';
+    if (outputPath) {
+        const outUri = resolveInputPath(outputPath, workspace);
+        let finalContent = combined;
+        if (append) {
+            const existing = await vscode.workspace.fs.readFile(outUri).then(b => Buffer.from(b).toString('utf-8'), () => undefined);
+            if (existing !== undefined) {
+                finalContent = existing.replace(/\n+$/, '') + '\n\n' + combined;
+            }
+        }
+        await vscode.workspace.fs.writeFile(outUri, Buffer.from(finalContent, 'utf-8'));
+        savedNote = append ? `\n\nAppended to "${outputPath}" (now ${finalContent.length} characters total).` : `\n\nFull text saved to "${outputPath}".`;
+    }
+    const ocrCompaction = compactOcrText(combined);
+    let previewSource = combined;
+    let compactNotice = '';
+    if (ocrCompaction.strategy !== 'skipped' || combined.length > DEFAULT_MAX_INLINE_CHARS) {
+        const handle = rememberOriginal('ocr', combined, meta);
+        if (ocrCompaction.strategy !== 'skipped') {
+            previewSource = ocrCompaction.text;
+            compactNotice = `\n\n${formatCompactionNotice(ocrCompaction, handle)}`;
+        }
+        else {
+            previewSource = combined.slice(0, DEFAULT_MAX_INLINE_CHARS);
+            compactNotice = `\n\n[@vscode-mcp: preview truncated at ${DEFAULT_MAX_INLINE_CHARS} chars. Full original available: retrieve_output_code "${handle}"]`;
+        }
+    }
+    const preview = previewSource.length > DEFAULT_MAX_INLINE_CHARS
+        ? previewSource.slice(0, DEFAULT_MAX_INLINE_CHARS) + `\n\n[…truncated, ${previewSource.length - DEFAULT_MAX_INLINE_CHARS} more characters${outputPath ? ' — see saved file' : ''}]`
+        : previewSource;
+    return {
+        content: [{
+                type: 'text' as const,
+                text: `${header}${savedNote}${tailNote}\n\n${preview}${compactNotice}`
+            }]
+    };
+}
 type PageCountSource = 'pdfinfo' | 'missing' | 'out-of-budget';
 
 function renderSummary(fileName: string, firstPage: number, lastPage: number, dpi: number, totalPages: number | undefined, source: PageCountSource): string {
@@ -236,7 +342,7 @@ export function registerOcrTools(server: McpServer): void {
 
 WHEN TO USE: before ocr_pdf_code, so you do not pay for OCR on a PDF that already has a text layer. Returns a per-page verdict plus the page ranges that actually need OCR.
 
-If most pages report text, read them with pdftotext (or a pdf skill) instead — faster and lossless.`, {
+If most pages report text, ocr_pdf_code(engine="auto") returns that text directly — faster and lossless.`, {
         pdfPath: z.string().describe('Path to the PDF to inspect'),
         minCharsPerPage: z.number().optional().default(DEFAULT_MIN_CHARS_PER_PAGE).describe(`A page with fewer extracted characters than this is considered "likely scanned". Defaults to ${DEFAULT_MIN_CHARS_PER_PAGE}.`),
         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
@@ -279,10 +385,13 @@ If most pages report text, read them with pdftotext (or a pdf skill) instead —
             const detail = scannedPages.length > 0 && scannedPages.length < pageCount
                 ? `\nPages scannées probables : ${scannedPages.map(p => p.page).join(', ')}`
                 : '';
+            const runtimeHint = totalChars > 0 && scannedPages.length < pageCount
+                ? `\n\n➡️ Lire ce texte sans OCR : ocr_pdf_code(engine="auto") sur ce PDF le renvoie directement (ou pdftotext en shell).`
+                : '';
             return {
                 content: [{
                         type: 'text' as const,
-                        text: `${verdict}${detail}\n\nPages : ${pageCount} — caractères extraits au total : ${totalChars}${pdfinfoBin ? '' : ' (page count estimated from pdftotext page breaks — pdfinfo not found, count may be slightly off for unusual PDFs)'}`
+                        text: `${verdict}${detail}\n\nPages : ${pageCount} — caractères extraits au total : ${totalChars}${pdfinfoBin ? '' : ' (page count estimated from pdftotext page breaks — pdfinfo not found, count may be slightly off for unusual PDFs)'}${runtimeHint}`
                     }]
             };
         }
@@ -321,6 +430,27 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
             const startedAt = Date.now();
             const remainingBudget = (): number => CLIENT_BUDGET_MS - (Date.now() - startedAt);
             const bounded = (cap: number): number => Math.max(750, Math.min(cap, remainingBudget()));
+            let totalPages: number | undefined;
+            let pageCountSource: PageCountSource = 'missing';
+            if (remainingBudget() < MIN_METADATA_BUDGET_MS) {
+                pageCountSource = 'out-of-budget';
+            }
+            else {
+                const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo', bounded(5000));
+                if (pdfinfoBin && remainingBudget() >= MIN_METADATA_BUDGET_MS) {
+                    const infoTimeout = Math.max(500, Math.min(PDFINFO_TIMEOUT_MS, remainingBudget() - MIN_METADATA_BUDGET_MS / 2));
+                    const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(fileUri.fsPath)}`, cwd, infoTimeout).catch(() => ({ output: '', exitCode: 1 }));
+                    const pagesMatch = infoResult.output.match(/^Pages:\s*(\d+)/m);
+                    const parsed = pagesMatch ? parseInt(pagesMatch[1], 10) : NaN;
+                    if (Number.isFinite(parsed) && parsed > 0) {
+                        totalPages = parsed;
+                        pageCountSource = 'pdfinfo';
+                    }
+                }
+                else if (pdfinfoBin) {
+                    pageCountSource = 'out-of-budget';
+                }
+            }
             const pdftoppmBin = await resolveBinary(terminal, cwd, 'pdftoppm', bounded(5000));
             if (!pdftoppmBin) {
                 return { content: [{ type: 'text' as const, text: missingBinaryMessage('pdftoppm', 'poppler-utils (e.g. "apt install poppler-utils" / "brew install poppler" / "winget install oschwartz10612.Poppler")') }], isError: true };
@@ -337,21 +467,6 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
                     ? `pdftoppm failed:\n${rasterResult.output}`
                     : 'pdftoppm produced no page images — check the page range is within the document.';
                 return { content: [{ type: 'text' as const, text: detail }], isError: true };
-            }
-            let totalPages: number | undefined;
-            let pageCountSource: PageCountSource = remainingBudget() >= MIN_METADATA_BUDGET_MS ? 'missing' : 'out-of-budget';
-            if (remainingBudget() >= MIN_METADATA_BUDGET_MS) {
-                const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo', bounded(5000));
-                if (pdfinfoBin) {
-                    const infoTimeout = Math.max(500, Math.min(PDFINFO_TIMEOUT_MS, remainingBudget() - MIN_METADATA_BUDGET_MS / 2));
-                    const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(fileUri.fsPath)}`, cwd, infoTimeout).catch(() => ({ output: '', exitCode: 1 }));
-                    const pagesMatch = infoResult.output.match(/^Pages:\s*(\d+)/m);
-                    const parsed = pagesMatch ? parseInt(pagesMatch[1], 10) : NaN;
-                    if (Number.isFinite(parsed) && parsed > 0) {
-                        totalPages = parsed;
-                        pageCountSource = 'pdfinfo';
-                    }
-                }
             }
             const summary = renderSummary(path.basename(fileUri.fsPath), firstPage, effectiveLast, dpi, totalPages, pageCountSource);
             const lateFinish = rasterResult.exitCode === 124
@@ -379,14 +494,14 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
     });
     server.tool('ocr_pdf_code', `Runs OCR on a scanned/image-only PDF and returns the extracted text.
 
-WHEN TO USE: after pdf_needs_ocr_code confirms there is no text layer. Do NOT run it on a PDF that already has one, it is slower and lossier than reading the text directly.
+WHEN TO USE: "tesseract" is for PDFs pdf_needs_ocr_code flagged as scanned — on a text-layer PDF it is slower and lossier. Engine "auto" is safe on any PDF: it returns the existing text layer verbatim when most requested pages have one.
 
-PAGE CAPS: the calling client enforces its own ~30s ceiling per tool call and timeoutMs cannot extend it. A call that dies client-side can leave the OCR terminal busy for the next call. So one call is capped at ${MAX_PAGES_PER_CALL.tesseract} pages for "tesseract", ${MAX_PAGES_PER_CALL.auto} for "auto", ${MAX_PAGES_PER_CALL.vision} for "vision", and a wider range is rejected immediately with the split instruction. For anything longer, call repeatedly over small consecutive ranges with the same outputPath and append:true.
+PAGE CAPS: the client enforces a ~30s ceiling per call that timeoutMs cannot extend. One call is capped at ${MAX_PAGES_PER_CALL.tesseract} pages for "tesseract", ${MAX_PAGES_PER_CALL.auto} for "auto", ${MAX_PAGES_PER_CALL.vision} for "vision"; a wider explicit range is rejected. For anything longer, call repeatedly over small consecutive ranges with the same outputPath and append:true.
 
 ENGINES:
 - "tesseract" (default): fast, needs pdftoppm and the language trained data. Weak on handwriting, faint scans, unusual fonts.
 - "vision": sends page images to a local Ollama model (visionModel, default ${DEFAULT_OLLAMA_VISION_MODEL}) for verbatim transcription. Better on handwriting and poor scans, but seconds to a minute per page. Nothing leaves the machine. Prefer render_pdf_pages_code if you would rather read the pages yourself with no local setup.
-- "auto": tesseract first, then retries just the low-confidence pages with the vision engine. Good for mixed clean/handwritten batches; keep them small.
+- "auto": reads the text layer first and returns it verbatim when most requested pages have one (scanned pages are marked with a next-call hint); otherwise tesseract, then vision escalation for low-confidence pages. Good on any PDF.
 
 The returned text is compacted, and a retrieve_output_code handle in the notice gives the full text when no outputPath was set.`, {
         pdfPath: z.string().describe('Path to the scanned PDF'),
@@ -405,6 +520,17 @@ The returned text is compacted, and a retrieve_output_code handle in the notice 
     }, async ({ pdfPath, engine = 'tesseract', language = 'eng', firstPage, lastPage, dpi = DEFAULT_DPI, ollamaUrl = DEFAULT_OLLAMA_URL, visionModel = DEFAULT_OLLAMA_VISION_MODEL, visionConfidenceThreshold = DEFAULT_VISION_CONFIDENCE_THRESHOLD, outputPath, append = false, timeoutMs = DEFAULT_OCR_TIMEOUT_MS, workspace }) => {
         let tmpDir: string | undefined;
         try {
+            const fileUri = resolveInputPath(pdfPath, workspace);
+            const stat = await Promise.resolve(vscode.workspace.fs.stat(fileUri)).catch(() => undefined);
+            if (!stat) {
+                return { content: [{ type: 'text' as const, text: `File not found: "${pdfPath}".` }], isError: true };
+            }
+            if (engine === 'auto') {
+                const textLayer = await tryTextLayer({ fileUri, firstPage, lastPage, timeoutMs, outputPath, append, workspace });
+                if (textLayer) {
+                    return textLayer;
+                }
+            }
             if (firstPage && lastPage) {
                 const requested = lastPage - firstPage + 1;
                 const cap = MAX_PAGES_PER_CALL[engine];
@@ -417,11 +543,6 @@ The returned text is compacted, and a retrieve_output_code handle in the notice 
                         isError: true
                     };
                 }
-            }
-            const fileUri = resolveInputPath(pdfPath, workspace);
-            const stat = await Promise.resolve(vscode.workspace.fs.stat(fileUri)).catch(() => undefined);
-            if (!stat) {
-                return { content: [{ type: 'text' as const, text: `File not found: "${pdfPath}".` }], isError: true };
             }
             let visionReady = false;
             let visionUnavailableReason = '';
@@ -577,45 +698,17 @@ The returned text is compacted, and a retrieve_output_code handle in the notice 
             const combined = pageResults
                 .map(p => `--- Page ${p.pageNum} (${p.engineUsed}) ---\n${p.text}`)
                 .join('\n\n');
-            let savedNote = '';
-            if (outputPath) {
-                const outUri = resolveInputPath(outputPath, workspace);
-                let finalContent = combined;
-                if (append) {
-                    const existing = await vscode.workspace.fs.readFile(outUri).then(b => Buffer.from(b).toString('utf-8'), () => undefined);
-                    if (existing !== undefined) {
-                        finalContent = existing.replace(/\n+$/, '') + '\n\n' + combined;
-                    }
-                }
-                await vscode.workspace.fs.writeFile(outUri, Buffer.from(finalContent, 'utf-8'));
-                savedNote = append ? `\n\nAppended to "${outputPath}" (now ${finalContent.length} characters total).` : `\n\nFull text saved to "${outputPath}".`;
-            }
-            const ocrCompaction = compactOcrText(combined);
-            let previewSource = combined;
-            let compactNotice = '';
-            if (ocrCompaction.strategy !== 'skipped' || combined.length > DEFAULT_MAX_INLINE_CHARS) {
-                const meta = `${path.basename(fileUri.fsPath)} pages ${firstPage ?? 1}-${(firstPage ?? 1) + images.length - 1}`;
-                const handle = rememberOriginal('ocr', combined, meta);
-                if (ocrCompaction.strategy !== 'skipped') {
-                    previewSource = ocrCompaction.text;
-                    compactNotice = `\n\n${formatCompactionNotice(ocrCompaction, handle)}`;
-                }
-                else {
-                    previewSource = combined.slice(0, DEFAULT_MAX_INLINE_CHARS);
-                    compactNotice = `\n\n[@vscode-mcp: preview truncated at ${DEFAULT_MAX_INLINE_CHARS} chars. Full original available: retrieve_output_code "${handle}"]`;
-                }
-            }
-            const preview = previewSource.length > DEFAULT_MAX_INLINE_CHARS
-                ? previewSource.slice(0, DEFAULT_MAX_INLINE_CHARS) + `\n\n[…truncated, ${previewSource.length - DEFAULT_MAX_INLINE_CHARS} more characters${outputPath ? ' — see saved file' : ''}]`
-                : previewSource;
             const visionCount = pageResults.filter(p => p.engineUsed === 'vision').length;
             const engineNote = engine === 'auto' && visionCount > 0 ? ` (${visionCount} page(s) escalated to local vision)` : '';
-            return {
-                content: [{
-                        type: 'text' as const,
-                        text: `OCR done — ${images.length} page(s)${engineNote}, ${combined.length} characters total.${savedNote}${skipFooter}\n\n${preview}${compactNotice}`
-                    }]
-            };
+            return finalizeOcrText({
+                combined,
+                header: `OCR done — ${images.length} page(s)${engineNote}, ${combined.length} characters total.`,
+                tailNote: skipFooter,
+                outputPath,
+                append,
+                workspace,
+                meta: `${path.basename(fileUri.fsPath)} pages ${firstPage ?? 1}-${(firstPage ?? 1) + images.length - 1}`
+            });
         }
         catch (error) {
             console.error('[ocr_pdf_code] Error:', error);

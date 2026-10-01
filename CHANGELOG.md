@@ -4,6 +4,14 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.19] - 2026-10-01
+### Fixed
+- `ocr_pdf_code` with `engine: "auto"` now reads the PDF's text layer before reaching for OCR. The flow was one-way to tesseract: every call rasterized the document, ran OCR on it, and the text layer — which `pdftotext` already extracts verbatim, faster and without OCR noise — was never consulted. With `auto`, `pdftotext` runs first; when most requested pages carry usable text, the extraction comes back directly, the scanned minority is marked with the next call to make, and the Ollama probe never happens. The per-engine page cap now sits after the fast path, so it only bites the raster path; an explicit `"tesseract"` call takes the old road unchanged. Runtime hint added to `pdf_needs_ocr_code`'s verdict when text was found. Guide version 11 to 12.
+- `render_pdf_pages_code` reads the page count before rasterizing, not after. The old order spent the client time budget on `pdftoppm` first and then tried to fit `pdfinfo` into whatever was left, so the one number that tells a model whether it is looking at page 2 of 2 or page 2 of 130 was exactly the one dropped on large documents — the calls most likely to be slow. The count is now read first with a bounded budget; only a genuinely spent budget still reports the total as unknown, and the wording distinguishes that from a missing `pdfinfo`.
+
+### Changed
+- Tool descriptions of the three PDF tools name the text-layer route so a model picks `engine: "auto"` without having to read the guide. The tools/list payload is 27,195 of 27,200 tokens.
+
 ## [0.20.18] - 2026-09-30
 ### Fixed
 - Refusing a binary now ends with the call to make. A client handed a model ten tools, three of them PDF readers; the model called `read_file_code` on a PDF, received a refusal naming all three readers, and reported that the document was unreadable. Every other redirect this server emits is syntactic — compaction ends with `[@vscode-mcp: ... retrieve_output_code "handle"]` and `diff_preview_code` ends with the exact call that applies the diff — while the PDF refusal was prose. It now ends the same way, carrying the real path. `read_file_code`'s description names `ocr_pdf_code` and `render_pdf_pages_code` outright instead of promising "a pointer to the tool that reads it", which meant the destination could only be learned by failing first.

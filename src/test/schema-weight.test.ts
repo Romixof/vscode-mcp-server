@@ -70,6 +70,7 @@ suite('tools/list payload budget', () => {
         test('the total payload stays under the ceiling', async () => {
                 const tools = await fetchToolList();
                 const tokens = Math.round(JSON.stringify(tools).length / 4);
+                console.log(`  payload: ${tokens} tok of ${PAYLOAD_CEILING}`);
                 assert.ok(tokens <= PAYLOAD_CEILING, `payload ${tokens} tok exceeds ceiling ${PAYLOAD_CEILING}`);
         });
 
