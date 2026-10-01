@@ -4,6 +4,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { registerAdvancedTools } from '../tools/advanced-tools';
 import { detectShellKind } from '../tools/shell-tools';
+import { detectRuntimeFacts } from '../utils/runtime-facts';
+import type { Context } from 'mocha';
 
 type TerminalArg = Parameters<typeof detectShellKind>[0];
 
@@ -38,7 +40,12 @@ function captureHandler(shellInfo?: () => string | undefined): () => Promise<{ t
         };
 }
 
-suite('server info shell report', () => {
+suite('server info shell report', function () {
+        suiteSetup(async function (this: Context) {
+                this.timeout(15000);
+                await detectRuntimeFacts();
+        });
+
         test('server info reports a bash terminal', async () => {
                 const terminal = fakeTerminal('C:\\Program Files\\Git\\bin\\bash.exe');
                 const call = captureHandler(() => detectShellKind(terminal));

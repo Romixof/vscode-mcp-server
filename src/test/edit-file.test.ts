@@ -13,7 +13,7 @@ async function withTempFile<T>(name: string, content: string, fn: (uri: vscode.U
         try {
                 return await fn(vscode.Uri.file(file));
         } finally {
-                fs.rmSync(dir, { recursive: true, force: true });
+                fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         }
 }
 

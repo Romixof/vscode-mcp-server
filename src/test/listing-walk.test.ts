@@ -19,7 +19,7 @@ suite('listing walk integration', () => {
         });
 
         suiteTeardown(() => {
-                fs.rmSync(root, { recursive: true, force: true });
+                fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         });
 
         test('the walk really skips build noise', async () => {

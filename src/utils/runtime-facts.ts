@@ -25,31 +25,36 @@ const PROBE_SCRIPT = [
         'print(json.dumps({"python":platform.python_version(),"libs":out}))'
 ].join('\n');
 
-let cachedRuntime: RuntimeFacts | undefined;
+let cachedRuntime: Promise<RuntimeFacts> | undefined;
 
-export function detectRuntimeFacts(): RuntimeFacts {
-        if (cachedRuntime) {
-                return cachedRuntime;
-        }
+function probeRuntime(): Promise<RuntimeFacts> {
         const facts: RuntimeFacts = { platform: process.platform, python: 'not on the extension host PATH' };
-        const { execFileSync } = require('child_process') as typeof import('child_process');
-        try {
-                const raw = execFileSync('python', ['-c', PROBE_SCRIPT], {
-                        stdio: ['ignore', 'pipe', 'ignore'],
-                        timeout: 4000,
-                        windowsHide: true
-                }).toString().trim();
-                const parsed = JSON.parse(raw) as { python: string; libs: Record<string, boolean> };
-                facts.python = parsed.python;
-                const libs: Record<string, boolean> = {};
-                for (const [label, module] of LIB_PROBES) {
-                        libs[label] = parsed.libs[module] === true;
-                }
-                facts.libs = libs;
-        } catch {
+        const { execFile } = require('child_process') as typeof import('child_process');
+        return new Promise<RuntimeFacts>(resolve => {
+                execFile('python', ['-c', PROBE_SCRIPT], { timeout: 4000, windowsHide: true }, (error, stdout) => {
+                        if (!error && stdout) {
+                                try {
+                                        const parsed = JSON.parse(stdout.toString().trim()) as { python: string; libs: Record<string, boolean> };
+                                        facts.python = parsed.python;
+                                        const libs: Record<string, boolean> = {};
+                                        for (const [label, module] of LIB_PROBES) {
+                                                libs[label] = parsed.libs[module] === true;
+                                        }
+                                        facts.libs = libs;
+                                }
+                                catch {
+                                }
+                        }
+                        resolve(facts);
+                });
+        });
+}
+
+export function detectRuntimeFacts(): Promise<RuntimeFacts> {
+        if (!cachedRuntime) {
+                cachedRuntime = probeRuntime();
         }
-        cachedRuntime = facts;
-        return facts;
+        return cachedRuntime;
 }
 
 export function runtimeSection(facts: RuntimeFacts): string {

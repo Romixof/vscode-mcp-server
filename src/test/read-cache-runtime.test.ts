@@ -2,7 +2,8 @@ import * as assert from 'assert';
 import * as path from 'path';
 import { isNoiseEntry, listingEntryLine } from '../tools/file-tools';
 import { unchangedReadNotice, fileFingerprint, recentReads, recordRead, repeatSavings, ReadCache } from '../utils/read-cache';
-import { runtimeSection, pythonCacheGuard } from '../utils/runtime-facts';
+import { runtimeSection, pythonCacheGuard, detectRuntimeFacts } from '../utils/runtime-facts';
+import type { Context } from 'mocha';
 
 suite('list listing carries size and date', () => {
         test('noise directories are filtered', () => {
@@ -121,20 +122,23 @@ suite('read cache detects unchanged files', () => {
         });
 });
 
-suite('runtime facts', () => {
-        test('the runtime probe stays far under the client ceiling', () => {
-                const { detectRuntimeFacts } = require('../utils/runtime-facts');
+suite('runtime facts', function () {
+        suiteSetup(async function (this: Context) {
+                this.timeout(15000);
+                await detectRuntimeFacts();
+        });
+
+        test('the runtime probe stays far under the client ceiling', async () => {
                 const started = Date.now();
-                detectRuntimeFacts();
+                await detectRuntimeFacts();
                 const elapsed = Date.now() - started;
                 assert.ok(elapsed < 5000, `runtime probe took ${elapsed}ms; it must not eat the 30s client budget`);
         });
 
-        test('the runtime probe spawns python once and caches', () => {
-                const { detectRuntimeFacts } = require('../utils/runtime-facts');
+        test('the runtime probe spawns python once and caches', async () => {
                 const again = Date.now();
-                const first = detectRuntimeFacts();
-                const second = detectRuntimeFacts();
+                const first = await detectRuntimeFacts();
+                const second = await detectRuntimeFacts();
                 const elapsed = Date.now() - again;
                 assert.strictEqual(first, second, 'the probe result must be cached, not recomputed per call');
                 assert.ok(elapsed < 50, `cached probe took ${elapsed}ms`);

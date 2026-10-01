@@ -2,6 +2,36 @@ const startedAt = Date.now();
 const callCounts = new Map<string, number>();
 let registered: string[] = [];
 
+export interface UsagePersistence {
+	load(): Record<string, number> | undefined;
+	save(counts: Record<string, number>): void;
+}
+
+let persistence: UsagePersistence | undefined;
+
+export function setUsagePersistence(store: UsagePersistence | undefined): void {
+	persistence = store;
+	const stored = store?.load();
+	if (stored) {
+		for (const [tool, calls] of Object.entries(stored)) {
+			if (typeof calls === 'number' && Number.isFinite(calls) && calls > 0) {
+				callCounts.set(tool, Math.max(callCounts.get(tool) ?? 0, Math.floor(calls)));
+			}
+		}
+	}
+}
+
+export function saveUsage(): void {
+	if (!persistence) {
+		return;
+	}
+	const counts: Record<string, number> = {};
+	for (const [tool, calls] of callCounts.entries()) {
+		counts[tool] = calls;
+	}
+	persistence.save(counts);
+}
+
 export function setRegisteredTools(names: string[]): void {
 	registered = [...names];
 }

@@ -5,6 +5,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { MCPServer, ToolConfiguration } from '../server';
 import { registerAdvancedTools } from '../tools/advanced-tools';
 import { recordToolCall, setRegisteredTools, getNeverCalledTools, getNeverCalledCount } from '../utils/usage';
+import { detectRuntimeFacts } from '../utils/runtime-facts';
+import type { Context } from 'mocha';
 import { TOOL_HINTS } from '../utils/tool-annotations';
 
 const ALL_GROUPS_ON = {
@@ -56,7 +58,12 @@ async function serverInfoText(): Promise<string> {
         return (result.content ?? []).map(c => c.text ?? '').join('\n');
 }
 
-suite('registered tools that were never called', () => {
+suite('registered tools that were never called', function () {
+        suiteSetup(async function (this: Context) {
+                this.timeout(15000);
+                await detectRuntimeFacts();
+        });
+
         teardown(() => {
                 setRegisteredTools([]);
         });

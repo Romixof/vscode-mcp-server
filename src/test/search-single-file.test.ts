@@ -45,7 +45,7 @@ suite('search_workspace_code on a file path', () => {
         });
 
         teardown(() => {
-                rmSync(root, { recursive: true, force: true });
+                rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         });
 
         test('a named file is searched instead of refused', async () => {

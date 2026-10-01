@@ -73,7 +73,7 @@ function formatExtensionList(title: string, extensions: ExtensionSummary[]): str
 export function registerAdvancedTools(server: McpServer, endpoint: { host: string; port: number }, clusterInfo?: () => string | undefined, authInfo?: () => string, shellInfo?: () => string | undefined): void {
         server.tool(
                 'get_server_info_code',
-                `Reports this MCP server's own status: extension/VS Code/Node versions, platform, remote environment (devcontainer / WSL / SSH), open workspace folders, uptime, and how many times each tool has been called since activation.
+                `Reports this MCP server's own status: extension/VS Code/Node versions, platform, remote environment (devcontainer / WSL / SSH), open workspace folders, uptime, and how many times each tool has been called across sessions.
 
         WHEN TO USE: Debugging connectivity ("is it running? where?"), checking which remote the client must reach, reviewing what an agent session has been doing.
 
@@ -93,12 +93,12 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
                                 `- Node version: ${process.version}`,
                                 `- Platform: ${process.platform}`,
                                 `- Shell: ${shellInfo ? shellInfo() : 'unknown'}`,
-                                runtimeSection(detectRuntimeFacts()),
+                                runtimeSection(await detectRuntimeFacts()),
                                 `- Environment: ${remoteName ? `remote "${remoteName}" — clients on another machine need port forwarding or a connection inside this remote` : 'local'}`,
                                 ...(authInfo ? [`- Auth: ${authInfo()}`] : []),
                                 `- Open workspace folders (${folders.length}): ${folders.length ? folders.map((f, i) => `${i + 1}=${f.name}`).join(', ') : 'none'}`,
                                 `- Uptime: ${uptimeSeconds}s`,
-                                `- Tool calls since activation: ${getTotalCalls()}`
+                                `- Tool calls across sessions: ${getTotalCalls()}`
                         ];
                         if (usage.length > 0) {
                                 lines.push('- Top tools: ' + usage.map(u => `${u.tool} (${u.calls})`).join(', '));
@@ -107,7 +107,7 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
                         if (neverTotal > 0) {
                                 const shown = getNeverCalledTools(NEVER_CALLED_SHOWN).join(', ');
                                 const more = neverTotal > NEVER_CALLED_SHOWN ? `, and ${neverTotal - NEVER_CALLED_SHOWN} more` : '';
-                                lines.push(`- Registered but never called since activation (${neverTotal}): ${shown}${more}`);
+                                lines.push(`- Registered but never called across sessions (${neverTotal}): ${shown}${more}`);
                         }
                         const clusterLine = clusterInfo?.();
                         if (clusterLine) {

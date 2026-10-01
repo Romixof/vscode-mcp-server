@@ -4,6 +4,18 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.20] - 2026-10-01
+### Fixed
+- The first `get_server_info_code` of a session froze the whole extension host for up to four seconds. `detectRuntimeFacts` probed python through `execFileSync`, so every extension in the window stalled while python started. The probe runs once per session and both suites that call the handler share one process, so whichever paid it first was the one that lost its test to the two-second mocha budget — which is why the same flake read `server info shell report` in 0.20.17 and `usage-never-called` in 0.20.19. It now runs through `execFile` on a promise cached for the session, and both suites prime it in a `suiteSetup` hook.
+- `edit_file_code`'s intermittent failure had a third cause, and none of the three were timing in the code under test. `replace_all changes every occurrence` opens a real document through VS Code's API, and the helper that deletes its temp directory then hit `ENOTEMPTY` on Windows: a file watcher or scanner touches the directory while the recursive delete walks it. Five test helpers cleaned up that way, and `node`'s `rmSync` has `maxRetries` and `retryDelay` for precisely this race; all five now pass them. The two-second test budget was left untouched, because it was never the problem.
+- Tool-call counters survive a window reload. `usage.ts` stays free of `vscode` imports: an injected load/save pair merges stored counts on activation and flushes the map in `deactivate`, the same shape as the audit log. The two lines that said "since activation" now say "across sessions", because that is what they count.
+
+### Changed
+- `tools/list` payload is 27,194 of 27,200 tokens. No tool was added or removed; the description change that freed one token says "across sessions" where it meant it.
+
+### Closed
+- The `fetch failed` reports from 28 September, open since 0.20.17, are explained by logs rather than by code. Across all fifteen retained sessions, 27 September to 1 October, the server starts exactly once per window on `127.0.0.1:3400`, with no `[cluster] SPOKE`, no `EADDRINUSE` and no election — including the sessions after 0.20.17 that instrument exactly that path, and the one on 1 October that was restarted three times. On the day itself the server served remote clients until a `render_pdf_pages_code` call, then went quiet until deactivation, logging no error; the server logs every request it receives, so the failing requests never arrived and the spoke hypothesis is discarded. What remains is transport: restart windows the logs do show — 13 seconds on 1 October at 20:51, a deactivate, reactivate and toggle sequence — and a client-side socket reset on multi-megabyte `render_pdf_pages_code` replies. The mitigation is a retry in the client, not a change here.
+
 ## [0.20.19] - 2026-10-01
 ### Fixed
 - `ocr_pdf_code` with `engine: "auto"` now reads the PDF's text layer before reaching for OCR. The flow was one-way to tesseract: every call rasterized the document, ran OCR on it, and the text layer — which `pdftotext` already extracts verbatim, faster and without OCR noise — was never consulted. With `auto`, `pdftotext` runs first; when most requested pages carry usable text, the extraction comes back directly, the scanned minority is marked with the next call to make, and the Ollama probe never happens. The per-engine page cap now sits after the fast path, so it only bites the raster path; an explicit `"tesseract"` call takes the old road unchanged. Runtime hint added to `pdf_needs_ocr_code`'s verdict when text was found. Guide version 11 to 12.

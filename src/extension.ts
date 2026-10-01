@@ -7,6 +7,7 @@ import { setSandboxConfigProvider } from './utils/workspace';
 import { flushJournalNow } from './utils/workspace-state';
 import type { SandboxMode } from './utils/sandbox';
 import { initAudit } from './auth/audit';
+import { setUsagePersistence, saveUsage } from './utils/usage';
 import { Dashboard, setDashboardRef } from './dashboard';
 import { setSecretStorage, getStoredApiKey, generateAndStoreApiKey, clearStoredApiKey } from './auth';
 import { setScopedKeyStorage } from './auth/scoped-keys';
@@ -325,6 +326,10 @@ export async function activate(context: vscode.ExtensionContext) {
     );
     setSecretStorage(context.secrets);
     setScopedKeyStorage(context.secrets);
+    setUsagePersistence({
+        load: () => context.globalState.get<Record<string, number>>('usage.counts', {}),
+        save: counts => context.globalState.update('usage.counts', counts)
+    });
 
     try {
 
@@ -461,6 +466,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 export async function deactivate() {
     flushJournalNow();
+    saveUsage();
     if (statusBarItem) {
         statusBarItem.dispose();
         statusBarItem = undefined;
