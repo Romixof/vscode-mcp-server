@@ -4,6 +4,13 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.21] - 2026-10-01
+### Added
+- `get_server_info_code` reports the machine's binary picture. One call now answers which PDF routes can actually run: pdftotext, pdfinfo, pdftoppm, tesseract and Git Bash, each with its resolved path, or when missing, the same install hint that would otherwise surface as a failed tool call — tesseract with the working `winget install UB-Mannheim.TesseractOCR` id. The probe runs `where.exe` on Windows and `command -v` elsewhere, off the event loop, with the usual Windows install locations as fallback. The binary knowledge the OCR and render tools already carried — fallback directories, git-bash discovery, the poppler hint — moved to `utils/binaries.ts`, so the doctor and the error messages cannot drift apart.
+
+### Changed
+- A missing-binary error now ends by naming `get_server_info_code`, so one call tells the whole story instead of the next tool failing the same way. The tools/list payload is unchanged at 27,194 of 27,200 tokens: no tool was added and no description moved.
+
 ## [0.20.20] - 2026-10-01
 ### Fixed
 - The first `get_server_info_code` of a session froze the whole extension host for up to four seconds. `detectRuntimeFacts` probed python through `execFileSync`, so every extension in the window stalled while python started. The probe runs once per session and both suites that call the handler share one process, so whichever paid it first was the one that lost its test to the two-second mocha budget — which is why the same flake read `server info shell report` in 0.20.17 and `usage-never-called` in 0.20.19. It now runs through `execFile` on a promise cached for the session, and both suites prime it in a `suiteSetup` hook.

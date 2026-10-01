@@ -9,6 +9,7 @@ import { resolveInputPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspac
 import { executeShellCommand, CLIENT_BUDGET_MS } from './shell-tools';
 import { compactOcrText, rememberOriginal, formatCompactionNotice } from '../utils/token-efficiency';
 import { assertUrlSafe } from '../utils/security-helpers';
+import { WINDOWS_FALLBACK_DIRS, findGitBash, POPPLER_HINT } from '../utils/binaries';
 
 const DEFAULT_MIN_CHARS_PER_PAGE = 20;
 const DEFAULT_DPI = 300;
@@ -26,36 +27,10 @@ const MAX_PAGES_PER_CALL = {
 const DEFAULT_OCR_TIMEOUT_MS = 25000;
 const MIN_METADATA_BUDGET_MS = 1000;
 const PDFINFO_TIMEOUT_MS = 2000;
-function winToBashPath(value: string): string {
-    return value.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_: string, d: string) => `/${d.toLowerCase()}`);
-}
-const WINDOWS_FALLBACK_DIRS: Record<string, string[]> = {
-    tesseract: [
-        '/c/Program Files/Tesseract-OCR',
-        '/c/Program Files (x86)/Tesseract-OCR',
-        ...(process.env.LocalAppData ? [`${winToBashPath(process.env.LocalAppData)}/Programs/Tesseract-OCR`] : [])
-    ]
-};
 function shellSingleQuote(value: string): string {
     return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 const OCR_TERMINAL_NAME = 'MCP OCR';
-const GIT_BASH_CANDIDATES = process.platform === 'win32' ? [
-    `${process.env.ProgramFiles || 'C:\\Program Files'}\\Git\\bin\\bash.exe`,
-    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
-    `${process.env.LocalAppData || ''}\\Programs\\Git\\bin\\bash.exe`
-].filter(p => p.length > 0 && !p.startsWith('\\')) : [];
-function findGitBash(): string | undefined {
-    for (const candidate of GIT_BASH_CANDIDATES) {
-        try {
-            if (fs.existsSync(candidate)) {
-                return candidate;
-            }
-        }
-        catch { /* ignore */ }
-    }
-    return undefined;
-}
 function getOcrTerminal(): vscode.Terminal {
     const existing = vscode.window.terminals.find(t => t.name === OCR_TERMINAL_NAME && t.exitStatus === undefined);
     if (existing) {
@@ -91,7 +66,7 @@ function missingBinaryMessage(bin: string, installHint: string): string {
         : '';
     return `"${bin}" is not available on PATH — install ${installHint}.${fallbackNote} `
         + 'If you just installed it and this still fails, fully quit and relaunch VS Code (not just the terminal) — '
-        + 'a PATH change made by an installer is not visible to a process, like VS Code, that was already running when it happened.';
+        + 'a PATH change made by an installer is not visible to a process, like VS Code, that was already running when it happened. Run get_server_info_code for the full binary picture on this machine.';
 }
 function splitPages(rawText: string): string[] {
     const pages = rawText.split('\f');
@@ -357,7 +332,7 @@ If most pages report text, ocr_pdf_code(engine="auto") returns that text directl
             const cwd = path.dirname(fileUri.fsPath);
             const pdftotextBin = await resolveBinary(terminal, cwd, 'pdftotext');
             if (!pdftotextBin) {
-                return { content: [{ type: 'text' as const, text: missingBinaryMessage('pdftotext', 'poppler-utils (e.g. "apt install poppler-utils" / "brew install poppler" / "winget install oschwartz10612.Poppler")') }], isError: true };
+                return { content: [{ type: 'text' as const, text: missingBinaryMessage('pdftotext', POPPLER_HINT) }], isError: true };
             }
             let totalPages: number | undefined;
             const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo');
@@ -453,7 +428,7 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
             }
             const pdftoppmBin = await resolveBinary(terminal, cwd, 'pdftoppm', bounded(5000));
             if (!pdftoppmBin) {
-                return { content: [{ type: 'text' as const, text: missingBinaryMessage('pdftoppm', 'poppler-utils (e.g. "apt install poppler-utils" / "brew install poppler" / "winget install oschwartz10612.Poppler")') }], isError: true };
+                return { content: [{ type: 'text' as const, text: missingBinaryMessage('pdftoppm', POPPLER_HINT) }], isError: true };
             }
             tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-render-'));
             const pagePrefix = path.join(tmpDir, 'page');

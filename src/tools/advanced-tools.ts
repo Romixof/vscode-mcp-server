@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveWorkspaceFolder, listWorkspaceFolders, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { getUsageSnapshot, getTotalCalls, getServerStartTime, getNeverCalledTools, getNeverCalledCount } from '../utils/usage';
+import { probePdfBinaries, BinaryStatus } from '../utils/binaries';
 import { detectRuntimeFacts, runtimeSection } from '../utils/runtime-facts';
 import { loadAllMemory } from './memory-tools';
 import { collectSkillsList } from './skills-tools';
@@ -62,6 +63,18 @@ function readWorkspaceRecommendations(root: string): string[] {
 
 const NEVER_CALLED_SHOWN = 20;
 
+function binariesSection(statuses: BinaryStatus[]): string[] {
+        const lines = ['Binaries:'];
+        for (const status of statuses) {
+                lines.push(`  - ${status.name}: ${status.found ? `found (${status.path})` : `missing — install ${status.hint}`}`);
+        }
+        const missing = statuses.filter(s => !s.found).map(s => s.name);
+        if (missing.length > 0) {
+                lines.push(`  ${missing.join(', ')} unavailable — the tools that need them will refuse with the same hint until they are installed.`);
+        }
+        return lines;
+}
+
 function formatExtensionList(title: string, extensions: ExtensionSummary[]): string {
         if (extensions.length === 0) {
                 return `${title}: none.`;
@@ -84,6 +97,7 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
                         const usage = getUsageSnapshot().slice(0, 20);
                         const uptimeSeconds = Math.round((Date.now() - getServerStartTime()) / 1000);
                         const remoteName = (vscode.env as { remoteName?: string | undefined }).remoteName;
+                        const binaries = await probePdfBinaries();
 
                         const lines = [
                                 'Server status',
@@ -94,6 +108,7 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
                                 `- Platform: ${process.platform}`,
                                 `- Shell: ${shellInfo ? shellInfo() : 'unknown'}`,
                                 runtimeSection(await detectRuntimeFacts()),
+                                ...binariesSection(binaries),
                                 `- Environment: ${remoteName ? `remote "${remoteName}" — clients on another machine need port forwarding or a connection inside this remote` : 'local'}`,
                                 ...(authInfo ? [`- Auth: ${authInfo()}`] : []),
                                 `- Open workspace folders (${folders.length}): ${folders.length ? folders.map((f, i) => `${i + 1}=${f.name}`).join(', ') : 'none'}`,
