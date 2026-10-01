@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
   "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.20.21",
+  "version": "0.20.22",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -16,7 +16,7 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "contributes": {
     "configuration": {
       "title": "MCP Server",
@@ -247,7 +247,8 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "compile": "tsc -p ./ && npm run bundle",
+        "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --platform=node --target=node20 --format=cjs --external:vscode --minify --sourcemap --sources-content=false",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
@@ -267,6 +268,7 @@
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.28.2",
     "eslint": "^9.23.0",
     "proxyquire": "^2.1.3",
     "sinon": "^16.1.1",

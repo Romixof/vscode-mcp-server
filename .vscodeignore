@@ -1,5 +1,8 @@
 src/**
-out/test/**
+out/**
+node_modules/**
+dist/*.map
+media/demo.mp4
 tsconfig.json
 **/.git
 **/.vscode

@@ -4,6 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.22] - 2026-10-02
+### Changed
+- The extension ships one bundled file instead of 4,254. esbuild bundles `src/extension.ts` into `dist/extension.js` — 1.6 MB, minified, node20/cjs, `vscode` external — and `node_modules` and `out/` are no longer packaged, so express, the MCP SDK and zod ride inside the bundle rather than as 4,123 files on disk. `main` points at the bundle and `compile` builds both halves, so `vscode:prepublish` and `pretest` always package a fresh one. A smoke test requires the bundle from inside the extension host and asserts it still exports `activate` and `deactivate`: the suite alone never loaded the shipped entry point.
+- The vsix is 1.31 MB instead of 8.45 MB, and 11 files instead of 4,254. `media/demo.mp4` (2.3 MB) was packaged and referenced by nothing — not the README, not the code — so it is gone; the marketplace icon stays. The sourcemap is still generated but no longer ships: with `sourcesContent` it embedded 436 sources for 4.5 MB, without it 1.5 MB, so it stays on the developer's machine and the package carries the code alone.
+
 ## [0.20.21] - 2026-10-01
 ### Added
 - `get_server_info_code` reports the machine's binary picture. One call now answers which PDF routes can actually run: pdftotext, pdfinfo, pdftoppm, tesseract and Git Bash, each with its resolved path, or when missing, the same install hint that would otherwise surface as a failed tool call — tesseract with the working `winget install UB-Mannheim.TesseractOCR` id. The probe runs `where.exe` on Windows and `command -v` elsewhere, off the event loop, with the usual Windows install locations as fallback. The binary knowledge the OCR and render tools already carried — fallback directories, git-bash discovery, the poppler hint — moved to `utils/binaries.ts`, so the doctor and the error messages cannot drift apart.
