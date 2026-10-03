@@ -68,10 +68,12 @@ function binariesSection(statuses: BinaryStatus[]): string[] {
         for (const status of statuses) {
                 lines.push(`  - ${status.name}: ${status.found ? `found (${status.path})` : `missing — install ${status.hint}`}`);
         }
-        const missing = statuses.filter(s => !s.found).map(s => s.name);
-        if (missing.length > 0) {
-                lines.push(`  ${missing.join(', ')} unavailable — the tools that need them will refuse with the same hint until they are installed.`);
-        }
+        const missing = statuses.filter(s => !s.found).map(s => s.name);                if (missing.length > 0) {
+                        const object = missing.length === 1 ? 'it' : 'them';
+                        const subject = missing.length === 1 ? 'it' : 'they';
+                        const be = missing.length === 1 ? 'is' : 'are';
+                        lines.push(`  ${missing.join(', ')} unavailable — the tools that need ${object} will refuse with the same hint until ${subject} ${be} installed.`);
+                }
         return lines;
 }
 

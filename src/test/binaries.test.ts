@@ -72,7 +72,10 @@ type HandlerResult = { content?: Array<{ type: string; text?: string }> };
 type ToolHandler = () => Promise<HandlerResult>;
 
 suite('server info reports the binary picture', () => {
-        function captureInfoText(): () => Promise<string> {
+        function captureInfoText(statuses: Array<{ name: string; found: boolean; path?: string; hint?: string }> = [
+                { name: 'pdftotext', found: true, path: '/usr/bin/pdftotext' },
+                { name: 'tesseract', found: false, hint: 'UB-Mannheim.TesseractOCR' }
+        ]): () => Promise<string> {
                 let captured: ToolHandler | undefined;
                 const probe = {
                         tool: (name: string, _description: string, _schema: unknown, handler: ToolHandler) => {
@@ -83,10 +86,7 @@ suite('server info reports the binary picture', () => {
                 } as unknown as McpServer;
                 const advanced = proxyquire('../tools/advanced-tools', {
                         '../utils/binaries': {
-                                probePdfBinaries: async () => [
-                                        { name: 'pdftotext', found: true, path: '/usr/bin/pdftotext' },
-                                        { name: 'tesseract', found: false, hint: 'UB-Mannheim.TesseractOCR' }
-                                ]
+                                probePdfBinaries: async () => statuses
                         }
                 }) as typeof import('../tools/advanced-tools');
                 advanced.registerAdvancedTools(probe, { host: '127.0.0.1', port: 3400 });
@@ -108,5 +108,23 @@ suite('server info reports the binary picture', () => {
                 const text = await captureInfoText()();
                 assert.ok(text.includes('UB-Mannheim.TesseractOCR'), `the install hint must travel with the verdict:\n${text}`);
                 assert.ok(/tesseract unavailable/i.test(text), `the verdict must name what is unavailable:\n${text}`);
+        });
+
+        test('one missing binary reads as a singular verdict', async () => {
+                const text = await captureInfoText()();
+                assert.ok(/need it will refuse/.test(text), `one missing binary must read singular:\n${text}`);
+                assert.ok(/until it is installed/.test(text), text);
+                assert.ok(!/need them/.test(text), `the plural must not leak into the singular:\n${text}`);
+        });
+
+        test('several missing binaries read as a plural verdict', async () => {
+                const text = await captureInfoText([
+                        { name: 'pdftotext', found: false, hint: 'oschwartz10612.Poppler' },
+                        { name: 'tesseract', found: false, hint: 'UB-Mannheim.TesseractOCR' }
+                ])();
+                assert.ok(/pdftotext, tesseract unavailable/.test(text), `both names must sit in the verdict:\n${text}`);
+                assert.ok(/need them will refuse/.test(text), `several missing binaries must read plural:\n${text}`);
+                assert.ok(/until they are installed/.test(text), text);
+                assert.ok(!/need it\b/.test(text), `the singular must not leak into the plural:\n${text}`);
         });
 });

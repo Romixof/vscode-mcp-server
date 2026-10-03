@@ -1,5 +1,4 @@
 export interface RuntimeFacts {
-        platform: NodeJS.Platform;
         python: string;
         libs?: Record<string, boolean>;
 }
@@ -28,7 +27,7 @@ const PROBE_SCRIPT = [
 let cachedRuntime: Promise<RuntimeFacts> | undefined;
 
 function probeRuntime(): Promise<RuntimeFacts> {
-        const facts: RuntimeFacts = { platform: process.platform, python: 'not on the extension host PATH' };
+        const facts: RuntimeFacts = { python: 'not on the extension host PATH' };
         const { execFile } = require('child_process') as typeof import('child_process');
         return new Promise<RuntimeFacts>(resolve => {
                 execFile('python', ['-c', PROBE_SCRIPT], { timeout: 4000, windowsHide: true }, (error, stdout) => {
@@ -62,8 +61,7 @@ export function runtimeSection(facts: RuntimeFacts): string {
                 `Interpreter: ${facts.python === 'not on the extension host PATH'
                         ? 'python is not on the extension host PATH. The integrated terminal usually still has it — run `command -v python` once, then use the absolute path.'
                         : `python ${facts.python}`}`,
-                `Platform: ${facts.platform}`,
-                `CWD: ${process.cwd()}`
+                `Extension host CWD: ${process.cwd()}`
         ];
         if (facts.libs) {
                 const present = Object.entries(facts.libs).filter(([, ok]) => ok).map(([name]) => name);

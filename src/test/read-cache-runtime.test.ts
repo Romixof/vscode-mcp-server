@@ -144,14 +144,13 @@ suite('runtime facts', function () {
                 assert.ok(elapsed < 50, `cached probe took ${elapsed}ms`);
         });
 
-        test('the runtime section names the interpreter and platform', () => {
-                const section = runtimeSection({ platform: 'win32', python: '3.11.9' });
+        test('the runtime section names the interpreter', () => {
+                const section = runtimeSection({ python: '3.11.9' });
                 assert.ok(/python/i.test(section), 'must name python');
-                assert.ok(/win32/.test(section), 'must name the platform');
         });
 
         test('the runtime section lists which libraries import', () => {
-                const section = runtimeSection({ platform: 'linux', python: '3.12', libs: { reportlab: true, pypdf: false } });
+                const section = runtimeSection({ python: '3.12', libs: { reportlab: true, pypdf: false } });
                 assert.ok(/reportlab/.test(section), 'must report reportlab');
                 assert.ok(/pypdf/.test(section), 'must report pypdf');
                 assert.ok(/missing|absent|not installed/i.test(section), 'must mark a missing library');

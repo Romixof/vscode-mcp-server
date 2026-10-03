@@ -4,6 +4,12 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.23] - 2026-10-03
+### Fixed
+- `get_server_info_code` printed `Platform` twice. The header carried `- Platform: win32` and the runtime section repeated `Platform: win32` two lines below — `RuntimeFacts.platform` was initialised from `process.platform` and never reassigned, so the two lines could never disagree. The field left `RuntimeFacts` entirely, the header line stays, and the shell test now counts occurrences instead of merely requiring one.
+- The same block read `CWD: D:\Program Files\Microsoft VS Code` — the extension host process directory, where no tool call and no shell command resolves anything. It now says `Extension host CWD:`, so a model cannot mistake it for the directory its commands run in.
+- The binary verdict conjugated for a crowd that was not there. One missing tesseract produced "the tools that need them will refuse ... until they are installed"; it now reads "need it ... until it is installed", and several missing binaries keep the plural. Two tests pin each side.
+
 ## [0.20.22] - 2026-10-02
 ### Changed
 - The extension ships one bundled file instead of 4,254. esbuild bundles `src/extension.ts` into `dist/extension.js` — 1.6 MB, minified, node20/cjs, `vscode` external — and `node_modules` and `out/` are no longer packaged, so express, the MCP SDK and zod ride inside the bundle rather than as 4,123 files on disk. `main` points at the bundle and `compile` builds both halves, so `vscode:prepublish` and `pretest` always package a fresh one. A smoke test requires the bundle from inside the extension host and asserts it still exports `activate` and `deactivate`: the suite alone never loaded the shipped entry point.

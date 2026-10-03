@@ -72,6 +72,8 @@ suite('server info shell report', function () {
                 const call = captureHandler(() => detectShellKind(terminal));
                 const { text } = await call();
                 assert.ok(/- Platform: /m.test(text), 'Platform line disappeared');
+                assert.strictEqual((text.match(/^- Platform: /gm) ?? []).length, 1, 'Platform must appear exactly once');
+                assert.strictEqual((text.match(/^Platform: /gm) ?? []).length, 0, 'the runtime section must not repeat Platform');
                 assert.ok(/- Shell: /m.test(text), 'Shell line missing');
         });
 
