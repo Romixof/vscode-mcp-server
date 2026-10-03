@@ -4,6 +4,14 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.28] - 2026-10-03
+### Fixed
+- The agent guide still advertised the parameters 0.20.27 removed. `session_bootstrap_code(memory, guide, skills, layout, workspace)` and `get_project_context_code(depth, includeDeps, includeScripts)` named four and three flags that the schemas no longer have — a model following the guide would pass `memory: false`, have it stripped as an unknown key, and receive the whole memory section it believed it had skipped. The catalog lines now name `sections`, with the enum spelled out. Guide version 12 to 13.
+- The `diff_preview_code` recipe was wrong twice over, and predates 0.20.27. It read `diff_preview_code(op="edit", path, old_string, new_string)`: the enum is `replace_lines | create | move | rename`, so `"edit"` was not a value, and `old_string`/`new_string` were never parameters — the tool takes line ranges and content, mirroring `replace_lines_code`. It now reads `diff_preview_code(op="replace_lines", path, startLine, endLine, content)`.
+
+### Added
+- The guide catalog is checked against the schemas. Every parameter named in it must exist in that tool's real schema, and every quoted literal must be a value that parameter's enum actually accepts — the two mistakes above were both invisible to the suite, which only counted tools. The hand-maintained catalog cannot drift from the registry again without a red test. Guide costs no payload, so this costs nothing to run.
+
 ## [0.20.27] - 2026-10-03
 ### Fixed
 - `get_project_context_code` advertised `includeDeps` and did nothing with it. The parameter existed in the schema and nowhere else — no handler destructured it and the function it feeds does not accept it — so a model asking for `includeDeps: false` got the dependency summary anyway. Removed.

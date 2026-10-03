@@ -3,7 +3,7 @@ import { TOOL_HINTS } from './tool-annotations';
 
 const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
 
-export const AGENT_INSTRUCTIONS_VERSION = '12';
+export const AGENT_INSTRUCTIONS_VERSION = '13';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -108,7 +108,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '[RO] get_open_ports_code(port, protocol, state) / check_env_vars_code(checkCodeUsage, envFiles, revealValues=false: .env values redacted to length+sha fingerprint unless revealValues=true) / get_server_info_code() - server version, enabled tool groups.',
     '',
     'PERSISTENT MEMORY AND SESSION:',
-    '[RO] session_bootstrap_code(memory, guide, skills, layout, workspace) - ONE-CALL session start: memory + workspace folders + root layout + skills + this guide. Replaces four opening calls; use it FIRST, every conversation.',
+    '[RO] session_bootstrap_code(sections, workspace) - ONE-CALL session start: memory + workspace folders + root layout + skills + this guide. Replaces four opening calls; use it FIRST, every conversation. sections=["memory","guide","skills","layout"] picks a subset; omit it for all four.',
     '[RO] memory_load_code() - memory only (when the session was opened with a partial bootstrap).',
     '[MUT] memory_save_code(section, entry, scope="global"|"project") - append a dated entry; save durable facts and decisions.',
     '[RO] workspace_state_code(action="read"|"write", version, branch, status, inProgress, nextStep) - the CURRENT snapshot of where the work stands: which version/branch, what is in progress, the next step. Overwritten, never grows. Loaded by session_bootstrap_code.',
@@ -129,7 +129,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '[MUT] secret_rotate_code(confirm=true) - regenerate the primary API key, old key dies at once. After any exposure.',
     '',
     'PROJECT AND DOCS:',
-    '[RO] get_project_context_code(depth, includeDeps, includeScripts) - stack, structure, entry points, scripts; good second call after memory_load_code.',
+    '[RO] get_project_context_code(depth, sections, workspace) - stack, structure, entry points, scripts; good second call after memory_load_code. sections=["scripts","config","readme"] picks a subset; omit it for all three.',
     '[RO] get_package_dependencies_code(ecosystem, includeOutdated) - dependencies across npm, pip, cargo, go, composer.',
     '[RO] list_extensions_code(filter, missingOnly) / list_snippets_code(prefixFilter).',
     '[MUT] generate_ics_code(path, output, calendarName, keywords) - extract events into an .ics calendar file.',
@@ -161,7 +161,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     'COMMON RECIPES:',
     '- Understand the project: session_bootstrap_code() (memory + layout + skills + guide in one call), or get_agent_instructions_code() when that one is not callable -> get_project_context_code() only if the stack is still unknown.',
     '- Locate an implementation: search_workspace_code(pattern) -> get_symbol_definition_code(...) -> read_file_code(...) on the exact range.',
-    '- Change code safely: diff_preview_code(op="edit", path, old_string, new_string) -> edit_file_code(path, old_string, new_string) -> get_diagnostics_code() -> test_impact_code() -> run_tests_code(...).',
+    '- Change code safely: diff_preview_code(op="replace_lines", path, startLine, endLine, content) -> edit_file_code(path, old_string, new_string) -> get_diagnostics_code() -> test_impact_code() -> run_tests_code(...).',
     '- When the user says "this" or "here", call get_active_editor_code() before guessing a path; list_open_tabs_code() when they name a file by role.',
     '- Big refactor: checkpoint_code(action="save") first; restore with confirm=true if it went wrong.',
     '- Risky commands: plan_mode_code(enabled=true) -> draft the calls (they only describe) -> present the plan -> enabled=false.',
