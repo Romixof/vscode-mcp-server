@@ -1260,15 +1260,13 @@ WHEN TO USE: Onboarding to a new codebase, getting project overview before makin
 
 Aggregates package.json, configs, file structure, languages, frameworks, entry points, and test setup.`, {
 		depth: z.number().optional().default(3).describe('Directory depth for structure tree'),
-		includeDeps: z.boolean().optional().default(true).describe('Include dependency summary'),
-		includeScripts: z.boolean().optional().default(true).describe('Include npm/composer scripts'),
-		includeConfigFiles: z.boolean().optional().default(true).describe('List config files found'),
-		includeReadme: z.boolean().optional().default(true).describe('Include README summary'),
+		sections: z.array(z.enum(['scripts', 'config', 'readme'])).optional().describe('Parts to include; omit for all three.'),
 		maxFileSize: z.number().optional().default(102400).describe('Max file size for content reads (bytes)'),
 		workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-	}, async ({ depth = 3, includeScripts = true, includeConfigFiles = true, includeReadme = true, workspace }) => {
+	}, async ({ depth = 3, sections, workspace }) => {
 		try {
-			const result = await getProjectContext({ depth, includeScripts, includeConfigFiles, includeReadme, workspace });
+			const want = (name: 'scripts' | 'config' | 'readme'): boolean => !sections || sections.includes(name);
+			const result = await getProjectContext({ depth, includeScripts: want('scripts'), includeConfigFiles: want('config'), includeReadme: want('readme'), workspace });
 			return { content: [{ type: 'text', text: result }] };
 		} catch (error) {
 			console.error('[get_project_context_code] Error:', error);

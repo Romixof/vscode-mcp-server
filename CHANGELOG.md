@@ -4,6 +4,14 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.27] - 2026-10-03
+### Fixed
+- `get_project_context_code` advertised `includeDeps` and did nothing with it. The parameter existed in the schema and nowhere else — no handler destructured it and the function it feeds does not accept it — so a model asking for `includeDeps: false` got the dependency summary anyway. Removed.
+
+### Changed
+- Eight boolean flags that all defaulted to true became two `sections` parameters. `session_bootstrap_code` takes `sections: ["memory","guide","skills","layout"]` and `get_project_context_code` takes `sections: ["scripts","config","readme"]`; omitting either returns everything, which is exactly what four `true` defaults expressed. A parameter whose only job is to switch something off, when it is on by default, reads as a list wearing a disguise, and one enum states the choices better than four switches. Tests pin the default, a single selection, and a multi-part selection. `tools/list` is 26,467 of 26,600 tokens: 403 characters, 0.38 %, measured rather than estimated — the first draft of the replacement text gave the saving straight back in prose.
+- The phase A spec records what the shortened `workspace` description did under a real client. Mammouth discovered `list_workspace_folders_code` unprompted and passed the folder name across four consecutive calls with no retry, so the 38-character description suffices. It never read the agent guide at all, which fixes the rule the spec now carries: teaching may move to the guide, semantics may not.
+
 ## [0.20.26] - 2026-10-03
 ### Changed
 - The `workspace` parameter stopped repeating where to look up its own values. Seventy-six tools carried `See list_workspace_folders_code.` — teaching, not a schema constraint, and the agent guide exists precisely so teaching costs no payload. The description drops from 71 to 38 characters, and the guide's `list_workspace_folders_code` entry now names itself as the source of the folder names and 1-based indexes, so the knowledge moved rather than disappeared. The long description stays on `list_workspace_folders_code`, the one tool that defines the semantics. `tools/list` is 26,567 of 27,200 tokens, down 627: 2,508 characters, 2.3 %. No capability removed and no tool wording changed.

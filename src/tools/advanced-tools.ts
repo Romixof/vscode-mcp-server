@@ -184,15 +184,17 @@ export function registerSessionBootstrapTool(server: McpServer, guideOverride?: 
 
         WHEN TO USE: ONCE, at the very start of every conversation — it replaces the four separate opening calls (memory_load_code, get_agent_instructions_code, list_workspace_folders_code, list_files_code on the root). Clients cap tool calls per response: spend them on the actual task, not on loading context.
 
-        Read-only. Skip already-known sections with the flags (e.g. guide=false to refresh only memory + layout).`,
+        Read-only. Skip already-known sections with sections=[...] (e.g. sections=["memory","layout"] to refresh only those); omit it for all four.`,
                 {
-                        memory: z.boolean().optional().default(true).describe('Include global + project memory'),
-                        guide: z.boolean().optional().default(true).describe('Include the full agent guide'),
-                        skills: z.boolean().optional().default(true).describe('Include the skills list (auto-detected roots)'),
-                        layout: z.boolean().optional().default(true).describe('Include workspace folders + root listing (1 level, 40 entries max)'),
+                        sections: z.array(z.enum(['memory', 'guide', 'skills', 'layout'])).optional().describe('Parts to return; omit for all four. "layout" is 1 level deep, 40 entries max.'),
                         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
                 },
-                async ({ memory = true, guide = true, skills = true, layout = true, workspace }): Promise<CallToolResult> => {
+                async ({ sections, workspace }): Promise<CallToolResult> => {
+                        const want = (name: 'memory' | 'guide' | 'skills' | 'layout'): boolean => !sections || sections.includes(name);
+                        const memory = want('memory');
+                        const guide = want('guide');
+                        const skills = want('skills');
+                        const layout = want('layout');
                         const parts: string[] = ['# 🚀 Session bootstrap'];
                         if (memory) {
                                 const { global, project, projectPath } = await loadAllMemory(workspace);

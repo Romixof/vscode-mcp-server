@@ -5,7 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { registerSessionBootstrapTool } from '../tools/advanced-tools';
 import { AGENT_INSTRUCTIONS_VERSION } from '../utils/agent-instructions';
 
-const ARGS = { memory: false, guide: true, skills: false, layout: false };
+const ARGS = { sections: ['guide'] };
 
 function newServer(override?: () => string | undefined): McpServer {
         const inner = new McpServer({ name: 'boot', version: 'test' }, {
@@ -94,10 +94,40 @@ suite('session_bootstrap_code guide delivery', () => {
                 );
         });
 
-        test('guide=false never mentions the guide', async () => {
+        test('an empty sections list never mentions the guide', async () => {
                 await withServer(newServer(), async call => {
-                        const text = await call({ memory: false, guide: false, skills: false, layout: false });
-                        assert.ok(!/guide/i.test(text), `guide=false must be silent about the guide: ${text}`);
+                        const text = await call({ sections: [] });
+                        assert.ok(!/guide/i.test(text), `sections=[] must be silent about the guide: ${text}`);
+                });
+        });
+
+        test('omitting sections returns all four, the default the four flags used to express', async () => {
+                await withServer(newServer(), async call => {
+                        const text = await call({});
+                        assert.ok(/## 📍 Memory/.test(text), `memory is a default section: ${text.slice(0, 200)}`);
+                        assert.ok(/## Workspace/.test(text), 'layout is a default section');
+                        assert.ok(/## Skills/.test(text), 'skills is a default section');
+                        assert.ok(/FULL TOOL CATALOG|was already sent/.test(text), 'the guide is a default section');
+                });
+        });
+
+        test('sections selects exactly the parts named, and no other', async () => {
+                await withServer(newServer(), async call => {
+                        const text = await call({ sections: ['skills'] });
+                        assert.ok(/## Skills/.test(text), 'the named section must be returned');
+                        assert.ok(!/## 📍 Memory/.test(text), `an unnamed section must be absent: ${text.slice(0, 200)}`);
+                        assert.ok(!/## Workspace/.test(text), 'layout was not named');
+                        assert.ok(!/FULL TOOL CATALOG|was already sent/.test(text), 'the guide was not named');
+                });
+        });
+
+        test('a multi-part selection is honoured part by part', async () => {
+                await withServer(newServer(), async call => {
+                        const text = await call({ sections: ['layout', 'skills'] });
+                        assert.ok(/## Workspace/.test(text), 'layout was named');
+                        assert.ok(/## Skills/.test(text), 'skills was named');
+                        assert.ok(!/## 📍 Memory/.test(text), 'memory was not named');
+                        assert.ok(!/FULL TOOL CATALOG|was already sent/.test(text), 'the guide was not named');
                 });
         });
 });
