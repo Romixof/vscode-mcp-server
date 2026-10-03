@@ -4,7 +4,7 @@ let registered: string[] = [];
 
 export interface UsagePersistence {
 	load(): Record<string, number> | undefined;
-	save(counts: Record<string, number>): void;
+	save(counts: Record<string, number>): void | PromiseLike<void>;
 }
 
 let persistence: UsagePersistence | undefined;
@@ -21,7 +21,7 @@ export function setUsagePersistence(store: UsagePersistence | undefined): void {
 	}
 }
 
-export function saveUsage(): void {
+export async function saveUsage(): Promise<void> {
 	if (!persistence) {
 		return;
 	}
@@ -29,7 +29,7 @@ export function saveUsage(): void {
 	for (const [tool, calls] of callCounts.entries()) {
 		counts[tool] = calls;
 	}
-	persistence.save(counts);
+	await persistence.save(counts);
 }
 
 export function setRegisteredTools(names: string[]): void {

@@ -328,7 +328,9 @@ export async function activate(context: vscode.ExtensionContext) {
     setScopedKeyStorage(context.secrets);
     setUsagePersistence({
         load: () => context.globalState.get<Record<string, number>>('usage.counts', {}),
-        save: counts => context.globalState.update('usage.counts', counts)
+        save: async counts => {
+            await context.globalState.update('usage.counts', counts);
+        }
     });
 
     try {
@@ -466,7 +468,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 export async function deactivate() {
     flushJournalNow();
-    saveUsage();
+    await saveUsage();
     if (statusBarItem) {
         statusBarItem.dispose();
         statusBarItem = undefined;

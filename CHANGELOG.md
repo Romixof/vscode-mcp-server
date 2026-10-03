@@ -4,6 +4,10 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.24] - 2026-10-03
+### Fixed
+- Tool-call counters never survived a reload, despite 0.20.20 labelling them "across sessions". The store was wired and the save ran, but nothing waited for it: `globalState.update` is asynchronous, `saveUsage` fired it and returned, and the extension host could be gone before the write reached the main process. The installation itself carried the proof: `state.vscdb` holds this extension's `authToken` keys, written once at activation and read back on every start, while `usage.counts` — written only in that deactivation window — appears zero times after a reload, and the counter restarts at zero every session. `saveUsage` is now awaited by `deactivate`, an async store is awaited before `saveUsage` resolves, and a test pins that an intentionally slow store still flushes before the call returns.
+
 ## [0.20.23] - 2026-10-03
 ### Fixed
 - `get_server_info_code` printed `Platform` twice. The header carried `- Platform: win32` and the runtime section repeated `Platform: win32` two lines below — `RuntimeFacts.platform` was initialised from `process.platform` and never reassigned, so the two lines could never disagree. The field left `RuntimeFacts` entirely, the header line stays, and the shell test now counts occurrences instead of merely requiring one.
