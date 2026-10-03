@@ -4,6 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.30] - 2026-10-03
+### Fixed
+- The guide's ENVIRONMENT section claimed to be measured and was not. Its header read "this machine, checked when the guide loads", but the only dynamic value in the whole section is the platform name on non-Windows; on Windows it is a fixed string. It therefore asserted things nothing probes — "Interpreter is `python`", "rg is not installed" — while `get_server_info_code` reports in the same breath that python is not on the extension host PATH. It also shipped the author's own folders, `Paths are d:/Mammouth/...`, to every marketplace installation as though they were this machine's facts. The section now says what it is, platform conventions, points at the tool that measures, qualifies ripgrep as possibly absent, and names no folder. The drive-letter warning is worded without a literal backslash path after a first attempt doubled the escape and rendered two.
+- Two test names claimed more than they checked. "the Windows section names the interpreter that actually exists" and "names the search tool that actually exists" both asserted against static text, so the suite agreed with itself while the guide overstated what it knew. Renamed to what they prove, plus a test that no platform section may claim measurement and one that no section may name an author's directory. Guide version 14 to 15.
+
 ## [0.20.29] - 2026-10-03
 ### Fixed
 - The guide's first numbered instruction contradicted its own tool budget. Rule 1 read "memory_load_code() at the very start of the conversation", while the opener and the TOOL BUDGET section both said to open with ONE `session_bootstrap_code()` call *instead of* memory_load plus guide plus folders plus listing. A model following rule 1 first — the instruction it meets before any other — spent a call on context loading that the bootstrap already returns, at the exact moment the budget says calls are scarce. Rule 1 now opens with the one-call bootstrap and reserves `memory_load_code()` for a conversation already bootstrapped without its memory section. Guide version 13 to 14.

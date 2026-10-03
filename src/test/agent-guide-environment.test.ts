@@ -10,16 +10,43 @@ suite('agent guide environment section', () => {
                 );
         });
 
-        test('the Windows section names the interpreter that actually exists', () => {
+        test('the Windows section names the interpreter convention without claiming to probe', () => {
                 const section = environmentSection('win32');
                 assert.ok(/`python`/.test(section), 'must tell the model python is the interpreter');
-                assert.ok(/`python3` does not exist/.test(section), `must warn that python3 is absent: ${section}`);
+                assert.ok(/`python3`/.test(section), `must warn that python3 is the wrong name: ${section}`);
+                assert.ok(
+                        /get_server_info_code/.test(section),
+                        `the section must point at the tool that measures the interpreter: ${section}`
+                );
         });
 
-        test('the Windows section names the search tool that actually exists', () => {
+        test('the Windows section names the search tool without claiming to know what is installed', () => {
                 const section = environmentSection('win32');
                 assert.ok(/grep/.test(section), 'must name grep');
-                assert.ok(/`rg` is not installed/.test(section), `must warn ripgrep is absent: ${section}`);
+                assert.ok(
+                        !/`rg` is not installed/.test(section),
+                        `nothing probes ripgrep, so the section must not assert it is absent: ${section}`
+                );
+        });
+
+        test('the section never claims to have measured this machine', () => {
+                for (const platform of ['win32', 'linux', 'darwin'] as NodeJS.Platform[]) {
+                        const section = environmentSection(platform);
+                        assert.ok(
+                                !/checked when the guide loads/.test(section),
+                                `the section is a fixed string per platform, not a measurement: ${section}`
+                        );
+                }
+        });
+
+        test('the section ships no developer path', () => {
+                for (const platform of ['win32', 'linux', 'darwin'] as NodeJS.Platform[]) {
+                        const section = environmentSection(platform);
+                        assert.ok(
+                                !/d:\/Mammouth|\/d\/Mammouth/i.test(section),
+                                `a marketplace guide must not name the author's folders: ${section}`
+                        );
+                }
         });
 
         test('the Windows section kills the fc-list hunt', () => {
@@ -36,9 +63,10 @@ suite('agent guide environment section', () => {
                 assert.ok(/get_server_info_code/.test(section), 'the guide must point at the authoritative shell source');
         });
 
-        test('the Windows section states the real path shape', () => {
+        test('the Windows section states the path shape without naming a folder', () => {
                 const section = environmentSection('win32');
-                assert.ok(/\/mnt\/|C:/.test(section), 'must warn that Linux and drive-letter paths are wrong here');
+                assert.ok(/\/mnt\//.test(section), 'must warn that Linux paths are wrong here');
+                assert.ok(/C:/.test(section), 'must warn that a drive-letter path is wrong in the integrated bash');
         });
 
         test('a non-Windows platform is not given Windows advice', () => {

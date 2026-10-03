@@ -3,24 +3,24 @@ import { TOOL_HINTS } from './tool-annotations';
 
 const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
 
-export const AGENT_INSTRUCTIONS_VERSION = '14';
+export const AGENT_INSTRUCTIONS_VERSION = '15';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
                 return [
                         '',
-                        'ENVIRONMENT (this machine, checked when the guide loads):',
-                        '- Interpreter is `python` (or `py`). `python3` does not exist here, so `python3 -c ...` fails.',
-                        '- Search with `grep`. `rg` is not installed.',
+                        'ENVIRONMENT (Windows conventions — get_server_info_code reports what this machine actually has):',
+                        '- Interpreter: `python` or `py`, never `python3`, which is not a Windows executable name.',
+                        '- Search with `grep`; `rg` may not be installed.',
                         '- No `fc-list`: that is a Linux font tool. Fonts are registered in the generator script, not hunted in the shell.',
-                        '- Paths are `d:/Mammouth/...` or `/d/Mammouth/...`. `/mnt/...` and `C:\\...` do not resolve here.',
-                        '- Shell: read it, do not assume it. `get_server_info_code` reports the live one. A restored terminal can report the Windows default before it is probed, so trust the tool over this line.'
+                        '- Paths: `d:/...` or `/d/...` for a drive. A `/mnt/...` or a `C:` drive-letter path does not resolve in the integrated bash.',
+                        '- Shell: read it, do not assume it. `get_server_info_code` reports the live one.'
                 ].join('\n');
         }
         return [
                 '',
-                'ENVIRONMENT (this machine, checked when the guide loads):',
-                `- Interpreter is \`python3\`. Platform is ${platform}.`
+                'ENVIRONMENT (platform conventions — get_server_info_code reports what this machine actually has):',
+                `- Interpreter: \`python3\`. Platform is ${platform}.`
         ].join('\n');
 }
 
