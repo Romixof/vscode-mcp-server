@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import type { Context } from 'mocha';
 import { recordToolCall, setUsagePersistence, saveUsage, getUsageSnapshot, setRegisteredTools } from '../utils/usage';
 
 function callsFor(tool: string): number | undefined {
@@ -59,5 +60,30 @@ suite('usage persistence', () => {
                 await saveUsage();
                 assert.ok(saved, 'deactivate awaits saveUsage, so the write must finish before the host can stop');
                 assert.strictEqual(saved!.persist_async_code, 1);
+        });
+
+        test('a recorded call reaches the store while the session runs', async () => {
+                const saved: Array<Record<string, number>> = [];
+                setUsagePersistence({ load: () => undefined, save: counts => { saved.push(counts); } });
+                recordToolCall('persist_live_code');
+                await new Promise(resolve => setTimeout(resolve, 50));
+                assert.ok(
+                        saved.some(counts => counts.persist_live_code === 1),
+                        `a write issued only at shutdown is lost when the window closes, so the session must persist as it runs: ${JSON.stringify(saved)}`
+                );
+        });
+
+        test('a burst collapses into one write, and the trailing write carries every call', async function (this: Context) {
+                this.timeout(8000);
+                const saved: Array<Record<string, number>> = [];
+                setUsagePersistence({ load: () => undefined, save: counts => { saved.push(counts); } });
+                recordToolCall('persist_burst_code');
+                recordToolCall('persist_burst_code');
+                recordToolCall('persist_burst_code');
+                await new Promise(resolve => setTimeout(resolve, 50));
+                assert.strictEqual(saved.length, 1, `a burst must not write on every call: ${JSON.stringify(saved)}`);
+                await new Promise(resolve => setTimeout(resolve, 2100));
+                assert.strictEqual(saved.length, 2, `the throttled write must still happen: ${JSON.stringify(saved)}`);
+                assert.strictEqual(saved[1].persist_burst_code, 3, 'throttling must delay the count, never drop it');
         });
 });

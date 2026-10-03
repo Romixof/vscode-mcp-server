@@ -4,6 +4,10 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.25] - 2026-10-03
+### Fixed
+- Tool-call counters still reset on every restart; 0.20.24's awaited save repaired the wrong thing. The counters were written in `deactivate` and nowhere else, and a `globalState` update issued while the window is closing never reaches the database. The audit log settles it: it writes through the identical `context.globalState.update`, un-awaited and on every single event, and it survives restarts — so the difference was never the `await`, it was the moment. Counts are now persisted as the session runs, throttled to one write per two seconds, with the awaited shutdown save kept as the backstop for the last two seconds of a session. A test pins that one recorded call reaches the store with no shutdown involved, and a second pins that a burst collapses into a single write still carrying every call.
+
 ## [0.20.24] - 2026-10-03
 ### Fixed
 - Tool-call counters never survived a reload, despite 0.20.20 labelling them "across sessions". The store was wired and the save ran, but nothing waited for it: `globalState.update` is asynchronous, `saveUsage` fired it and returned, and the extension host could be gone before the write reached the main process. The installation itself carried the proof: `state.vscdb` holds this extension's `authToken` keys, written once at activation and read back on every start, while `usage.counts` — written only in that deactivation window — appears zero times after a reload, and the counter restarts at zero every session. `saveUsage` is now awaited by `deactivate`, an async store is awaited before `saveUsage` resolves, and a test pins that an intentionally slow store still flushes before the call returns.

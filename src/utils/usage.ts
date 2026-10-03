@@ -8,9 +8,21 @@ export interface UsagePersistence {
 }
 
 let persistence: UsagePersistence | undefined;
+const SAVE_THROTTLE_MS = 2000;
+let lastSaveAt = 0;
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+function clearSaveTimer(): void {
+	if (saveTimer) {
+		clearTimeout(saveTimer);
+		saveTimer = undefined;
+	}
+}
 
 export function setUsagePersistence(store: UsagePersistence | undefined): void {
 	persistence = store;
+	clearSaveTimer();
+	lastSaveAt = 0;
 	const stored = store?.load();
 	if (stored) {
 		for (const [tool, calls] of Object.entries(stored)) {
@@ -22,14 +34,34 @@ export function setUsagePersistence(store: UsagePersistence | undefined): void {
 }
 
 export async function saveUsage(): Promise<void> {
+	clearSaveTimer();
 	if (!persistence) {
 		return;
 	}
+	lastSaveAt = Date.now();
 	const counts: Record<string, number> = {};
 	for (const [tool, calls] of callCounts.entries()) {
 		counts[tool] = calls;
 	}
 	await persistence.save(counts);
+}
+
+function scheduleSave(): void {
+	if (!persistence) {
+		return;
+	}
+	const elapsed = Date.now() - lastSaveAt;
+	if (elapsed >= SAVE_THROTTLE_MS) {
+		void saveUsage().catch(() => undefined);
+		return;
+	}
+	if (saveTimer) {
+		return;
+	}
+	saveTimer = setTimeout(() => {
+		saveTimer = undefined;
+		void saveUsage().catch(() => undefined);
+	}, SAVE_THROTTLE_MS - elapsed);
 }
 
 export function setRegisteredTools(names: string[]): void {
@@ -38,6 +70,7 @@ export function setRegisteredTools(names: string[]): void {
 
 export function recordToolCall(toolName: string): void {
 	callCounts.set(toolName, (callCounts.get(toolName) ?? 0) + 1);
+	scheduleSave();
 }
 
 function neverCalledAll(): string[] {
