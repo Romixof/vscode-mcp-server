@@ -65,6 +65,19 @@ suite('the guide never names a parameter the schema dropped', () => {
                 assert.deepStrictEqual([...new Set(problems)], [], `the guide drifted from the schemas: ${[...new Set(problems)].join('; ')}`);
         });
 
+        test('the opening instruction does not contradict the tool budget', async () => {
+                const rule = DEFAULT_AGENT_INSTRUCTIONS.split('\n').find(line => line.trim().startsWith('1.'));
+                assert.ok(rule, 'the workflow must still have a first numbered rule');
+                assert.ok(
+                        /session_bootstrap_code\(\)/.test(rule!),
+                        `rule 1 must open with the one-call bootstrap: ${rule}`
+                );
+                assert.ok(
+                        !/memory_load_code\(\) at the very start/.test(DEFAULT_AGENT_INSTRUCTIONS),
+                        'the budget says to open with session_bootstrap_code instead of memory_load; rule 1 must not contradict it'
+                );
+        });
+
         test('a tool that gains or drops a parameter cannot leave the guide behind', async () => {
                 const tools: ListedTool[] = await fetchToolList();
                 const props = (tools.find(t => t.name === 'session_bootstrap_code')!.inputSchema.properties) || {};

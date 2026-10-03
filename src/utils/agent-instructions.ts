@@ -3,7 +3,7 @@ import { TOOL_HINTS } from './tool-annotations';
 
 const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
 
-export const AGENT_INSTRUCTIONS_VERSION = '13';
+export const AGENT_INSTRUCTIONS_VERSION = '14';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -30,7 +30,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     'LEGEND: [RO] = readOnlyHint, read-only, auto-approved, use freely. [MUT] modifies files or state, may need manual approval. [DST] destructive or runs arbitrary commands, needs approval. Multi-root: every path tool accepts workspace="<folder name or 1-based index>"; results come back as "FolderName/path" and resolve if you feed them back as-is.',
     '',
     'NON-NEGOTIABLE WORKFLOW:',
-    '1. memory_load_code() at the very start of the conversation to restore persistent context, then work from this map.',
+    '1. Start with ONE session_bootstrap_code() call — it returns memory, layout, skills and this guide in a single response, then work from this map. memory_load_code() is only for a conversation already bootstrapped without its "memory" section.',
     '2. Explore with list_files_code(path=".") (never recursive on the root). Read with read_file_code(path, startLine, endLine) using ranges for large files. Prefer structure first: get_document_symbols_code(path) for an outline, search_symbols_code(query) to locate a function or class, get_symbol_definition_code(path, line, symbol) for its definition and type.',
     '3. Search text with search_workspace_code(pattern, glob) - NEVER use shell commands to read or search files.',
     '4. Edit existing code with edit_file_code(path, old_string, new_string): it matches the text you quote, so it cannot break when the file shifts under it. It refuses to guess when old_string appears more than once and hands you every location instead. Reach for create_file_code(path, content, overwrite=true) only for a new file or a whole-file rewrite, and replace_lines_code only for a pure insertion or deletion at a known line. Rename code symbols only with rename_symbol_code(oldName, newName), never by manual search/replace.',
