@@ -98,4 +98,20 @@ suite('a client list missing the opener still gets the guide', () => {
                         'the recipes must name the fallback'
                 );
         });
+
+        test('the guide carries what the per-tool workspace descriptions stopped saying', () => {
+                const guide = DEFAULT_AGENT_INSTRUCTIONS;
+                assert.ok(
+                        guide.includes('workspace="<folder name or 1-based index>"'),
+                        'the multi-root legend must still teach the workspace parameter shape'
+                );
+                assert.ok(
+                        guide.includes('this is where the workspace="<folder name or 1-based index>" values come from'),
+                        'the guide must now carry the lookup pointer that 76 tool descriptions dropped'
+                );
+                assert.ok(
+                        guide.includes('list_workspace_folders_code()'),
+                        'the guide must name the tool that resolves folder names and indexes'
+                );
+        });
 });

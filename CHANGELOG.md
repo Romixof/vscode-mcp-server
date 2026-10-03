@@ -4,6 +4,13 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.26] - 2026-10-03
+### Changed
+- The `workspace` parameter stopped repeating where to look up its own values. Seventy-six tools carried `See list_workspace_folders_code.` — teaching, not a schema constraint, and the agent guide exists precisely so teaching costs no payload. The description drops from 71 to 38 characters, and the guide's `list_workspace_folders_code` entry now names itself as the source of the folder names and 1-based indexes, so the knowledge moved rather than disappeared. The long description stays on `list_workspace_folders_code`, the one tool that defines the semantics. `tools/list` is 26,567 of 27,200 tokens, down 627: 2,508 characters, 2.3 %. No capability removed and no tool wording changed.
+
+### Closed
+- The phase A payload spec's central recommendation turned out to be already done, and its success criterion unreachable. Commit `ecf789b` had shortened this very description six weeks before the spec was written, and measurement shows the 128 parameters unique to a single tool are worth 14.2 % of the payload in total: removing every one of them recovers less than the 15 % the spec promised, so the target could only have been met by stripping capabilities and calling it optimisation. The spec now carries measured figures, records the arithmetic, and states an honest ceiling near 3 %.
+
 ## [0.20.25] - 2026-10-03
 ### Fixed
 - Tool-call counters still reset on every restart; 0.20.24's awaited save repaired the wrong thing. The counters were written in `deactivate` and nowhere else, and a `globalState` update issued while the window is closing never reaches the database. The audit log settles it: it writes through the identical `context.globalState.update`, un-awaited and on every single event, and it survives restarts — so the difference was never the `await`, it was the moment. Counts are now persisted as the session runs, throttled to one write per two seconds, with the awaited shutdown save kept as the backstop for the last two seconds of a session. A test pins that one recorded call reaches the store with no shutdown involved, and a second pins that a burst collapses into a single write still carrying every call.

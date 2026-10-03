@@ -3,12 +3,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { MCPServer, ToolConfiguration } from '../server';
+import { WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
 const EXPECTED_TOOL_COUNT = 91;
 const MAX_TOKENS_PER_TOOL = 950;
 const P95_TOKENS_PER_TOOL = 480;
-const PAYLOAD_CEILING = 27200;
+const PAYLOAD_CEILING = 26600;
 const WORKSPACE_DESC_MAX_CHARS = 90;
+const REPEATED_WORKSPACE_DESC_MAX_CHARS = 48;
 const MAMMOTH_PER_TOOL_CAP = 32768;
 
 const ALL_GROUPS_ON = {
@@ -77,10 +79,18 @@ suite('tools/list payload budget', () => {
         test('the repeated workspace parameter description stays short', async () => {
                 const tools = await fetchToolList();
                 const withWorkspace = tools.filter(t => t.inputSchema.properties?.workspace?.description);
-                const perTool = withWorkspace[0]?.inputSchema.properties?.workspace?.description?.length ?? 0;
-                console.log(`  workspace: ${perTool} chars x ${withWorkspace.length} tools ~${Math.round(perTool * withWorkspace.length / 4)} tok`);
-                assert.ok(withWorkspace.length > 50, 'expected the workspace param on most tools');
-                assert.ok(perTool <= WORKSPACE_DESC_MAX_CHARS, `workspace description ${perTool} chars, budget ${WORKSPACE_DESC_MAX_CHARS}`);
+                const repeated = withWorkspace.filter(t => t.inputSchema.properties?.workspace?.description === WORKSPACE_PARAM_DESCRIPTION);
+                console.log(`  workspace: ${WORKSPACE_PARAM_DESCRIPTION.length} chars x ${repeated.length} tools ~${Math.round(WORKSPACE_PARAM_DESCRIPTION.length * repeated.length / 4)} tok`);
+                assert.ok(repeated.length > 50, `expected the shared description on most tools, found ${repeated.length} of ${withWorkspace.length}`);
+                assert.ok(WORKSPACE_PARAM_DESCRIPTION.length <= REPEATED_WORKSPACE_DESC_MAX_CHARS, `the shared workspace description is ${WORKSPACE_PARAM_DESCRIPTION.length} chars, budget ${REPEATED_WORKSPACE_DESC_MAX_CHARS}`);
+        });
+
+        test('no workspace description teaches what the agent guide already teaches', async () => {
+                const tools = await fetchToolList();
+                const over = tools
+                        .filter(t => (t.inputSchema.properties?.workspace?.description?.length ?? 0) > WORKSPACE_DESC_MAX_CHARS)
+                        .map(t => `${t.name} (${t.inputSchema.properties?.workspace?.description?.length})`);
+                assert.deepStrictEqual(over, [], `a per-tool workspace description may not restate the guide: ${over.join(', ')}`);
         });
 
         test('no single tool exceeds the per-tool schema cap', async () => {

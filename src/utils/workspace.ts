@@ -216,7 +216,7 @@ export function resolveRelativeToolPath(
 }
 
 export const WORKSPACE_PARAM_DESCRIPTION =
-	'Workspace root: name or 1-based index. See list_workspace_folders_code.';
+	'Workspace root: name or 1-based index.';
 
 export const WORKSPACE_PARAM_LONG_DESCRIPTION =
 	'Which workspace root to use when multiple folders are open: folder name or 1-based index. Defaults to the first folder. ' +

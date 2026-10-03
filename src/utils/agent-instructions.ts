@@ -49,7 +49,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     `FULL TOOL CATALOG (${TOOL_CATALOG_SIZE} tools):`,
     '',
     'FILES AND WORKSPACE:',
-    '[RO] list_workspace_folders_code() - list open workspace folders.',
+    '[RO] list_workspace_folders_code() - list open workspace folders; this is where the workspace="<folder name or 1-based index>" values come from.',
     '[RO] list_files_code(path, recursive, limit, offset) - directory listing; never recursive=true on the root.',
     '[RO] read_file_code(path, startLine, endLine, maxCharacters, encoding) - file content; use line ranges for large files.',
     '[RO] search_workspace_code(pattern, path, glob, caseSensitive, maxResults, skipCommon) - regex search grouped by file with 1-based line numbers; glob "*.ts" matches a file name at any depth.',
