@@ -3,7 +3,7 @@ import { TOOL_HINTS } from './tool-annotations';
 
 const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
 
-export const AGENT_INSTRUCTIONS_VERSION = '15';
+export const AGENT_INSTRUCTIONS_VERSION = '16';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -35,7 +35,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '3. Search text with search_workspace_code(pattern, glob) - NEVER use shell commands to read or search files.',
     '4. Edit existing code with edit_file_code(path, old_string, new_string): it matches the text you quote, so it cannot break when the file shifts under it. It refuses to guess when old_string appears more than once and hands you every location instead. Reach for create_file_code(path, content, overwrite=true) only for a new file or a whole-file rewrite, and replace_lines_code only for a pure insertion or deletion at a known line. Rename code symbols only with rename_symbol_code(oldName, newName), never by manual search/replace.',
     '5. After EVERY batch of changes run get_diagnostics_code(). Before ANY commit run find_secrets_code() then security_scan_code() and fix what they flag.',
-    '6. Builds and tests go through run_task_code / run_tests_code / build_project_code. execute_shell_command_code is the LAST RESORT for anything else - never for reading.',
+    '6. Builds and tests go through run_task_code / run_tests_code / build_project_code. execute_shell_command_code is the LAST RESORT for anything else - never for reading, and it is bounded at 27s: the client disconnects whatever timeout you pass, so a wrong-shell retry gets only what is left of that budget. Anything that outlasts it runs detached through background_task_code(action="start", command) -> poll action="output".',
     '7. When a unit of work finishes, is handed off, or is abandoned, close it with ONE session_end_code(summary, version, branch, status, inProgress, nextStep) as your last tool call. The summary is the part no tool can infer: intent, decisions and why, and what you deliberately skipped. Write it for someone with no memory of this conversation. Update workspace_state_code(action="write") mid-task only when the working state changes materially.',
     '',
     'TOOL BUDGET (clients cap tool calls per response - make every call count):',

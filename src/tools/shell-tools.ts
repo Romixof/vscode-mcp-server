@@ -260,6 +260,7 @@ export async function waitForShellIntegration(terminal: vscode.Terminal, timeout
 interface TerminalQueue {
         tail: Promise<unknown>;
         depth: number;
+        headStartedAt: number;
 }
 
 const terminalQueues = new WeakMap<vscode.Terminal, TerminalQueue>();
@@ -292,8 +293,8 @@ export function queueOnTerminal<T>(terminal: vscode.Terminal, task: () => Promis
         const busyAtEnqueue = entry !== undefined && entry.depth > 0;
         const enqueuedAt = Date.now();
 
-        if (requestedTimeoutMs !== undefined && busyAtEnqueue) {
-                const waited = Date.now() - enqueuedAt;
+        if (requestedTimeoutMs !== undefined && busyAtEnqueue && entry) {
+                const waited = Math.max(0, enqueuedAt - entry.headStartedAt);
                 if (waited + requestedTimeoutMs > CLIENT_BUDGET_MS) {
                         return Promise.reject(terminalBusyError(waited, requestedTimeoutMs));
                 }
@@ -302,7 +303,11 @@ export function queueOnTerminal<T>(terminal: vscode.Terminal, task: () => Promis
         const run = previous.catch(() => undefined).then(() => task());
 
         const tail = run.then(() => undefined, () => undefined);
-        terminalQueues.set(terminal, { tail, depth: busyAtEnqueue ? 2 : 1 });
+        terminalQueues.set(terminal, {
+                tail,
+                depth: busyAtEnqueue ? 2 : 1,
+                headStartedAt: busyAtEnqueue && entry ? entry.headStartedAt : enqueuedAt
+        });
 
         void tail.then(() => {
                 const current = terminalQueues.get(terminal);
@@ -312,7 +317,7 @@ export function queueOnTerminal<T>(terminal: vscode.Terminal, task: () => Promis
                 if (current.depth <= 1) {
                         terminalQueues.delete(terminal);
                 } else {
-                        terminalQueues.set(terminal, { tail: current.tail, depth: current.depth - 1 });
+                        terminalQueues.set(terminal, { tail: current.tail, depth: current.depth - 1, headStartedAt: current.headStartedAt });
                 }
         });
 
@@ -435,29 +440,45 @@ export async function executeShellCommand(
 
     terminal.show();
 
+    const deadline = Date.now() + Math.min(timeout, CLIENT_BUDGET_MS);
+    const left = () => deadline - Date.now();
+
     return queueOnTerminal(terminal, async () => {
         await verifyShellKind(terminal);
         const usedKind = detectShellKind(terminal);
-        const fullCommand = buildFullCommand(terminal, command, cwd);
-        let result = await executeAndWait(terminal, fullCommand, timeout);
+        let result = await executeAndWait(terminal, buildFullCommand(terminal, command, cwd), Math.max(1, left()));
 
         if (looksLikeWrongWrap(result.output)) {
             const opposite = usedKind === 'bash' ? 'powershell' : 'bash';
-            logger.info(`[execute_shell_command] Terminal rejected ${usedKind} syntax — retrying once as ${opposite}`);
-            forcedShellKinds.set(terminal, opposite);
-            const retried = await executeAndWait(terminal, buildFullCommandFor(opposite, command, cwd), timeout);
-            if (!looksLikeWrongWrap(retried.output)) {
-                result = retried;
-                if (!explicitShellKind(terminal)) {
-                    verifiedShellKinds.set(terminal, opposite);
-                }
+            const budgetLeft = left();
+            if (budgetLeft <= 0) {
+                result = {
+                        ...result,
+                        output: result.output + `\n\n[No time left in the ${CLIENT_BUDGET_MS}ms client budget to retry as ${opposite}, so the command did not run. ` +
+                                `It is still waiting to be written in ${usedKind}. Use background_task_code for work that outlasts the budget.]`
+                };
                 return result;
             }
-            forcedShellKinds.delete(terminal);
+            logger.info(`[execute_shell_command] Terminal rejected ${usedKind} syntax — retrying once as ${opposite} with ${budgetLeft}ms of the client budget left`);
+            forcedShellKinds.set(terminal, opposite);
+            const retried = await executeAndWait(terminal, buildFullCommandFor(opposite, command, cwd), budgetLeft);
+            if (!looksLikeWrongWrap(retried.output)) {
+                result = retried;
+            } else {
+                forcedShellKinds.delete(terminal);
+            }
         }
 
         return result;
     }, timeout);
+}
+
+function shellDeclaration(terminal: vscode.Terminal | undefined): string {
+        if (!terminal) {
+                return 'unknown';
+        }
+        const kind = detectShellKind(terminal);
+        return isShellKindVerified(terminal) ? kind : `${kind} (assumed from the default profile, not yet confirmed against the running terminal)`;
 }
 
 function looksLikeWrongWrap(output: string): boolean {
@@ -475,9 +496,9 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
 
 WHEN TO USE: builds, tests, installs, git operations, anything that actually mutates. For reads (file contents, listings, text search, git status/diff/log, diagnostics) prefer the dedicated read-only tools — they auto-approve without a prompt, so keeping this tool for real mutations makes approval the exception.
 
-Timeout: default ${SHELL_TIMEOUT_MS}ms. The calling client disconnects at ${CLIENT_CEILING_MS}ms whatever you pass, so a larger timeout returns nothing at all. A request over the ${CLIENT_BUDGET_MS}ms budget is clamped and the clamp is reported back. A command that runs past the budget returns what was captured with exit code 124. Anything that legitimately takes minutes (builds, test suites, installs) belongs in background_task_code, which detaches and never blocks. The terminal runs one command at a time: a call that would still be queued when the budget runs out is rejected, not waited on.
+Timeout: default ${SHELL_TIMEOUT_MS}ms. The calling client disconnects at ${CLIENT_CEILING_MS}ms whatever you pass, so a larger timeout returns nothing at all. A request over the ${CLIENT_BUDGET_MS}ms budget is clamped and the clamp is reported back. That budget covers the WHOLE call: if a wrong-shell retry is needed, the retry gets whatever is left of it, never a fresh timeout. A command that runs past the budget returns what was captured with exit code 124. Anything that legitimately takes minutes (builds, test suites, installs) belongs in background_task_code, which detaches and never blocks. The terminal runs one command at a time: a call that arrives while the terminal is already busy is rejected when the wait cannot fit in the budget, rather than queued past the client's ceiling.
 
-Shell: ${terminal ? detectShellKind(terminal) : 'unknown'}. Write syntax for that shell. Sending the other family's syntax fails before your command runs.
+Shell: ${shellDeclaration(terminal)}. Write syntax for that shell. Sending the other family's syntax fails before your command runs, and the server retries once in the other family with the remaining budget.
 
 Token efficiency: output is compacted by default (progress bars stripped, repeated lines collapsed, long lines truncated, head+tail capped, with category filters for git, installs, test runners and builds). A notice carries a retrieve_output_code handle for the full original. Pass outputMode "raw" to skip compaction.
 

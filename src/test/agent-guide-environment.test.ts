@@ -67,6 +67,10 @@ suite('agent guide environment section', () => {
                 const section = environmentSection('win32');
                 assert.ok(/\/mnt\//.test(section), 'must warn that Linux paths are wrong here');
                 assert.ok(/C:/.test(section), 'must warn that a drive-letter path is wrong in the integrated bash');
+                assert.ok(
+                        !/[a-z]:\/[a-z0-9]/i.test(section),
+                        `the section must describe a path shape, never a real folder: ${section}`
+                );
         });
 
         test('a non-Windows platform is not given Windows advice', () => {
@@ -75,10 +79,13 @@ suite('agent guide environment section', () => {
                 assert.ok(/python3/.test(linux), 'Linux should be told python3');
         });
 
-        test('the default guide carries an environment section', () => {
+        test('the default guide carries the environment section for its platform', () => {
                 const guide = resolveAgentInstructions(undefined, 'win32');
                 assert.ok(guide.includes('ENVIRONMENT'), 'the guide must carry an ENVIRONMENT section');
-                assert.ok(guide.includes('python3'), 'the win32 environment facts must be present');
+                assert.ok(
+                        /`python` or `py`/.test(guide),
+                        `the win32 interpreter advice must survive into the guide: ${environmentSection('win32')}`
+                );
         });
 
         test('an override still gets the machine facts appended', () => {

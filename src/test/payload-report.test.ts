@@ -89,7 +89,7 @@ suite('tools/list payload report', () => {
                 console.log('');
 
                 assert.ok(tools.length > 0, 'the report must have listed tools, otherwise it silently measures nothing');
-                assert.strictEqual(description + paramDesc + structure + names, total, 'the buckets must account for the whole payload exactly once');
+                assert.ok(names >= 0, `names + annotations came out at ${names}; a bucket is double-counted, because names is the remainder of the total`);
                 assert.ok(names < total * 0.25, `names + annotations are ${names}, which is too large to be only wrapping`);
         });
 });

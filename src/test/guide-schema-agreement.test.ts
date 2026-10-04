@@ -65,25 +65,26 @@ suite('the guide never names a parameter the schema dropped', () => {
                 assert.deepStrictEqual([...new Set(problems)], [], `the guide drifted from the schemas: ${[...new Set(problems)].join('; ')}`);
         });
 
-        test('the opening instruction does not contradict the tool budget', async () => {
-                const rule = DEFAULT_AGENT_INSTRUCTIONS.split('\n').find(line => line.trim().startsWith('1.'));
+        test('rule 1 and the tool budget name the same opener', () => {
+                const lines = DEFAULT_AGENT_INSTRUCTIONS.split('\n');
+                const rule = lines.find(line => line.trim().startsWith('1.'));
+                const budget = lines.find(line => line.startsWith('- Open with ONE'));
                 assert.ok(rule, 'the workflow must still have a first numbered rule');
-                assert.ok(
-                        /session_bootstrap_code\(\)/.test(rule!),
-                        `rule 1 must open with the one-call bootstrap: ${rule}`
+                assert.ok(budget, 'the tool budget must still open with one call');
+
+                const openerOf = (line: string): string => line.match(/\b[a-z_]+_code\b/)?.[0] ?? 'undecided';
+
+                assert.strictEqual(
+                        openerOf(rule!),
+                        openerOf(budget!),
+                        `rule 1 and the tool budget disagree on how a session opens:\n  rule 1: ${rule}\n  budget: ${budget}`
                 );
-                assert.ok(
-                        !/memory_load_code\(\) at the very start/.test(DEFAULT_AGENT_INSTRUCTIONS),
-                        'the budget says to open with session_bootstrap_code instead of memory_load; rule 1 must not contradict it'
-                );
+                assert.strictEqual(openerOf(rule!), 'session_bootstrap_code', 'the one-call bootstrap must stay the opener');
         });
 
-        test('a tool that gains or drops a parameter cannot leave the guide behind', async () => {
+        test('every registered tool is named in the catalog', async () => {
                 const tools: ListedTool[] = await fetchToolList();
-                const props = (tools.find(t => t.name === 'session_bootstrap_code')!.inputSchema.properties) || {};
-                assert.ok(!('memory' in props), 'the memory flag was replaced by sections, the guide must follow');
-                assert.ok(!('guide' in props), 'the guide flag was replaced by sections');
-                assert.ok(!DEFAULT_AGENT_INSTRUCTIONS.includes('session_bootstrap_code(memory'), 'the catalog line must not name the removed flags');
-                assert.ok(DEFAULT_AGENT_INSTRUCTIONS.includes('session_bootstrap_code(sections, workspace)'), 'the catalog must name the parameter that exists');
+                const missing = tools.map(t => t.name).filter(name => !DEFAULT_AGENT_INSTRUCTIONS.includes(name));
+                assert.deepStrictEqual(missing, [], `registered tools the guide never names: ${missing.join(', ')}`);
         });
 });

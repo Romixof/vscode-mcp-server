@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { executeShellCommand, queueOnTerminal } from '../tools/shell-tools';
+import { executeShellCommand, queueOnTerminal, CLIENT_BUDGET_MS } from '../tools/shell-tools';
 
 type FakeTerminal = Parameters<typeof executeShellCommand>[0];
 
@@ -8,7 +8,7 @@ interface FakeExecution {
         exitCode: number;
 }
 
-function fakeTerminal(executions: FakeExecution[], gate?: { opened: () => void }): FakeTerminal {
+function fakeTerminal(executions: FakeExecution[], gate?: { opened: () => void }, holdMs = 0): FakeTerminal {
         let index = 0;
         const terminal = {
                 name: 'MCP',
@@ -23,6 +23,10 @@ function fakeTerminal(executions: FakeExecution[], gate?: { opened: () => void }
                                         if (current.output.length > 0) {
                                                 yield `${current.output}\n`;
                                         }
+                                        if (holdMs) {
+                                                await new Promise(resolve => setTimeout(resolve, holdMs));
+                                                return;
+                                        }
                                         yield '__MCP_EXIT:0\n';
                                 };
                                 return { read: run };
@@ -33,20 +37,21 @@ function fakeTerminal(executions: FakeExecution[], gate?: { opened: () => void }
 }
 
 suite('shell queue admission', () => {
-        test('a call is rejected when the queue wait plus its timeout exceeds the client budget', async () => {
+        test('a full-budget call behind a busy terminal is rejected, not queued past the ceiling', async () => {
                 const gate = { opened: () => {} };
                 let openedResolve: () => void = () => {};
                 const opened = new Promise<void>(r => { openedResolve = r; });
                 gate.opened = () => openedResolve();
-                const terminal = fakeTerminal([{ output: 'first', exitCode: 0 }], gate);
+                const terminal = fakeTerminal([{ output: 'first', exitCode: 0 }], gate, 200);
 
                 const first = executeShellCommand(terminal, 'echo first', undefined, 5000);
                 await opened;
+                await new Promise(resolve => setTimeout(resolve, 30));
 
                 await assert.rejects(
-                        () => executeShellCommand(terminal, 'echo second', undefined, 30000),
+                        () => executeShellCommand(terminal, 'echo second', undefined, CLIENT_BUDGET_MS),
                         /background_task_code/,
-                        'a call that cannot finish inside the client budget must be rejected, not silently queued'
+                        'the timeout the handler actually passes must be rejected once the terminal is busy'
                 );
 
                 await first;
@@ -57,13 +62,14 @@ suite('shell queue admission', () => {
                 let openedResolve: () => void = () => {};
                 const opened = new Promise<void>(r => { openedResolve = r; });
                 gate.opened = () => openedResolve();
-                const terminal = fakeTerminal([{ output: 'first', exitCode: 0 }], gate);
+                const terminal = fakeTerminal([{ output: 'first', exitCode: 0 }], gate, 200);
 
                 const first = executeShellCommand(terminal, 'echo first', undefined, 5000);
                 await opened;
+                await new Promise(resolve => setTimeout(resolve, 30));
 
                 await assert.rejects(
-                        () => executeShellCommand(terminal, 'echo second', undefined, 30000),
+                        () => executeShellCommand(terminal, 'echo second', undefined, CLIENT_BUDGET_MS),
                         (err: unknown) => {
                                 const message = err instanceof Error ? err.message : String(err);
                                 assert.ok(message.includes('background_task_code'), `missing background_task_code: ${message}`);
@@ -111,11 +117,12 @@ suite('shell queue admission', () => {
                 const terminal = fakeTerminal([
                         { output: 'first', exitCode: 0 },
                         { output: 'third', exitCode: 0 }
-                ], gate);
+                ], gate, 200);
 
                 const first = executeShellCommand(terminal, 'echo first', undefined, 5000);
                 await opened;
-                await assert.rejects(() => executeShellCommand(terminal, 'echo second', undefined, 30000));
+                await new Promise(resolve => setTimeout(resolve, 30));
+                await assert.rejects(() => executeShellCommand(terminal, 'echo second', undefined, CLIENT_BUDGET_MS));
                 const third = await executeShellCommand(terminal, 'echo third', undefined, 2000);
                 await first;
 

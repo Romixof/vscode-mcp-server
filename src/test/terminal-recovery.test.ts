@@ -26,8 +26,8 @@ function deadTerminal(): FakeTerminal {
 suite('queue admission only applies under load', () => {
         test('a long request on a FREE terminal is admitted, not refused', async () => {
                 const terminal = liveTerminal();
-                const { queueOnTerminal } = require('../tools/shell-tools');
-                const result = await queueOnTerminal(terminal, async () => 'ran', 60000);
+                const { queueOnTerminal, CLIENT_BUDGET_MS } = require('../tools/shell-tools');
+                const result = await queueOnTerminal(terminal, async () => 'ran', CLIENT_BUDGET_MS);
                 assert.strictEqual(
                         result,
                         'ran',
@@ -37,12 +37,13 @@ suite('queue admission only applies under load', () => {
 
         test('a long request behind real work is still refused', async () => {
                 const terminal = liveTerminal();
-                const { queueOnTerminal } = require('../tools/shell-tools');
+                const { queueOnTerminal, CLIENT_BUDGET_MS } = require('../tools/shell-tools');
                 let release: () => void = () => {};
                 const gate = new Promise<void>(r => { release = r; });
                 const blocker = queueOnTerminal(terminal, () => gate);
+                await new Promise(resolve => setTimeout(resolve, 30));
                 await assert.rejects(
-                        () => queueOnTerminal(terminal, async () => 'never', 60000),
+                        () => queueOnTerminal(terminal, async () => 'never', CLIENT_BUDGET_MS),
                         /background_task_code/,
                         'a call queued behind live work must still be turned away'
                 );
