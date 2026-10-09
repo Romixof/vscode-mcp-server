@@ -6,7 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { resolveWorkspaceFolder, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { executeShellCommand, resolveShellKind } from './shell-tools';
+import { executeShellCommand, resolveShellKind, CLIENT_BUDGET_MS, CLIENT_CEILING_MS } from './shell-tools';
 import { planModeIntercept } from './safety-tools';
 import { assertUrlSafe, maskSecret, MAX_API_BODY_BYTES, readBodyWithCap, REDIRECT_STATUSES } from '../utils/security-helpers';
 
@@ -99,10 +99,10 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
             databaseName: z.string().optional().describe('Database name (for PostgreSQL/MySQL)'),
             filePath: z.string().optional().describe('SQLite file path (required for sqlite)'),
             format: z.enum(['json', 'table', 'csv']).optional().default('json').describe('Output format'),
-            timeout: z.number().optional().default(30000).describe('Query timeout in ms'),
+            timeout: z.number().optional().default(10000).describe(`Query timeout in ms (capped at ${CLIENT_BUDGET_MS} — the client disconnects at ${CLIENT_CEILING_MS} regardless)`),
             workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ query, database, connectionString, databaseName, filePath, format = 'json', timeout = 30000, workspace }): Promise<CallToolResult> => {
+        async ({ query, database, connectionString, databaseName, filePath, format = 'json', timeout = 10000, workspace }): Promise<CallToolResult> => {
             try {
                 const pm = planModeIntercept('run_sql_query_code', `{ query: ${JSON.stringify(query.slice(0, 160))}${database ? `, database: "${database}"` : ''}${filePath ? `, filePath: "${filePath}"` : ''} }`);
                 if (pm) { return pm; }
@@ -158,7 +158,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                     throw new Error('Database type required (postgresql, mysql, sqlite) or provide connectionString');
                 }
 
-                const result = await execDbCommand(bin, args, { cwd, timeout, env });
+                const result = await execDbCommand(bin, args, { cwd, timeout: Math.min(timeout, CLIENT_BUDGET_MS), env });
                 const exitNote = result.exitCode !== 0 ? `\n(exit code ${result.exitCode})` : '';
                 return {
                     content: [{ type: 'text', text: `Query: ${query}\n\n${result.output}${exitNote}` }]
@@ -191,7 +191,8 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
         async ({ url, method = 'GET', headers = {}, body, timeout = 10000, followRedirects = true, validateStatus = false, allowPrivateNetwork = false }): Promise<CallToolResult> => {
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), timeout);
+                const effectiveTimeout = Math.min(timeout, CLIENT_BUDGET_MS);
+                const timeoutId = setTimeout(() => controller.abort(), effectiveTimeout);
 
                 const fetchOptions: RequestInit = {
                     method,
@@ -470,10 +471,10 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
             cwd: z.string().optional().default('.').describe('Working directory'),
             port: z.number().optional().describe('Port the dev server runs on (for verification)'),
             killTimeout: z.number().optional().default(5000).describe('Time to wait for graceful shutdown (ms)'),
-            startupTimeout: z.number().optional().default(30000).describe('Time to wait for server ready (ms)'),
+            startupTimeout: z.number().optional().default(15000).describe(`Time to wait for server ready (ms, capped so the whole call stays under the ${CLIENT_CEILING_MS}ms client ceiling)`),
             workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
         },
-        async ({ script, command, cwd = '.', port, killTimeout = 5000, startupTimeout = 30000, workspace }): Promise<CallToolResult> => {
+        async ({ script, command, cwd = '.', port, killTimeout = 5000, startupTimeout = 15000, workspace }): Promise<CallToolResult> => {
             try {
                 const pm = planModeIntercept('restart_dev_server_code', `{ ${command ? `command: ${JSON.stringify(command.slice(0, 120))}` : script ? `script: "${script}"` : '(auto-detected)'}${port ? `, port: ${port}` : ''} }`);
                 if (pm) { return pm; }
@@ -500,6 +501,7 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
                     throw new Error('No script or command specified, and no dev script found in package.json');
                 }
 
+                const callStartedAt = Date.now();
                 if (!sharedTerminal) {
                     throw new Error('Terminal not available for database tools');
                 }
@@ -526,8 +528,9 @@ export function registerDatabaseTools(server: McpServer, terminal?: vscode.Termi
 
                 let verified = false;
                 if (port) {
+                    const verifyDeadline = Date.now() + Math.min(startupTimeout, CLIENT_BUDGET_MS - (Date.now() - callStartedAt) - 2000);
                     const startTime = Date.now();
-                    while (Date.now() - startTime < startupTimeout) {
+                    while (Date.now() - startTime < verifyDeadline) {
                         await new Promise(r => setTimeout(r, 1000));
                         const checkResult = await runShellCommand(
                             process.platform === 'win32' ? `netstat -ano | findstr :${port}` : `lsof -ti:${port}`,

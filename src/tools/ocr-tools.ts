@@ -9,7 +9,7 @@ import { resolveInputPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspac
 import { executeShellCommand, CLIENT_BUDGET_MS } from './shell-tools';
 import { compactOcrText, rememberOriginal, formatCompactionNotice } from '../utils/token-efficiency';
 import { assertUrlSafe } from '../utils/security-helpers';
-import { WINDOWS_FALLBACK_DIRS, findGitBash, POPPLER_HINT } from '../utils/binaries';
+import { WINDOWS_FALLBACK_DIRS, findGitBash, POPPLER_HINT, windowsBinaryExists } from '../utils/binaries';
 
 const DEFAULT_MIN_CHARS_PER_PAGE = 20;
 const DEFAULT_DPI = 300;
@@ -57,6 +57,9 @@ async function resolveBinary(terminal: vscode.Terminal, cwd: string, bin: string
         if (probe.exitCode === 0) {
             return exePath;
         }
+    }
+    if (process.platform === 'win32' && (WINDOWS_FALLBACK_DIRS[bin] || []).some(dir => windowsBinaryExists(dir, bin))) {
+        return (WINDOWS_FALLBACK_DIRS[bin] || []).map(dir => `${dir}/${bin}.exe`).find(p => windowsBinaryExists(path.dirname(p), bin));
     }
     return undefined;
 }
@@ -188,12 +191,12 @@ async function tryTextLayer(options: {
     fileUri: vscode.Uri;
     firstPage: number | undefined;
     lastPage: number | undefined;
-    timeoutMs: number;
+    budgetLeft: () => number;
     outputPath: string | undefined;
     append: boolean;
     workspace: string | undefined;
 }): Promise<CallToolResult | undefined> {
-    const { fileUri, firstPage, lastPage, timeoutMs, outputPath, append, workspace } = options;
+    const { fileUri, firstPage, lastPage, budgetLeft, outputPath, append, workspace } = options;
     const terminal = getOcrTerminal();
     const cwd = path.dirname(fileUri.fsPath);
     const pdftotextBin = await resolveBinary(terminal, cwd, 'pdftotext');
@@ -208,7 +211,7 @@ async function tryTextLayer(options: {
         terminal,
         `${shellSingleQuote(pdftotextBin)}${rangeArgs ? ` ${rangeArgs}` : ''} ${shellSingleQuote(fileUri.fsPath)} -`,
         cwd,
-        Math.min(timeoutMs, 20000)
+        Math.min(20000, budgetLeft())
     ).catch(() => ({ output: '', exitCode: 1 }));
     if (textResult.exitCode !== 0 || !textResult.output.trim()) {
         return undefined;
@@ -330,18 +333,20 @@ If most pages report text, ocr_pdf_code(engine="auto") returns that text directl
             }
             const terminal = getOcrTerminal();
             const cwd = path.dirname(fileUri.fsPath);
-            const pdftotextBin = await resolveBinary(terminal, cwd, 'pdftotext');
+            const needsOcrDeadline = Date.now() + CLIENT_BUDGET_MS;
+            const needsOcrLeft = () => needsOcrDeadline - Date.now();
+            const pdftotextBin = await resolveBinary(terminal, cwd, 'pdftotext', Math.min(5000, Math.max(750, needsOcrLeft())));
             if (!pdftotextBin) {
                 return { content: [{ type: 'text' as const, text: missingBinaryMessage('pdftotext', POPPLER_HINT) }], isError: true };
             }
             let totalPages: number | undefined;
-            const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo');
-            if (pdfinfoBin) {
-                const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(fileUri.fsPath)}`, cwd, 8000);
+            const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo', Math.min(5000, Math.max(750, needsOcrLeft())));
+            if (pdfinfoBin && needsOcrLeft() > 2000) {
+                const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(fileUri.fsPath)}`, cwd, Math.min(8000, needsOcrLeft()));
                 const pagesMatch = infoResult.output.match(/^Pages:\s*(\d+)/m);
                 totalPages = pagesMatch ? parseInt(pagesMatch[1], 10) : undefined;
             }
-            const textResult = await executeShellCommand(terminal, `${shellSingleQuote(pdftotextBin)} ${shellSingleQuote(fileUri.fsPath)} -`, cwd, 20000);
+            const textResult = await executeShellCommand(terminal, `${shellSingleQuote(pdftotextBin)} ${shellSingleQuote(fileUri.fsPath)} -`, cwd, Math.min(20000, Math.max(1000, needsOcrLeft())));
             if (textResult.exitCode !== 0) {
                 return { content: [{ type: 'text' as const, text: `pdftotext failed:\n${textResult.output}` }], isError: true };
             }
@@ -494,6 +499,8 @@ The returned text is compacted, and a retrieve_output_code handle in the notice 
         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
     }, async ({ pdfPath, engine = 'tesseract', language = 'eng', firstPage, lastPage, dpi = DEFAULT_DPI, ollamaUrl = DEFAULT_OLLAMA_URL, visionModel = DEFAULT_OLLAMA_VISION_MODEL, visionConfidenceThreshold = DEFAULT_VISION_CONFIDENCE_THRESHOLD, outputPath, append = false, timeoutMs = DEFAULT_OCR_TIMEOUT_MS, workspace }) => {
         let tmpDir: string | undefined;
+        const deadline = Date.now() + Math.min(timeoutMs, CLIENT_BUDGET_MS);
+        const budgetLeft = () => deadline - Date.now();
         try {
             const fileUri = resolveInputPath(pdfPath, workspace);
             const stat = await Promise.resolve(vscode.workspace.fs.stat(fileUri)).catch(() => undefined);
@@ -501,7 +508,7 @@ The returned text is compacted, and a retrieve_output_code handle in the notice 
                 return { content: [{ type: 'text' as const, text: `File not found: "${pdfPath}".` }], isError: true };
             }
             if (engine === 'auto') {
-                const textLayer = await tryTextLayer({ fileUri, firstPage, lastPage, timeoutMs, outputPath, append, workspace });
+                const textLayer = await tryTextLayer({ fileUri, firstPage, lastPage, budgetLeft, outputPath, append, workspace });
                 if (textLayer) {
                     return textLayer;
                 }
@@ -540,13 +547,13 @@ The returned text is compacted, and a retrieve_output_code handle in the notice 
             }
             const terminal = getOcrTerminal();
             const cwd = path.dirname(fileUri.fsPath);
-            const pdftoppmBin = await resolveBinary(terminal, cwd, 'pdftoppm');
+            const pdftoppmBin = await resolveBinary(terminal, cwd, 'pdftoppm', Math.min(5000, Math.max(750, budgetLeft())));
             if (!pdftoppmBin) {
                 return { content: [{ type: 'text' as const, text: missingBinaryMessage('pdftoppm', 'poppler-utils (e.g. "apt install poppler-utils" / "winget install oschwartz10612.Poppler")') }], isError: true };
             }
             let tesseractBin: string | undefined;
             if (engine !== 'vision') {
-                tesseractBin = await resolveBinary(terminal, cwd, 'tesseract');
+                tesseractBin = await resolveBinary(terminal, cwd, 'tesseract', Math.min(5000, Math.max(750, budgetLeft())));
                 if (!tesseractBin) {
                     return {
                         content: [{ type: 'text' as const, text: missingBinaryMessage('tesseract', `tesseract-ocr (e.g. "apt install tesseract-ocr tesseract-ocr-${language.split('+')[0]}" / "winget install UB-Mannheim.TesseractOCR")`) }],
@@ -564,15 +571,18 @@ The returned text is compacted, and a retrieve_output_code handle in the notice 
                 rasterCmd += ` -l ${lastPage}`;
             }
             rasterCmd += ` ${shellSingleQuote(fileUri.fsPath)} ${shellSingleQuote(pagePrefix)}`;
-            const rasterResult = await executeShellCommand(terminal, rasterCmd, cwd, Math.min(timeoutMs, 60000));
-            if (rasterResult.exitCode !== 0) {
+            const rasterResult = await executeShellCommand(terminal, rasterCmd, cwd, Math.max(1000, Math.min(timeoutMs, 60000, budgetLeft())));
+            if (rasterResult.exitCode !== 0 && rasterResult.exitCode !== 124) {
                 return { content: [{ type: 'text' as const, text: `pdftoppm failed:\n${rasterResult.output}` }], isError: true };
             }
             const images = fs.readdirSync(tmpDir)
                 .filter(f => f.startsWith('page') && f.endsWith('.png'))
                 .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
             if (images.length === 0) {
-                return { content: [{ type: 'text' as const, text: 'pdftoppm produced no page images — check firstPage/lastPage are within range.' }], isError: true };
+                const why = rasterResult.exitCode === 124
+                    ? `pdftoppm hit this call's time budget before writing a single page image at ${dpi} DPI — retry with a narrower page range or dpi=150.`
+                    : 'pdftoppm produced no page images — check firstPage/lastPage are within range.';
+                return { content: [{ type: 'text' as const, text: why }], isError: true };
             }
             const engineCap = MAX_PAGES_PER_CALL[engine];
             if (images.length > engineCap) {
@@ -585,8 +595,6 @@ The returned text is compacted, and a retrieve_output_code handle in the notice 
                 };
             }
             const perPageTimeout = Math.max(15000, Math.floor(timeoutMs / images.length));
-            const deadline = Date.now() + timeoutMs;
-            const budgetLeft = () => deadline - Date.now();
             const visionPageTimeout = Math.max(12000, Math.min(20000, Math.floor(timeoutMs / Math.ceil(images.length / 2))));
             const skippedNote = (pageNum: number) => `[Skipped: this call's internal budget ran out before this page — call ocr_pdf_code again with firstPage=${pageNum} lastPage=${pageNum}]`;
             const pageResults: Array<{ pageNum: number; text: string; engineUsed: string }> = [];
@@ -668,7 +676,10 @@ The returned text is compacted, and a retrieve_output_code handle in the notice 
             }
             const skippedCount = pageResults.filter(p => p.engineUsed === 'skipped').length;
             const skipFooter = skippedCount > 0
-                ? `\n\n⚠️ ${skippedCount} page(s) were skipped because this call's internal budget ran out before they could be processed — each is marked [Skipped …] with its page number. Re-run ocr_pdf_code for just those pages.`
+                ? `\n\n⚠️ ${skippedCount} page(s) were skipped because this call's time budget ran out before they could be processed — each is marked [Skipped …] with its page number. Continue OCR by re-running ocr_pdf_code with firstPage/lastPage on just those pages.`
+                : '';
+            const rasterFooter = rasterResult.exitCode === 124
+                ? `\n\n⚠️ pdftoppm hit this call's time budget, so only the pages above were rasterized — continue OCR with a later firstPage.`
                 : '';
             const combined = pageResults
                 .map(p => `--- Page ${p.pageNum} (${p.engineUsed}) ---\n${p.text}`)
@@ -678,7 +689,7 @@ The returned text is compacted, and a retrieve_output_code handle in the notice 
             return finalizeOcrText({
                 combined,
                 header: `OCR done — ${images.length} page(s)${engineNote}, ${combined.length} characters total.`,
-                tailNote: skipFooter,
+                tailNote: skipFooter + rasterFooter,
                 outputPath,
                 append,
                 workspace,

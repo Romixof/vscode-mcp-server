@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { execFile } from 'child_process';
 
 export const POPPLER_HINT = 'poppler-utils (e.g. "apt install poppler-utils" / "brew install poppler" / "winget install oschwartz10612.Poppler")';
@@ -16,6 +17,23 @@ export const WINDOWS_FALLBACK_DIRS: Record<string, string[]> = {
                 ...(process.env.LocalAppData ? [`${winToBashPath(process.env.LocalAppData)}/Programs/Tesseract-OCR`] : [])
         ]
 };
+
+const TESSERACT_EXE = 'tesseract.exe';
+export function msysToWindowsPath(dir: string): string {
+        const isMsysPath = /^\/[A-Za-z]\//.test(dir);
+        const winPath = isMsysPath
+                ? `${dir[1].toUpperCase()}:\\${dir.slice(3).replace(/\//g, '\\')}`
+                : dir;
+        return winPath;
+}
+export function windowsBinaryExists(dir: string, name: string): boolean {
+        try {
+                return fs.existsSync(path.join(msysToWindowsPath(dir), `${name}.exe`));
+        }
+        catch {
+                return false;
+        }
+}
 
 const GIT_BASH_CANDIDATES = process.platform === 'win32' ? [
         `${process.env.ProgramFiles || 'C:\\Program Files'}\\Git\\bin\\bash.exe`,
@@ -57,9 +75,8 @@ export function probeBinary(name: string, hint: string, platform: NodeJS.Platfor
                                 return;
                         }
                         for (const dir of platform === 'win32' ? (WINDOWS_FALLBACK_DIRS[name] ?? []) : []) {
-                                const exePath = `${dir}/${name}.exe`;
-                                if (fs.existsSync(exePath)) {
-                                        resolve({ name, found: true, path: exePath });
+                                if (windowsBinaryExists(dir, name)) {
+                                        resolve({ name, found: true, path: path.join(msysToWindowsPath(dir), `${name}.exe`) });
                                         return;
                                 }
                         }

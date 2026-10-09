@@ -53,9 +53,11 @@ function readTextFile(fsPath: string, displayPath: string): string {
     return buf.toString('utf-8');
 }
 
+import { CLIENT_BUDGET_MS, RESPONSE_RESERVE_MS } from './shell-tools';
+
 function gitExec(args: string[], cwd: string): Promise<{ code: number; out: string }> {
     return new Promise(resolve => {
-        execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, timeout: 30000 }, (err, stdout, stderr) => {
+        execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, timeout: CLIENT_BUDGET_MS - RESPONSE_RESERVE_MS }, (err, stdout, stderr) => {
             resolve({ code: err ? ((err as { code?: number }).code ?? 1) : 0, out: `${stdout}${stderr}`.trim() });
         });
     });

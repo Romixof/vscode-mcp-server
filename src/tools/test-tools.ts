@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { z } from 'zod';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { executeShellCommand } from './shell-tools';
+import { executeShellCommand, CLIENT_BUDGET_MS, CLIENT_CEILING_MS } from './shell-tools';
 import { planModeIntercept } from './safety-tools';
 import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
@@ -173,7 +173,8 @@ Returns stdout/stderr with pass/fail summary.`, {
                         }
                         const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('MCP Tests');
                         const fullCwd = path.resolve(resolveWorkspaceFolder(workspace).uri.fsPath, cwd);
-                        const { output } = await executeShellCommand(terminal, command, fullCwd, 120000);
+                        const { output } = await executeShellCommand(terminal, command, fullCwd, CLIENT_BUDGET_MS)
+                                .catch(error => ({ output: `${error instanceof Error ? error.message : String(error)}\n\nTest suites usually outlast the ${CLIENT_BUDGET_MS}ms client budget — rerun them with background_task_code for the full run.`, exitCode: 1 }));
                         return {
                                 content: [{
                                         type: 'text',
@@ -251,7 +252,8 @@ Supports: vitest, jest, pytest (with pytest-cov), mocha (with c8/nyc).`, {
                         }
                         const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('MCP Coverage');
                         const cwd = resolveWorkspaceFolder(workspace).uri.fsPath;
-                        const { output } = await executeShellCommand(terminal, command, cwd, 180000);
+                        const { output } = await executeShellCommand(terminal, command, cwd, CLIENT_BUDGET_MS)
+                                .catch(error => ({ output: `${error instanceof Error ? error.message : String(error)}\n\nCoverage runs usually outlast the ${CLIENT_BUDGET_MS}ms client budget — rerun with background_task_code for the full report.`, exitCode: 1 }));
                         return {
                                 content: [{
                                         type: 'text',

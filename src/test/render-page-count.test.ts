@@ -58,7 +58,16 @@ function loadOcrTools(options: ShellStubOptions): { render: ToolHandler; execute
                         return { output: '', exitCode: 1 };
                 }
         };
-        const ocrTools = proxyquire('../tools/ocr-tools', { './shell-tools': shellStub }) as
+        const ocrTools = proxyquire('../tools/ocr-tools', { 
+                './shell-tools': shellStub, 
+                // Hermetic: the native Windows fallback must never leak a real install into these stubs.
+                '../utils/binaries': {
+                        WINDOWS_FALLBACK_DIRS: {},
+                        windowsBinaryExists: () => false,
+                        findGitBash: () => undefined,
+                        POPPLER_HINT: 'poppler'
+                }
+        }) as
                 typeof import('../tools/ocr-tools');
         const handlers = new Map<string, ToolHandler>();
         const fakeServer = {

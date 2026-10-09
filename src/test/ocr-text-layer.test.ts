@@ -13,6 +13,7 @@ interface ShellStubOptions {
         pageTexts: string[];
         pdftotextFails?: boolean;
         tesseractFound?: boolean;
+        nativeTesseract?: boolean;
         raster?: 'ok' | 'fail';
 }
 
@@ -56,8 +57,17 @@ function loadOcrTools(options: ShellStubOptions): { ocr: ToolHandler; executed: 
                         }
                         return { output: '', exitCode: 1 };
                 }
+        };	// Hermetic: the native Windows fallback must not leak a real install into tests
+        // that assert tesseract is missing — unless the test asks for it (nativeTesseract).
+        const binariesStub = {
+                WINDOWS_FALLBACK_DIRS: options.nativeTesseract
+                        ? { tesseract: ['/c/Program Files/Tesseract-OCR'] }
+                        : {},
+                windowsBinaryExists: () => options.nativeTesseract === true,
+                findGitBash: () => undefined,
+                POPPLER_HINT: 'poppler'
         };
-        const ocrTools = proxyquire('../tools/ocr-tools', { './shell-tools': shellStub }) as
+        const ocrTools = proxyquire('../tools/ocr-tools', { './shell-tools': shellStub, '../utils/binaries': binariesStub }) as
                 typeof import('../tools/ocr-tools');
         const handlers = new Map<string, ToolHandler>();
         const fakeServer = {
@@ -206,6 +216,23 @@ suite('ocr_pdf_code text-layer fast path', () => {
                 const result = await ocr({ pdfPath: pdf, engine: 'auto' });
                 assert.ok(result.isError, 'a failed extraction must fall through to the OCR engines');
                 assert.ok(/tesseract/.test(firstText(result)), `expected the tesseract requirement. Got: ${firstText(result)}`);
+        });
+
+        test('tesseract missing from PATH but installed at the standard Windows location is found natively', async () => {
+                const pdf = fakePdf();
+                const { ocr, executed } = loadOcrTools({
+                        pdftotextFound: true,
+                        pageTexts: [GOOD, 'x', 'y'],
+                        tesseractFound: false,
+                        nativeTesseract: true,
+                        raster: 'ok'
+                });
+                const result = await ocr({ pdfPath: pdf, engine: 'auto', dpi: 72 });
+                assert.ok(!result.isError, `the native fallback must rescue the incident scenario: ${firstText(result)}`);
+                assert.ok(
+                        executed.some(c => c.includes("'/c/Program Files/Tesseract-OCR/tesseract.exe'")),
+                        `the native fallback must run the tesseract binary by its full fallback path. Ran: ${executed.join(' | ')}`
+                );
         });
 
         test('outputPath saves the text-layer result', async () => {

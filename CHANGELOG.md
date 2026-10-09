@@ -4,6 +4,26 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.32] - 2026-10-09
+### Fixed
+
+- `ocr_pdf_code` could not be stopped. Its "internal budget" deadline was taken *after* the text-layer attempt, the binary probes and rasterization had already run — none of them sharing one clock — so a single call could spend 40 s and more: text layer, six 15 s tesseract legs at `perPageTimeout = max(15000, timeout/pages)`, then vision escalations, all on top of a client that disconnects at 30 s. The deadline is now taken when the call arrives; every leg (raster, each tesseract page, each vision page) gets only what is left of it, and a page whose time has passed is returned marked `[Skipped … firstPage=N lastPage=N]` with a re-run hint instead of extending the call. Pages pdftoppm wrote just as its leg timed out are still used, with a note; a raster that starved before writing anything is a bounded error naming the DPI/page-range remedy, not a hang.
+- `get_server_info_code` lied that tesseract was missing. The probe ran `fs.existsSync('/c/Program Files/Tesseract-OCR/tesseract.exe')` — an MSYS path Node on Windows cannot resolve — while tesseract sat at that exact location, so the doctor reported "missing" and pointed the agent at pointless reinstalls. `probeBinary` now checks the standard Windows install locations with a real stat when PATH lookup fails and reports the found binary at its Windows path.
+- `profile_command_code` could loop ten runs at 27 s each against the same 30 s ceiling. The loop now draws on one global deadline and stops early when it is spent.
+- `run_sql_query_code` and `test_api_endpoint_code` accepted client-passable 30 s defaults that sat exactly at the disconnect point. Their defaults are clamped under the ceiling.
+- The two `gitExec` calls used a 30 s `execFile` timeout, so one hung git call alone consumed the whole budget. They are now bounded well below it.
+- Nominal timeouts in `run_task_code`, `build_project_code`, `run_tests_code`, coverage, security and documentation tools were clamped to a 1000 ms floor that could still exceed the remaining budget; all now draw from one clamped deadline.
+
+### Changed
+- The shared budget constants (`CLIENT_CEILING_MS` 30 s, 3 s response reserve, 25 s default shell timeout) moved to `src/utils/client-budget.ts` so every tool clamps against the same clock instead of re-declaring its own.
+- The per-engine page caps in the `ocr_pdf_code` description state that the client enforces a ~30 s ceiling that `timeoutMs` cannot extend, and that wider jobs must be split into consecutive calls appended with `outputPath`/+`append:true`.
+- The skipped-page footer of `ocr_pdf_code` names the time budget and the exact `firstPage/lastPage` re-run commands so a partial result can always be resumed in page order.
+
+### Tests
+- New `ocr-budget.test.ts` exercises the seam between the tool clock and the shell clock with fake-timed legs: a raster that eats the budget still returns a partial with a resume hint; a starved raster with no pages is a bounded error; and the whole tesseract pipeline succeeds when the legs are quick.
+- New `binaries-fallback.test.ts` pins the MSYS→Windows path conversion and makes the probe hermetic via proxyquired `execFile`.
+- The OCR text-layer tests are now hermetic against the machine they run on: a real tesseract install in the standard Windows location can no longer leak into tests that assert it is missing, and a specific test proves the incident scenario (tesseract absent from PATH, present at the fallback dir) is rescued by the native probe.
+
 ## [0.20.31] - 2026-10-04
 ### Fixed
 - A wrong-shell retry could run past the point where the client had already gone. `executeShellCommand` applied the requested timeout to each attempt separately, so a command that failed its shell syntax check was retried in the other family with a *fresh* full budget instead of what was left of the first one: 27 s, then another 27 s, against a client that disconnects at 30 s. A single observed call burned 11.5 s on the bash attempt, began the PowerShell retry, and lost its client at 29.5 s with the retry still running and the response never delivered. One deadline is now computed when the request arrives and each attempt gets the remainder; when nothing is left, the call says so and points at `background_task_code` instead of silently overrunning the ceiling. The tool description states that the budget covers the whole call, retries included.

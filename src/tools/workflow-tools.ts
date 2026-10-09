@@ -4,7 +4,7 @@ import * as path from 'path';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { executeShellCommand } from './shell-tools.js';
+import { executeShellCommand, CLIENT_BUDGET_MS, CLIENT_CEILING_MS } from './shell-tools.js';
 import { planModeIntercept } from './safety-tools';
 import { getWorkspaceRoot, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace.js';
 
@@ -194,6 +194,12 @@ async function runInTerminal(
 ): Promise<{ output: string; exitCode: number }> {
         if (!terminal) {
                 throw new Error('Terminal not available');
+        }
+        if (timeout > CLIENT_BUDGET_MS) {
+                throw new Error(
+                        `Timeout ${timeout}ms exceeds the ${CLIENT_BUDGET_MS}ms client budget (the calling client disconnects at ${CLIENT_CEILING_MS}ms whatever this tool promises). ` +
+                        `Run it with background_task_code instead, or pass a timeout at or under ${CLIENT_BUDGET_MS}.`
+                );
         }
         const effectiveCwd = !cwd || cwd === '.' || cwd === './' ? undefined : cwd;
         return executeShellCommand(terminal, command, effectiveCwd ?? getWorkspaceRoot(), timeout);

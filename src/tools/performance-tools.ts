@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
-import { executeShellCommand } from './shell-tools';
+import { executeShellCommand, CLIENT_BUDGET_MS, CLIENT_CEILING_MS } from './shell-tools';
 import { planModeIntercept } from './safety-tools';
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', '.vscode-mcp', '__pycache__']);
@@ -171,10 +171,19 @@ async function profileCommand(command: string, runs: number, workspace?: string)
         const durations: number[] = [];
         let lastOutput = '';
         let lastExit = 0;
+        const loopDeadline = Date.now() + CLIENT_BUDGET_MS;
         for (let i = 0; i < runs; i++) {
+                const runLeft = loopDeadline - Date.now();
+                if (runLeft < 2000) {
+                        if (i === 0) {
+                                throw new Error(`Cannot profile even once: the run needs a slot inside the ${CLIENT_BUDGET_MS}ms budget before the client disconnects at ${CLIENT_CEILING_MS}ms. Profile fewer runs, or run a single measured call through execute_shell_command_code.`);
+                        }
+                        lastOutput += `\n[Stopped after ${i} run(s): the ${CLIENT_BUDGET_MS}ms client budget was spent — later runs would return nothing when the client disconnects at ${CLIENT_CEILING_MS}ms.]`;
+                        break;
+                }
                 const startedAt = Date.now();
                 try {
-                        const result = await executeShellCommand(sharedTerminal, command, workspaceRoot, 120000);
+                        const result = await executeShellCommand(sharedTerminal, command, workspaceRoot, runLeft);
                         durations.push(Date.now() - startedAt);
                         lastOutput = result.output;
                         lastExit = result.exitCode;
