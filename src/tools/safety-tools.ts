@@ -71,9 +71,9 @@ export function registerSafetyTools(server: McpServer): void {
 
     server.tool(
         'diff_preview_code',
-        `Dry-run preview of a file edit: returns the unified diff that replace_lines_code / create_file_code / move_file_code / rename_file_code WOULD produce, without touching anything.
+        `Dry-run preview of a file edit: the unified diff that replace_lines_code / create_file_code / move_file_code / rename_file_code WOULD produce, touching nothing. Read-only, free to call.
 
-WHEN TO USE: before replacing or rewriting non-trivial content, before overwriting an existing file, whenever you are not 100% sure of the outcome. Read-only and free to call.
+WHEN TO USE: before rewriting non-trivial content, overwriting an existing file, or whenever the outcome is not certain.
 
 Ops mirror the real tools: "replace_lines" (path, startLine, endLine, content, optional originalCode), "create" (path, content, overwrite), "move" (sourcePath, targetPath, overwrite), "rename" (filePath, newName, overwrite).`,
         {

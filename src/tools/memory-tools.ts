@@ -14,6 +14,8 @@ import {
         readTextFile,
         renderState,
         tailLog,
+        parseState,
+        StateFields,
         writeTextFile
 } from '../utils/workspace-state';
 
@@ -309,15 +311,11 @@ Provide entry to remove a specific bullet. Omit entry to remove the entire secti
                 };
         });
 
-        server.tool('workspace_state_code', `Reads or overwrites the CURRENT working state of this workspace: version, branch, status, what is in progress, and the next step.
+        server.tool('workspace_state_code', `Reads or overwrites this workspace's current working state: version, branch, status, in progress, next step.
 
-WHEN TO USE: at the start of a task to find out where the last session stopped, and at the end to record where you stopped. The state file is a small snapshot that gets overwritten, so it never grows — unlike memory, which only accumulates.
+WHEN TO USE: at the start of a task to find where the last session stopped, at the end to record it. A small snapshot, overwritten, never grows — unlike memory, which only accumulates.
 
-Actions:
-- read (default): the current state snapshot.
-- write {version, branch, status, inProgress, nextStep}: overwrites the snapshot. Omit any field to clear it.
-
-The next session reads this through session_bootstrap_code, so write a real next step — that is the whole point.`, {
+Actions: read (default) prints it; write {version, branch, status, inProgress, nextStep} overwrites it, omitted fields cleared. The next session reads it through session_bootstrap_code, so write a real next step.`, {
                 action: z.enum(['read', 'write']).optional().default('read').describe('Read the state snapshot or overwrite it'),
                 version: z.string().optional().describe('write: version or build identifier currently being worked on'),
                 branch: z.string().optional().describe('write: current git branch or tag'),
@@ -342,15 +340,11 @@ The next session reads this through session_bootstrap_code, so write a real next
                 return { content: [{ type: 'text', text: `# Workspace state (${target})\n\n${existing}` }] };
         });
 
-        server.tool('session_end_code', `Closes out a work session: records what was done, what is still open, and the next step, so the next conversation resumes instead of starting over.
+        server.tool('session_end_code', `Closes a work session: what was done, what remains, the next step — so the next conversation resumes instead of starting over.
 
-WHEN TO USE: as the LAST tool call of a task, right before you report completion. Not for every reply — only when a unit of work is finished, handed off, or abandoned.
+WHEN TO USE: as the LAST tool call of a task, right before reporting completion. Not every reply — only a finished, handed-off or abandoned unit of work.
 
-It does two things:
-- writes the workspace state snapshot (version, branch, in progress, next step) that session_bootstrap_code loads next time;
-- appends a dated session summary to the workspace log.
-
-The summary is the part a tool cannot infer: the intent behind the work, the decisions you made and why, and anything you deliberately left out. Write it for someone with no memory of this conversation.`, {
+Writes the state snapshot (version, branch, in progress, next step) that session_bootstrap_code loads next time, and appends a dated summary to the workspace log. The summary carries what no tool can infer: intent, decisions and why, deliberate skips.`, {
                 summary: z.string().describe('What was done, what was decided and why, what was deliberately skipped. Concrete, not generic.'),
                 version: z.string().optional().describe('Version or build identifier this session was working on'),
                 branch: z.string().optional().describe('Current git branch or tag'),
@@ -381,6 +375,40 @@ The summary is the part a tool cannot infer: the intent behind the work, the dec
                                 text: `✅ Session closed.\n\nState → ${stateTarget}\nLog → ${logTarget}\n\n${state}\n\nLogged summary: ${summary.slice(0, 400)}${summary.length > 400 ? '…' : ''}`
                         }]
                 };
+        });
+
+        server.tool('handoff_code', `Bookmark the current handoff state without a session close: what you are doing, the tool that last moved it, the literal next step.
+
+WHEN TO USE: when the work context materially changes (model switch, direction change, long pause) — not every reply. session_end_code owns the close, this owns the resume point. Loaded by session_bootstrap_code.
+
+Omitted fields are filled from the prior state, so restate only what changed.`, {
+                action: z.enum(['write', 'read']).optional().default('write').describe('write merges each provided field over the current state; read prints the file'),
+                inProgress: z.string().optional().describe('what is being worked on right now'),
+                lastTool: z.string().optional().describe('the tool that last changed this state, named so a resuming model can re-derive it'),
+                nextStep: z.string().optional().describe('the single next action to take on resume'),
+                status: z.string().optional().describe('short status like "2 tests failing"'),
+                workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+        }, async ({ action = 'write', inProgress, lastTool, nextStep, status, workspace }) => {
+                const target = projectStatePath(workspace);
+                if (!target) {
+                        throw new Error('No workspace open — handoff_code needs an open folder.');
+                }
+                const existing = parseState(await readTextFile(target));
+                const fields: StateFields = action === 'read'
+                        ? { version: existing.version, branch: existing.branch, status: existing.status, inProgress: existing.inProgress, nextStep: existing.nextStep }
+                        : {
+                                version: existing.version,
+                                branch: existing.branch,
+                                status: status ?? existing.status,
+                                inProgress: inProgress ?? existing.inProgress,
+                                nextStep: nextStep ?? existing.nextStep
+                        };
+                const merged = renderState({ ...fields, updatedAt: new Date().toISOString(), nextStep: fields.nextStep || lastTool });
+                if (action === 'read') {
+                        return { content: [{ type: 'text', text: `# Handoff state (${target})\n\n${merged}` }] };
+                }
+                await writeTextFile(target, merged);
+                return { content: [{ type: 'text', text: `✅ Handoff state written to ${target}:\n\n${merged}` }] };
         });
 
         server.tool('workspace_log_code', `Reads the workspace session log: a dated, budgeted history of what happened, most recent last. Rotates automatically so it never grows without bound.

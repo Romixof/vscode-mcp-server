@@ -22,6 +22,7 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'get_project_context_code', 'get_package_dependencies_code',
         'memory_load_code', 'memory_search_code',
         'workspace_state_code', 'workspace_log_code',
+        'handoff_code',
         'snapshot_workspace_code',
         'list_skills_code', 'validate_skill_code',
         'pdf_needs_ocr_code',

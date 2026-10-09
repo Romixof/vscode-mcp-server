@@ -380,20 +380,19 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
 
     server.tool(
         'read_file_code',
-        `Retrieves file contents with size limits and partial reading support.
+        `File contents with size limits and partial reading.
 
-        WHEN TO USE: Reading code, config files, analyzing implementations.
+        WHEN TO USE: reading code, config files, analyzing implementations.
 
-        Encoding: text encodings (utf-8, latin1, …) for text files, 'base64' for the raw string.
-        Line numbers: startLine/endLine (1-based) read a section of a large file.
+        Encoding: text encodings (utf-8, latin1, …); "base64" for the raw string. startLine/endLine (1-based) read a section of a large file.
 
-        Images: a .png/.jpg/.gif/.webp/.bmp comes back as a picture you can look at, with its pixel size and token cost. Pass encoding "base64" only for the raw string.
+        Images: .png/.jpg/.gif/.webp/.bmp come back as a picture with pixel size and token cost.
 
-        A PDF, .docx or .zip is binary and is refused. A PDF is read by ocr_pdf_code for its text, or render_pdf_pages_code for its pages as images.
+        A PDF, .docx or .zip is binary and refused: a PDF is read by ocr_pdf_code (text) or render_pdf_pages_code (page images).
 
-        Re-reading: a file already in context comes back as a one-line notice, never a second copy, including a full read asked as startLine 1 with an endLine past the last line.
+        Re-reading: a file already in context comes back as a one-line notice, never a second copy.
 
-        Missing a tool? session_bootstrap_code has the catalog; if it is not callable, get_agent_instructions_code does.`,
+        Missing a tool? session_bootstrap_code has the catalog; if not callable, get_agent_instructions_code does.`,
         {
             path: z.string().describe('The path to the file to read'),
             encoding: z.string().optional().default('utf-8').describe('Encoding to convert the file content to a string. Use "base64" for base64-encoded string'),

@@ -3,7 +3,7 @@ import { TOOL_HINTS } from './tool-annotations';
 
 const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
 
-export const AGENT_INSTRUCTIONS_VERSION = '16';
+export const AGENT_INSTRUCTIONS_VERSION = '17';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -30,7 +30,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     'LEGEND: [RO] = readOnlyHint, read-only, auto-approved, use freely. [MUT] modifies files or state, may need manual approval. [DST] destructive or runs arbitrary commands, needs approval. Multi-root: every path tool accepts workspace="<folder name or 1-based index>"; results come back as "FolderName/path" and resolve if you feed them back as-is.',
     '',
     'NON-NEGOTIABLE WORKFLOW:',
-    '1. Start with ONE session_bootstrap_code() call — it returns memory, layout, skills and this guide in a single response, then work from this map. memory_load_code() is only for a conversation already bootstrapped without its "memory" section.',
+    '1. Start with ONE session_bootstrap_code() call — it returns memory, layout, skills and this guide in a single response, then work from this map. Rejoining a session mid-conversation (model was switched, context was trimmed): call it once again first to re-anchor on memory + state. memory_load_code() is only for a conversation already bootstrapped without its "memory" section.',
     '2. Explore with list_files_code(path=".") (never recursive on the root). Read with read_file_code(path, startLine, endLine) using ranges for large files. Prefer structure first: get_document_symbols_code(path) for an outline, search_symbols_code(query) to locate a function or class, get_symbol_definition_code(path, line, symbol) for its definition and type.',
     '3. Search text with search_workspace_code(pattern, glob) - NEVER use shell commands to read or search files.',
     '4. Edit existing code with edit_file_code(path, old_string, new_string): it matches the text you quote, so it cannot break when the file shifts under it. It refuses to guess when old_string appears more than once and hands you every location instead. Reach for create_file_code(path, content, overwrite=true) only for a new file or a whole-file rewrite, and replace_lines_code only for a pure insertion or deletion at a known line. Rename code symbols only with rename_symbol_code(oldName, newName), never by manual search/replace.',
@@ -44,7 +44,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '- Never list a folder when the user already gave the path; never re-read a file you just wrote; never paste file contents into chat when a create_file_code call can carry them.',
     '- Chain shell steps into one call (cmd1 && cmd2): generate + verify (pdfinfo, ls) together.',
     '- Copy annex files (scripts, templates) with copy_file_code or shell cp - never retype them.',
-    '- Write deliverables FIRST (create_file_code), verify after: if the budget runs out mid-task, the files must already exist.',
+    '- Write deliverables FIRST (create_file_code), verify after: if the budget runs out mid-task, the files must already exist. When the working context changes materially (model switch, direction change, pause), close the gap with ONE handoff_code(inProgress, lastTool, nextStep) — session_end_code stays for finished units only.',
     '',
     `FULL TOOL CATALOG (${TOOL_CATALOG_SIZE} tools):`,
     '',
@@ -113,6 +113,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
     '[MUT] memory_save_code(section, entry, scope="global"|"project") - append a dated entry; save durable facts and decisions.',
     '[RO] workspace_state_code(action="read"|"write", version, branch, status, inProgress, nextStep) - the CURRENT snapshot of where the work stands: which version/branch, what is in progress, the next step. Overwritten, never grows. Loaded by session_bootstrap_code.',
     '[MUT] session_end_code(summary, version, branch, status, inProgress, nextStep) - close a work session: writes the state snapshot and appends a dated summary to the log. Call as the LAST tool call of a finished, handed-off or abandoned unit of work.',
+    '[MUT] handoff_code(action="write"|"read", inProgress, lastTool, nextStep, status) - replaces ONLY the fields provided on top of the current state (read shows the file). Use at a context switch, not at a close: what changed, which tool last moved it, what to do next. Loaded by session_bootstrap_code.',
     '[RO] workspace_log_code(count) - recent session history with files touched and commands run, when the state snapshot is not enough detail.',
     '[RO] memory_search_code(query, scope) - search memory by keyword.',
     '[DST] memory_clear_code(section, entry, scope) - remove wrong or outdated entries.',

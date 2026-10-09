@@ -34,6 +34,7 @@ export const TOOL_HINTS: Record<string, ToolHints> = {
     list_open_tabs_code: RO,
     workspace_state_code: RO,
     workspace_log_code: RO,
+    handoff_code: MUT,
     session_bootstrap_code: RO,
     get_git_diff_code: RO,
     get_blame_code: RO,

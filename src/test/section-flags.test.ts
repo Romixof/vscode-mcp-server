@@ -22,7 +22,7 @@ function enumOf(prop: PropertyShape | undefined): string[] | undefined {
 suite('section flags replaced the boolean fans', () => {
         test('session_bootstrap_code exposes one sections param, not four booleans', async () => {
                 const props = await schemaOf('session_bootstrap_code');
-                assert.deepStrictEqual(Object.keys(props).sort(), ['sections', 'workspace'], `unexpected shape: ${Object.keys(props).join(', ')}`);
+                assert.deepStrictEqual(Object.keys(props).sort(), ['mode', 'sections', 'workspace'], `unexpected shape: ${Object.keys(props).join(', ')}`);
                 assert.deepStrictEqual(enumOf(props.sections), ['memory', 'guide', 'skills', 'layout'], 'the enum must name the four parts it replaced');
                 assert.ok(/omit for all four/i.test(props.sections.description || ''), `the default must be stated: ${props.sections.description}`);
         });

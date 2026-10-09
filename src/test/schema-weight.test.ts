@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import { fetchToolList } from './helpers/tool-list';
 import { WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
-const EXPECTED_TOOL_COUNT = 91;
+const EXPECTED_TOOL_COUNT = 92;
 const MAX_TOKENS_PER_TOOL = 950;
 const P95_TOKENS_PER_TOOL = 480;
 const PAYLOAD_CEILING = 26600;

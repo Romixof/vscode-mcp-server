@@ -180,22 +180,32 @@ export function registerSessionBootstrapTool(server: McpServer, guideOverride?: 
         let deliveredGuide = '';
         server.tool(
                 'session_bootstrap_code',
-                `ONE-CALL session start. Returns in a single response: persistent memory (global + project), the open workspace folders with the first folder's root layout, the skills list (auto-detected: "skills" then ".claude/skills"), and the full agent guide.
+                `ONE-CALL session start: persistent memory (global + project), workspace folders + root layout, skills list, and the full agent guide in one response.
 
-        WHEN TO USE: ONCE, at the very start of every conversation — it replaces the four separate opening calls (memory_load_code, get_agent_instructions_code, list_workspace_folders_code, list_files_code on the root). Clients cap tool calls per response: spend them on the actual task, not on loading context.
+        WHEN TO USE: ONCE at the very start of every conversation — replaces four separate opening calls. Clients cap tool calls per response: spend them on the task, not on loading context.
 
-        Read-only. Skip already-known sections with sections=[...] (e.g. sections=["memory","layout"] to refresh only those); omit it for all four.`,
-                {
+        Refresh only known sections with sections=[...] (e.g. ["memory","layout"]); omit it for all four.
+
+        COMPACT: mode="compact" returns ONLY the state snapshot plus a pointer to the full call (~800 tokens) — for re-anchoring mid-conversation after a model switch or context trim.`, {
                         sections: z.array(z.enum(['memory', 'guide', 'skills', 'layout'])).optional().describe('Parts to return; omit for all four. "layout" is 1 level deep, 40 entries max.'),
+                        mode: z.enum(['full', 'compact']).optional().default('full').describe('compact = state snapshot + pointer only, for re-anchoring mid-conversation'),
                         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
                 },
-                async ({ sections, workspace }): Promise<CallToolResult> => {
+                async ({ sections, mode = 'full', workspace }): Promise<CallToolResult> => {
                         const want = (name: 'memory' | 'guide' | 'skills' | 'layout'): boolean => !sections || sections.includes(name);
                         const memory = want('memory');
                         const guide = want('guide');
                         const skills = want('skills');
                         const layout = want('layout');
                         const parts: string[] = ['# 🚀 Session bootstrap'];
+                        if (mode === 'compact') {
+                                const statePath = projectStatePath(workspace);
+                                const state = statePath ? await readTextFile(statePath) : null;
+                                parts.push('\n## 🧭 Workspace state (compact re-anchor)\n');
+                                parts.push(state ?? '*No workspace state recorded yet — call the full session_bootstrap_code() or workspace_state_code(action="write", …) to create one.*');
+                                parts.push(`\n\nFull re-anchor (memory + layout + skills + guide): call session_bootstrap_code() with no arguments.`);
+                                return { content: [{ type: 'text', text: parts.join('\n') }] };
+                        }
                         if (memory) {
                                 const { global, project, projectPath } = await loadAllMemory(workspace);
                                 const statePath = projectStatePath(workspace);

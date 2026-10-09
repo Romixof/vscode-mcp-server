@@ -4,6 +4,19 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.33] - 2026-10-09
+### Added
+
+- `handoff_code` — mid-session checkpoint without a session close. `session_end_code` answers "the work is done"; a model switch, a direction change or a long pause does neither, so the resume point used to be lost. `handoff_code(inProgress, lastTool, nextStep, status)` overwrites ONLY the fields provided on top of the current state — you restate what changed, not the whole snapshot; a `lastTool` with no `nextStep` becomes the next step, since re-running the tool that last moved the state is itself a next step. Guide v17: rule 1 now says a model rejoining mid-conversation starts with `session_bootstrap_code`, and the budget section names `handoff_code` for context changes.
+- `session_bootstrap_code` gained `mode="compact"` — the workspace state snapshot plus a pointer to the full call, ~800 tokens instead of the full memory + layout + skills + guide payload. The gap between "full re-anchor" and "no context at all" was the reason a switched model skipped re-anchoring: too expensive for the margin it needed.
+- `session_bootstrap_code` description states the compact option, and the guide points mid-session re-anchoring at it.
+
+### Changed
+- The `tools/list` payload had 88 tokens of headroom; three of the heaviest descriptions (`ocr_pdf_code`, `read_file_code`, `workspace_state_code` + `session_end_code` + `diff_preview_code`) were trimmed to fit the 92nd tool under the same 26 600 cap — payload now 26 583 tok.
+
+### Tests
+- New `handoff.test.ts`: merge semantics (partial write survives the fields it does not touch, `lastTool` becomes a re-derivable next step, read never writes), and the compact mode returns the snapshot without guide or layout and stays under ~2 400 chars.
+
 ## [0.20.32] - 2026-10-09
 ### Fixed
 
