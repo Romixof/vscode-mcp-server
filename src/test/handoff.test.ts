@@ -100,6 +100,23 @@ suite('handoff_code merge semantics', () => {
                 assert.ok(/Next step: compile and rerun suite/.test(saved2), `the new nextStep must replace the old: ${saved2}`);
         });
 
+        test('lastTool is persisted as its own line even when nextStep is also given', async () => {
+                const handlers = captureTools(memoryTools.registerMemoryTools);
+                const handoff = handlers.get('handoff_code');
+                assert.ok(handoff, 'handoff_code was not registered');
+
+                await handoff({ nextStep: 'run the suite', lastTool: 'edit_file_code' });
+                const saved = fs.readFileSync(stateFile, 'utf-8');
+                assert.ok(/Last tool: edit_file_code/.test(saved), `lastTool must persist as its own line: ${saved}`);
+                assert.ok(/Next step: run the suite/.test(saved), `an explicit nextStep must not be overwritten by lastTool: ${saved}`);
+
+                // A later write that mentions neither field must keep both.
+                await handoff({ status: 'tests green' });
+                const saved2 = fs.readFileSync(stateFile, 'utf-8');
+                assert.ok(/Last tool: edit_file_code/.test(saved2), `lastTool must survive an untouched partial write: ${saved2}`);
+                assert.ok(/Next step: run the suite/.test(saved2), `nextStep must survive an untouched partial write: ${saved2}`);
+        });
+
         test('read prints the file without writing it', async () => {
                 const handlers = captureTools(memoryTools.registerMemoryTools);
                 const handoff = handlers.get('handoff_code');
@@ -113,6 +130,8 @@ suite('handoff_code merge semantics', () => {
 });
 
 suite('session_bootstrap_code compact mode', () => {
+        const stateFile = path.join(wsRoot, 'handoff-test_STATE.md');
+
         test('compact returns the state snapshot and a pointer, not the guide or layout', async () => {
                 const advanced = proxyquire('../tools/advanced-tools', {
                         '../utils/workspace': workspaceStub,
@@ -127,5 +146,24 @@ suite('session_bootstrap_code compact mode', () => {
                 assert.ok(!/Root of "/.test(text), `compact must not ship the root layout: ${text.slice(0, 200)}`);
                 assert.ok(text.length < 2400, `compact must stay lean, got ${text.length} chars`);
                 assert.ok(/call session_bootstrap_code\(\) with no arguments/.test(text), `compact must point back to the full call: ${text.slice(0, 400)}`);
+        });
+
+        test('a state file that exists but is blank reads as nothing recorded, not as an empty section', async () => {
+                // The real transcript hit this: a whitespace file exists, readTextFile
+                // returns '' (not null), and a plain ?? served an empty section header.
+                fs.writeFileSync(stateFile, '   \n\n');
+                const advanced = proxyquire('../tools/advanced-tools', {
+                        '../utils/workspace': workspaceStub,
+                        '../utils/workspace-state': stateModule()
+                }) as unknown as typeof import('../tools/advanced-tools');
+                const handlers = captureTools(s => advanced.registerSessionBootstrapTool(s, () => undefined));
+                const boot = handlers.get('session_bootstrap_code');
+                assert.ok(boot, 'session_bootstrap_code was not registered');
+                const text = firstText(await boot({ mode: 'compact' }));
+                assert.ok(/No workspace state recorded yet/.test(text), `a blank state file must serve the fallback note: ${text.slice(0, 300)}`);
+                // And the real content must come back once the file means something again.
+                fs.writeFileSync(stateFile, '# Workspace state\n\n- In progress: real value\n');
+                const text2 = firstText(await boot({ mode: 'compact' }));
+                assert.ok(/In progress: real value/.test(text2), `a real state must come through: ${text2.slice(0, 300)}`);
         });
 });

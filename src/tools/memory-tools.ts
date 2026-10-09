@@ -384,7 +384,7 @@ WHEN TO USE: when the work context materially changes (model switch, direction c
 Omitted fields are filled from the prior state, so restate only what changed.`, {
                 action: z.enum(['write', 'read']).optional().default('write').describe('write merges each provided field over the current state; read prints the file'),
                 inProgress: z.string().optional().describe('what is being worked on right now'),
-                lastTool: z.string().optional().describe('the tool that last changed this state, named so a resuming model can re-derive it'),
+                lastTool: z.string().optional().describe('the tool that last changed this state, persisted as its own line; when nextStep is omitted it also becomes the next step'),
                 nextStep: z.string().optional().describe('the single next action to take on resume'),
                 status: z.string().optional().describe('short status like "2 tests failing"'),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
@@ -395,15 +395,16 @@ Omitted fields are filled from the prior state, so restate only what changed.`, 
                 }
                 const existing = parseState(await readTextFile(target));
                 const fields: StateFields = action === 'read'
-                        ? { version: existing.version, branch: existing.branch, status: existing.status, inProgress: existing.inProgress, nextStep: existing.nextStep }
+                        ? { version: existing.version, branch: existing.branch, status: existing.status, inProgress: existing.inProgress, nextStep: existing.nextStep, lastTool: existing.lastTool }
                         : {
                                 version: existing.version,
                                 branch: existing.branch,
                                 status: status ?? existing.status,
                                 inProgress: inProgress ?? existing.inProgress,
-                                nextStep: nextStep ?? existing.nextStep
+                                nextStep: nextStep ?? (existing.nextStep || lastTool),
+                                lastTool: lastTool ?? existing.lastTool
                         };
-                const merged = renderState({ ...fields, updatedAt: new Date().toISOString(), nextStep: fields.nextStep || lastTool });
+                const merged = renderState({ ...fields, updatedAt: new Date().toISOString() });
                 if (action === 'read') {
                         return { content: [{ type: 'text', text: `# Handoff state (${target})\n\n${merged}` }] };
                 }

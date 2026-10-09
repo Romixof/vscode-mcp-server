@@ -4,6 +4,16 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.34] - 2026-10-09
+### Fixed
+
+- A real handoff test session exposed two defects, both fixed and both pinned by tests:
+- `session_bootstrap_code(mode="compact")` served an EMPTY state section when the state file existed but was blank — `readTextFile` returns `''` for a whitespace-only file and `?? ''` passed it through, instead of the fallback note that a *missing* file gets. A blank read is now treated the same as no file: the "nothing recorded yet" note is served and the agent is told how to create a state.
+- `handoff_code` accepted `lastTool` but only ever used it as a fallback for `nextStep`, then dropped it — the promised "the resuming model can re-derive what moved the state" was false, and the model in the test session correctly noticed. `lastTool` is now persisted as its own `Last tool:` state line, survives later partial writes, and still becomes the next step when no `nextStep` is given.
+
+### Tests
+- `handoff.test.ts` grew two cases: lastTool persisted and immune to untouched writes, and a blank-state file serving the fallback once, then real content once it exists.
+
 ## [0.20.33] - 2026-10-09
 ### Added
 

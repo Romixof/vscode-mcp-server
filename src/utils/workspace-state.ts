@@ -70,6 +70,7 @@ export interface StateFields {
         status?: string;
         inProgress?: string;
         nextStep?: string;
+        lastTool?: string;
         updatedAt?: string;
 }
 
@@ -86,6 +87,7 @@ export function renderState(fields: StateFields): string {
         push('Status', fields.status);
         push('In progress', fields.inProgress);
         push('Next step', fields.nextStep);
+        push('Last tool', fields.lastTool);
         push('Updated', fields.updatedAt ?? new Date().toISOString());
         return clip(rows.join('\n') + '\n', STATE_MAX_CHARS);
 }
@@ -107,6 +109,7 @@ export function parseState(content: string | null): StateFields {
                 else if (key === 'status') { fields.status = value; }
                 else if (key === 'in progress') { fields.inProgress = value; }
                 else if (key === 'next step') { fields.nextStep = value; }
+                else if (key === 'last tool') { fields.lastTool = value; }
                 else if (key === 'updated') { fields.updatedAt = value; }
         }
         return fields;

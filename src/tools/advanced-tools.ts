@@ -202,7 +202,10 @@ export function registerSessionBootstrapTool(server: McpServer, guideOverride?: 
                                 const statePath = projectStatePath(workspace);
                                 const state = statePath ? await readTextFile(statePath) : null;
                                 parts.push('\n## 🧭 Workspace state (compact re-anchor)\n');
-                                parts.push(state ?? '*No workspace state recorded yet — call the full session_bootstrap_code() or workspace_state_code(action="write", …) to create one.*');
+                                // A file that exists but is blank (whitespace-only) reads as '' —
+                                // not null — so a plain ?? would serve an empty section. Treat
+                                // any blank read the same as a missing file.
+                                parts.push(state && state.trim() ? state : '*No workspace state recorded yet — call the full session_bootstrap_code() or workspace_state_code(action="write", …) to create one.*');
                                 parts.push(`\n\nFull re-anchor (memory + layout + skills + guide): call session_bootstrap_code() with no arguments.`);
                                 return { content: [{ type: 'text', text: parts.join('\n') }] };
                         }
