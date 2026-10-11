@@ -4,6 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.35-twilight.2] - 2026-10-11
+### Added
+
+- **Twilight strict mode** (`vscode-mcp-server.twilightStrict`, implies the gate): the live Mammouth test showed its connector popup re-calls tools/list EVERY time it re-opens, so in loose gate mode one popup re-open re-cached all 92 schemas. In strict mode tools/list NEVER returns more than session_bootstrap_code — not after the gate passes, not on reconnect, not on popup re-open. Every other tool stays callable by name (the SDK tools/call handler is replaced with one that skips the enabled check and reports errors as isError text like the SDK does); the agent guide remains the only catalog the model sees. Tests: strict list stays at one tool forever, unlisted tool callable, 299/299 green.
+
 ## [0.20.35-twilight.1] - 2026-10-11
 ### Added
 

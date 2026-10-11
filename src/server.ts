@@ -93,20 +93,22 @@ export function setTwilightConfigSource(source: TwilightConfigSource | undefined
         twilightConfigSource = source;
 }
 
-function readTwilightConfig(): boolean {
+function readTwilightConfig(key: string, fallback: boolean): boolean {
         try {
                 const envValue = process.env[TWILIGHT_GATE_ENV];
-                if (envValue === '1') {
-                        return true;
-                }
-                if (envValue === '0') {
-                        return false;
+                if (key === 'twilightGate') {
+                        if (envValue === '1') {
+                                return true;
+                        }
+                        if (envValue === '0') {
+                                return false;
+                        }
                 }
                 if (twilightConfigSource) {
-                        return twilightConfigSource.get<boolean>('vscode-mcp-server', 'twilightGate', false);
+                        return twilightConfigSource.get<boolean>('vscode-mcp-server', key, fallback);
                 }
         } catch { /* fall through */ }
-        return false;
+        return fallback;
 }
 
 /**
@@ -246,6 +248,7 @@ export class MCPServer {
     private invokeHandlers = new Map<string, (args: unknown, extra: unknown) => unknown>();
 
     private readonly twilightGate: boolean;
+    private readonly twilightStrict: boolean;
 
     public readonly cluster: ClusterCoordinator;
 
@@ -253,12 +256,13 @@ export class MCPServer {
         this.fileListingCallback = callback;
     }
 
-    constructor(port: number = 3400, host: string = '127.0.0.1', terminal?: vscode.Terminal, toolConfig?: ToolConfiguration, terminalProvider?: () => vscode.Terminal | undefined, twilightGate?: boolean) {
+    constructor(port: number = 3400, host: string = '127.0.0.1', terminal?: vscode.Terminal, toolConfig?: ToolConfiguration, terminalProvider?: () => vscode.Terminal | undefined, twilightGate?: boolean, twilightStrict?: boolean) {
         this.port = port;
         this.host = host;
         this.terminal = terminal;
         this.terminalProvider = terminalProvider;
-        this.twilightGate = twilightGate ?? readTwilightConfig();
+        this.twilightGate = twilightGate ?? readTwilightConfig('twilightGate', false);
+        this.twilightStrict = twilightStrict ?? readTwilightConfig('twilightStrict', false);
         this.toolConfig = toolConfig || {
             file: true,
             edit: true,
@@ -337,18 +341,26 @@ export class MCPServer {
         this.registerToolsOn(server);
         // Twilight gate, part 2: the gate opens ONLY when the bootstrap tool is
         // called. Mammouth calls tools/list a single time when the connector is
-        // added, after the MCP handshake — so an unlock on
-        // notifications/initialized would fire before that one list and the
-        // client would cache all 100+ tool schemas anyway. Instead the one
-        // listed tool (session_bootstrap_code) stays callable; its wrapper
-        // unlocks the catalog. If the client supports
-        // notifications/tools/list_changed it refreshes; if it never re-lists
-        // (Mammouth) it keeps its small cached list and the model calls other
-        // tools by name — the connection accepts any tool name regardless of
-        // what was cached.
-        if (this.twilightGate && !twilightUnlocked) {
+        // added and again whenever its connector popup re-opens — so the gate
+        // has to hold indefinitely for that client.
+        //
+        // twilightGate (loose): tools/list starts at the bootstrap tool only;
+        // the first session_bootstrap_code() call unlocks the catalog for the
+        // server process and fires notifications/tools/list_changed for
+        // clients that re-list.
+        //
+        // twilightStrict (strict, implies gate): the list NEVER grows. Every
+        // re-list — popup re-open, reconnect, anything — sees exactly one
+        // tool. The other tools stay callable by name (tools/call is not
+        // filtered by the enabled flag anymore), so the model uses them
+        // without the client ever caching their schemas.
+        if (this.twilightGate && (this.twilightStrict || !twilightUnlocked)) {
+            const strict = this.twilightStrict;
+            const registrations = server as unknown as { _registeredTools?: Record<string, { enabled: boolean; handler: (...cbArgs: unknown[]) => unknown }> };
             const unlock = (): void => {
-                const registrations = server as unknown as { _registeredTools?: Record<string, { enabled: boolean; enable(): void }> };
+                if (strict) {
+                    return; // the list stays at one tool forever
+                }
                 const tools = registrations._registeredTools ?? {};
                 let changed = false;
                 for (const entry of Object.values(tools)) {
@@ -363,10 +375,36 @@ export class MCPServer {
                     server.sendToolListChanged();
                 }
             };
-            // Fallback for a client that never sends notifications/initialized in
-            // a way we see: the bootstrap tool call itself passes the gate.
-            const bootstrapReg = server as unknown as { _registeredTools?: Record<string, { enabled: boolean; handler: (...cbArgs: unknown[]) => unknown }> };
-            const bootstrap = bootstrapReg._registeredTools?.[TWILIGHT_BOOTSTRAP_TOOL];
+            // In strict mode the SDK's tools/call handler refuses disabled
+            // tools, and the model will name anything the guide described —
+            // so the SDK handler is replaced by one that skips the enabled
+            // check. The registry still holds every handler; nothing else
+            // changes.
+            if (strict) {
+                const serverInner = server.server;
+                const lk = 'tools/call';
+                const existing = (serverInner as unknown as { _requestHandlers?: Map<string, (request: unknown, extra: unknown) => unknown> })._requestHandlers?.get(lk);
+                if (existing) {
+                    (serverInner as unknown as { _requestHandlers?: Map<string, (request: unknown, extra: unknown) => unknown> })._requestHandlers!.set(lk, async (request: unknown, extra: unknown) => {
+                        // Same request shape the SDK handler parses; the only
+                        // differences are that entry.enabled is not consulted
+                        // and errors surface as isError text like the SDK's own
+                        // handler does, instead of a -32603 protocol error.
+                        try {
+                            const req = request as { params: { name: string; arguments?: Record<string, unknown> } };
+                            const tool = registrations._registeredTools?.[req.params.name];
+                            if (!tool) {
+                                return { content: [{ type: 'text', text: `Tool ${req.params.name} not found` }], isError: true };
+                            }
+                            return await tool.handler(req.params.arguments ?? {}, extra);
+                        } catch (error) {
+                            return { content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true };
+                        }
+                    });
+                }
+            }
+            // The bootstrap tool call passes the gate.
+            const bootstrap = registrations._registeredTools?.[TWILIGHT_BOOTSTRAP_TOOL];
             if (bootstrap) {
                 const originalHandler = bootstrap.handler;
                 bootstrap.handler = (...cbArgs: unknown[]) => {
@@ -426,7 +464,7 @@ export class MCPServer {
         // passed it yet, every tool registered on this session server starts
         // disabled. The SDK's tools/list handler filters on tool.enabled, so the
         // client sees only the bootstrap tool.
-        if (this.twilightGate && !twilightUnlocked) {
+        if (this.twilightGate && (!twilightUnlocked || this.twilightStrict)) {
             const gateTool = ((name: string, ...toolArgs: unknown[]) => {
                 const returned = (originalTool as (...toolArgs: unknown[]) => unknown)(name, ...toolArgs) as { enabled: boolean; enable(): void };
                 if (name !== TWILIGHT_BOOTSTRAP_TOOL && returned) {

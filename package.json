@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
   "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.20.35-twilight.1",
+  "version": "0.20.35-twilight.2",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -86,6 +86,11 @@
           "type": "boolean",
           "default": false,
           "description": "Twilight gate: clients that call tools/list once cache every schema forever (Mammouth AI). With the gate on, tools/list returns ONLY session_bootstrap_code; the first session_bootstrap_code call unlocks the whole catalog for the server process. Server restart applies a change; the MCP client must also remove and re-add the connector so it lists again."
+        },
+        "vscode-mcp-server.twilightStrict": {
+          "type": "boolean",
+          "default": false,
+          "description": "Twilight strict mode (implies #vscode-mcp-server.twilightGate#): tools/list NEVER returns more than session_bootstrap_code, even after the gate is passed — connector pop-ups that re-list can never re-cache the other schemas. Every other tool stays callable by name (tools/call accepts it) but is never advertised; the agent guide remains their only catalog."
         },
         "vscode-mcp-server.agentInstructions": {
           "type": "string",

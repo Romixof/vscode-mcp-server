@@ -3,6 +3,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { MCPServer, ToolConfiguration, resetTwilightForTests, isTwilightUnlocked, setTwilightConfigSource } from '../server';
+import { runWithScopes } from '../auth/toolgate';
+import { ALL_SCOPES } from '../auth/scopes';
 
 const ALL_ON = {
 	file: true, edit: true, shell: true, diagnostics: true, symbol: true,
@@ -17,9 +19,9 @@ interface TwSession {
 	connect: Promise<unknown>;
 }
 
-function startSession(twilightGate: boolean, applyGateArg = true): TwSession {
+function startSession(twilightGate: boolean, applyGateArg = true, twilightStrict?: boolean): TwSession {
 	const gateArg = applyGateArg ? twilightGate : undefined;
-	const host = new MCPServer(3400, '127.0.0.1', undefined, ALL_ON, undefined, gateArg);
+	const host = new MCPServer(3400, '127.0.0.1', undefined, ALL_ON, undefined, gateArg, twilightStrict);
 	host.setFileListingCallback(async () => []);
 	const inner = (host as unknown as { buildSessionServer(): McpServer }).buildSessionServer();
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -43,8 +45,8 @@ function simulateVsCodeConfig(values: Record<string, unknown>): void {
 suite('twilight gate (Mammouth one-tool listing)', () => {
 	setup(() => {
 		resetTwilightForTests();
-		simulateVsCodeConfig({});
 		process.env.VSCODE_MCP_TWILIGHT_GATE = '1';
+		simulateVsCodeConfig({ 'twilightGate': true });
 	});
 
 	teardown(() => {
@@ -98,6 +100,35 @@ suite('twilight gate (Mammouth one-tool listing)', () => {
 		const { tools } = await client.listTools();
 		assert.ok(tools.filter(t => t.name.endsWith('_code')).length >= 88, 'env=0 must disable the gate even with the setting on');
 		simulateVsCodeConfig({});
+	});
+
+	test('strict mode: the list stays at one tool even after the bootstrap call', async () => {
+		simulateVsCodeConfig({});
+		const first = await ready(startSession(true, true, true));
+		let { tools } = await first.client.listTools();
+		assert.deepStrictEqual(tools.map(t => t.name), ['session_bootstrap_code'], 'strict mode starts at the bootstrap tool too');
+		// The call that would unlock in loose mode does not grow the list here.
+		await first.client.callTool({ name: 'session_bootstrap_code', arguments: {} });
+		({ tools } = await first.client.listTools());
+		assert.deepStrictEqual(tools.map(t => t.name), ['session_bootstrap_code'], 'strict mode must keep the list at one tool after the gate passes');
+		// Fresh session server (new POST): the strict list stays at one.
+		const second = await ready(startSession(true, true, true));
+		({ tools } = await second.client.listTools());
+		assert.deepStrictEqual(tools.map(t => t.name), ['session_bootstrap_code'], 'a re-list (popup re-open) must never see the catalog in strict mode');
+	});
+
+	test('strict mode: a non-listed tool stays callable by name', async () => {
+		const { client } = await ready(startSession(true, true, true));
+		const { tools } = await client.listTools();
+		assert.deepStrictEqual(tools.map(t => t.name), ['session_bootstrap_code']);
+		// get_agent_instructions_code is [RO], exists in the registry, was never
+		// listed and needs no open workspace. The HTTP path grants its clients
+		// scopes through runWithScopes; the test client does the same thing the
+		// /mcp endpoint does for an api-key call.
+		const result = await runWithScopes(ALL_SCOPES, 'twilight-test', () =>
+			client.callTool({ name: 'get_agent_instructions_code', arguments: {} })) as { content?: Array<{ text?: string }>; isError?: boolean };
+		assert.ok(!result.isError, `the unlisted tool call must not refuse: ${JSON.stringify(result).slice(0, 300)}`);
+		assert.ok((result.content ?? []).length > 0 && (result.content?.[0]?.text ?? '').includes('FULL TOOL CATALOG'), 'the call must return the real agent guide');
 	});
 
 	test('clientInfo declares the gate: listChanged stays advertised', async () => {
