@@ -1,5 +1,9 @@
 # VSCodium MCP Server
 
+![build](https://img.shields.io/badge/mcp_server-dark_slate_88_tools-4c51bf) ![license](https://img.shields.io/badge/license-MIT-green) ![mammouth](https://img.shields.io/badge/mammouth_AI-streamable_HTTP_only-e11d48)
+
+![twilight](https://img.shields.io/badge/build-twilight_0.20.35—twilight.1-7c3aed) ![twilight gate](https://img.shields.io/badge/twilight_gate-1_tool_listed,_bootstrap_unlock-a78bfa)
+
 Turn VS Code into a local MCP server: 88 tools that let AI coding assistants explore and edit your workspace, run terminal commands, work with git, read scanned PDFs, test APIs and databases, audit frontend code, and remember context between sessions. Everything runs on localhost over the streamable HTTP API.
 
 This project began as a fork of [juehang/vscode-mcp-server](https://github.com/juehang/vscode-mcp-server) by Juehang Qin, built on his 0.4.0 codebase with his git history intact. His original 12 tools are still here; the other 73 came later. Credit for the core idea and the first implementation belongs to him.
