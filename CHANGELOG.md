@@ -4,6 +4,16 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.35-twilight.1] - 2026-10-11
+### Added
+
+- **Twilight build** (branch `twilight`, gated by `VSCODE_MCP_TWILIGHT_GATE=1`): MCP clients that call tools/list exactly once when a connector is added — Mammouth AI — would cache all 100+ tool schemas forever, burning tokens on every conversation. With the gate armed, tools/list returns ONLY session_bootstrap_code (one tool, ~800 tokens of schema instead of ~35k); the first session_bootstrap_code() call unlocks the full catalog for the whole server process and sends notifications/tools/list_changed for spec-correct clients. A client that never re-lists keeps its small cache and the model calls other tools by name — tools/list_changed stays advertised. When the gate is off (default) or already passed, the tool list and behavior are identical to 0.20.34.
+
+### Fixed
+
+- The MCP `initialize` response now carries server instructions (the agent guide) — clients that read `instructions` get the tool map without a get_agent_instructions_code call.
+- The server badge/icon: `serverInfo.icons` now points at cdn.jsdelivr.net (raw.githubusercontent serves media as text/plain, which icon fetchers refuse); `/favicon.ico` answers 204 was replaced by a real 200 PNG response served from media/icon-256.png when present.
+
 ## [0.20.34] - 2026-10-09
 ### Fixed
 

@@ -1,5 +1,7 @@
 import express from "express";
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { generateSessionToken, readAuthConfig, bearerAuth, originGuard, originAllowed, tokensMatch, extractToken, setSecretStorage, generateAndStoreApiKey, getStoredApiKey } from './auth';
 import type { RequestHandler } from 'express';
 import { createOAuthRouter } from './auth-oauth';
@@ -65,6 +67,34 @@ import {
 
 const EXT_VERSION_FALLBACK = '0.19.13';
 
+/**
+ * Twilight gate: while this is on, the tools each session server lists at connect
+ * time are only the bootstrap set (one tool). MCP clients that cache tools/list
+ * once (Mammouth AI calls it a single time when the connector is added) then see
+ * a 1-tool list instead of 100+, which keeps the client-side tool schema payload
+ * small. After the client sends notifications/initialized — or calls the
+ * bootstrap tool — every tool is re-enabled and a tools/list_changed
+ * notification is sent so spec-correct clients refresh their list.
+ */
+export const TWILIGHT_BOOTSTRAP_TOOL = 'session_bootstrap_code';
+export const TWILIGHT_GATE_ENV = 'VSCODE_MCP_TWILIGHT_GATE';
+
+/**
+ * Process-level twilight state. Session MCP servers are rebuilt per POST
+ * (stateless transport), so a per-instance flag would forget the unlock between
+ * calls. Once any client passes the gate by calling the bootstrap tool, every
+ * later tools/list in this process lists the whole catalog.
+ */
+let twilightUnlocked = false;
+
+export function isTwilightUnlocked(): boolean {
+    return twilightUnlocked;
+}
+
+export function resetTwilightForTests(): void {
+    twilightUnlocked = false;
+}
+
 function resolveExtVersion(): string {
     try {
         return vscode.extensions.getExtension(EXTENSION_ID)?.packageJSON?.version ?? EXT_VERSION_FALLBACK;
@@ -78,10 +108,14 @@ const EXT_VERSION = resolveExtVersion();
 const SERVER_TITLE = "VSCodium MCP Server";
 const SERVER_DESCRIPTION = "Turn VS Code into an MCP server: file ops, symbols, diagnostics, tests, git, terminal, persistent memory and session state for AI coding assistants.";
 const SERVER_WEBSITE = "https://github.com/Romixof/vscode-mcp-server";
-const REPO_RAW_BASE = "https://raw.githubusercontent.com/Romixof/vscode-mcp-server/master";
+// Icon URLs must answer with the right image Content-Type for MCP clients to
+// build a badge (Mammouth refuses non-image responses). raw.githubusercontent
+// serves media files as text/plain, so icons go through a CDN that sets
+// image/png. media/icon-256.png lives in the repo at the tag the CDN reads.
+const REPO_CDN_BASE = "https://cdn.jsdelivr.net/gh/Romixof/vscode-mcp-server@master";
 const SERVER_ICONS = [
-        { src: `${REPO_RAW_BASE}/media/icon-256.png`, mimeType: "image/png", sizes: ["256x256"], theme: "dark" as const },
-        { src: `${REPO_RAW_BASE}/media/logo.svg`, mimeType: "image/svg+xml", theme: "dark" as const }
+        { src: `${REPO_CDN_BASE}/media/icon-256.png`, mimeType: "image/png", sizes: ["256x256"], theme: "dark" as const },
+        { src: `${REPO_CDN_BASE}/media/logo.svg`, mimeType: "image/svg+xml", theme: "dark" as const }
 ];
 
 export async function refreshApiKeyCache(): Promise<void> {
@@ -182,17 +216,20 @@ export class MCPServer {
 
     private invokeHandlers = new Map<string, (args: unknown, extra: unknown) => unknown>();
 
+    private readonly twilightGate: boolean;
+
     public readonly cluster: ClusterCoordinator;
 
     public setFileListingCallback(callback: FileListingCallback) {
         this.fileListingCallback = callback;
     }
 
-    constructor(port: number = 3400, host: string = '127.0.0.1', terminal?: vscode.Terminal, toolConfig?: ToolConfiguration, terminalProvider?: () => vscode.Terminal | undefined) {
+    constructor(port: number = 3400, host: string = '127.0.0.1', terminal?: vscode.Terminal, toolConfig?: ToolConfiguration, terminalProvider?: () => vscode.Terminal | undefined, twilightGate?: boolean) {
         this.port = port;
         this.host = host;
         this.terminal = terminal;
         this.terminalProvider = terminalProvider;
+        this.twilightGate = twilightGate ?? process.env[TWILIGHT_GATE_ENV] === '1';
         this.toolConfig = toolConfig || {
             file: true,
             edit: true,
@@ -263,11 +300,52 @@ export class MCPServer {
             capabilities: {
                 logging: {},
                 tools: {
-                    listChanged: false
+                    listChanged: true
                 }
-            }
+            },
+            instructions: resolveAgentInstructions(this.currentAgentInstructionsOverride())
         });
         this.registerToolsOn(server);
+        // Twilight gate, part 2: the gate opens ONLY when the bootstrap tool is
+        // called. Mammouth calls tools/list a single time when the connector is
+        // added, after the MCP handshake — so an unlock on
+        // notifications/initialized would fire before that one list and the
+        // client would cache all 100+ tool schemas anyway. Instead the one
+        // listed tool (session_bootstrap_code) stays callable; its wrapper
+        // unlocks the catalog. If the client supports
+        // notifications/tools/list_changed it refreshes; if it never re-lists
+        // (Mammouth) it keeps its small cached list and the model calls other
+        // tools by name — the connection accepts any tool name regardless of
+        // what was cached.
+        if (this.twilightGate && !twilightUnlocked) {
+            const unlock = (): void => {
+                const registrations = server as unknown as { _registeredTools?: Record<string, { enabled: boolean; enable(): void }> };
+                const tools = registrations._registeredTools ?? {};
+                let changed = false;
+                for (const entry of Object.values(tools)) {
+                    if (!entry.enabled) {
+                        entry.enabled = true;
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    twilightUnlocked = true;
+                    logger.info('[twilight] gate passed (bootstrap tool called) — all tools enabled for this server process');
+                    server.sendToolListChanged();
+                }
+            };
+            // Fallback for a client that never sends notifications/initialized in
+            // a way we see: the bootstrap tool call itself passes the gate.
+            const bootstrapReg = server as unknown as { _registeredTools?: Record<string, { enabled: boolean; handler: (...cbArgs: unknown[]) => unknown }> };
+            const bootstrap = bootstrapReg._registeredTools?.[TWILIGHT_BOOTSTRAP_TOOL];
+            if (bootstrap) {
+                const originalHandler = bootstrap.handler;
+                bootstrap.handler = (...cbArgs: unknown[]) => {
+                    unlock();
+                    return originalHandler(...cbArgs);
+                };
+            }
+        }
         return server;
     }
 
@@ -314,6 +392,21 @@ export class MCPServer {
             }
             return (originalTool as (...toolArgs: unknown[]) => unknown)(name, ...args);
         }) as typeof server.tool;
+
+        // Twilight gate, part 1: while the gate is armed and no client has
+        // passed it yet, every tool registered on this session server starts
+        // disabled. The SDK's tools/list handler filters on tool.enabled, so the
+        // client sees only the bootstrap tool.
+        if (this.twilightGate && !twilightUnlocked) {
+            const gateTool = ((name: string, ...toolArgs: unknown[]) => {
+                const returned = (originalTool as (...toolArgs: unknown[]) => unknown)(name, ...toolArgs) as { enabled: boolean; enable(): void };
+                if (name !== TWILIGHT_BOOTSTRAP_TOOL && returned) {
+                    returned.enabled = false;
+                }
+                return returned;
+            }) as typeof server.tool;
+            server.tool = gateTool;
+        }
 
         const groups: Array<[string, boolean, () => void]> = [
             ['file', c.file, () => registerFileTools(server, fileListing, () => this.cluster.clusterFolderListing())],
@@ -430,6 +523,15 @@ export class MCPServer {
         });
 
         this.app.get('/favicon.ico', (_req, res) => {
+            try {
+                const icon = path.join(__dirname, 'media', 'icon-256.png');
+                if (fs.existsSync(icon)) {
+                    res.setHeader('Cache-Control', 'public, max-age=86400');
+                    res.setHeader('Content-Type', 'image/png');
+                    res.status(200).sendFile(icon);
+                    return;
+                }
+            } catch { /* fall through to 204 */ }
             res.status(204).end();
         });
 
