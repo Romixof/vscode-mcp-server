@@ -13,6 +13,7 @@ import { setSecretStorage, getStoredApiKey, generateAndStoreApiKey, clearStoredA
 import { setScopedKeyStorage } from './auth/scoped-keys';
 import { refreshApiKeyCache } from './server';
 import { readAuthConfig } from './auth';
+import { setTwilightConfigSource } from './server';
 import { resolveAgentInstructions } from './utils/agent-instructions';
 
 export { MCPServer };
@@ -314,6 +315,11 @@ export async function activate(context: vscode.ExtensionContext) {
         logger.info(`[activate] Remote environment detected: ${vscode.env.remoteName}`);
     }
 
+    setTwilightConfigSource({
+        get: <T>(section: string, key: string, defaultValue?: T): T =>
+            vscode.workspace.getConfiguration(section).get<T>(key, defaultValue!)
+    });
+
     setSandboxConfigProvider(() => {
         const cfg = vscode.workspace.getConfiguration('vscode-mcp-server');
         const mode = (cfg.get<string>('security.sandbox.mode', 'workspace') || 'workspace') as SandboxMode;
@@ -433,7 +439,8 @@ export async function activate(context: vscode.ExtensionContext) {
             const relevant =
                 event.affectsConfiguration('vscode-mcp-server.enabledTools') ||
                 event.affectsConfiguration('vscode-mcp-server.port') ||
-                event.affectsConfiguration('vscode-mcp-server.host');
+                event.affectsConfiguration('vscode-mcp-server.host') ||
+                event.affectsConfiguration('vscode-mcp-server.twilightGate');
             if (!relevant) {
                 return;
             }

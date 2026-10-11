@@ -43,7 +43,7 @@ suite('Extension Test Suite', () => {
         MockServerConstructor = sinon.stub().returns(mockMCPServer);
 
         extension = proxyquire('../extension', {
-            './server': { MCPServer: MockServerConstructor, refreshApiKeyCache: async () => undefined }
+            './server': { MCPServer: MockServerConstructor, refreshApiKeyCache: async () => undefined, setTwilightConfigSource: () => undefined }
         });
 
         statusBarItem = {

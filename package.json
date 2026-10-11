@@ -82,6 +82,11 @@
           "default": true,
           "description": "Accept requests that carry no Origin header (curl, SDK clients). Browsers always send Origin on cross-site posts, so this does not weaken the drive-by protection."
         },
+        "vscode-mcp-server.twilightGate": {
+          "type": "boolean",
+          "default": false,
+          "description": "Twilight gate: clients that call tools/list once cache every schema forever (Mammouth AI). With the gate on, tools/list returns ONLY session_bootstrap_code; the first session_bootstrap_code call unlocks the whole catalog for the server process. Server restart applies a change; the MCP client must also remove and re-add the connector so it lists again."
+        },
         "vscode-mcp-server.agentInstructions": {
           "type": "string",
           "default": "",

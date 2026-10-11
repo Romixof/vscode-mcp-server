@@ -7,7 +7,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [0.20.35-twilight.1] - 2026-10-11
 ### Added
 
-- **Twilight build** (branch `twilight`, gated by `VSCODE_MCP_TWILIGHT_GATE=1`): MCP clients that call tools/list exactly once when a connector is added — Mammouth AI — would cache all 100+ tool schemas forever, burning tokens on every conversation. With the gate armed, tools/list returns ONLY session_bootstrap_code (one tool, ~800 tokens of schema instead of ~35k); the first session_bootstrap_code() call unlocks the full catalog for the whole server process and sends notifications/tools/list_changed for spec-correct clients. A client that never re-lists keeps its small cache and the model calls other tools by name — tools/list_changed stays advertised. When the gate is off (default) or already passed, the tool list and behavior are identical to 0.20.34.
+- **Twilight build** (branch `twilight`, gated by the `vscode-mcp-server.twilightGate` setting or `VSCODE_MCP_TWILIGHT_GATE=1`): MCP clients that call tools/list exactly once when a connector is added — Mammouth AI — would cache all 100+ tool schemas forever, burning tokens on every conversation. With the gate armed, tools/list returns ONLY session_bootstrap_code (one tool, ~800 tokens of schema instead of ~35k); the first session_bootstrap_code() call unlocks the full catalog for the whole server process and sends notifications/tools/list_changed for spec-correct clients. A client that never re-lists keeps its small cache and the model calls other tools by name — tools/list_changed stays advertised. When the gate is off (default) or already passed, the tool list and behavior are identical to 0.20.34.
 
 ### Fixed
 

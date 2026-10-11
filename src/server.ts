@@ -79,6 +79,36 @@ const EXT_VERSION_FALLBACK = '0.19.13';
 export const TWILIGHT_BOOTSTRAP_TOOL = 'session_bootstrap_code';
 export const TWILIGHT_GATE_ENV = 'VSCODE_MCP_TWILIGHT_GATE';
 
+interface TwilightConfigSource {
+        get<T>(section: string, key: string, defaultValue?: T): T;
+}
+
+let twilightConfigSource: TwilightConfigSource | undefined;
+
+/**
+ * Indirection so tests (and non-VS Code runs, like the tunnel/host script) can
+ * supply the config read; production reads the vscode workspace configuration.
+ */
+export function setTwilightConfigSource(source: TwilightConfigSource | undefined): void {
+        twilightConfigSource = source;
+}
+
+function readTwilightConfig(): boolean {
+        try {
+                const envValue = process.env[TWILIGHT_GATE_ENV];
+                if (envValue === '1') {
+                        return true;
+                }
+                if (envValue === '0') {
+                        return false;
+                }
+                if (twilightConfigSource) {
+                        return twilightConfigSource.get<boolean>('vscode-mcp-server', 'twilightGate', false);
+                }
+        } catch { /* fall through */ }
+        return false;
+}
+
 /**
  * Process-level twilight state. Session MCP servers are rebuilt per POST
  * (stateless transport), so a per-instance flag would forget the unlock between
@@ -89,10 +119,9 @@ let twilightUnlocked = false;
 
 export function isTwilightUnlocked(): boolean {
     return twilightUnlocked;
-}
-
-export function resetTwilightForTests(): void {
-    twilightUnlocked = false;
+}export function resetTwilightForTests(): void {
+        twilightUnlocked = false;
+        setTwilightConfigSource(undefined);
 }
 
 function resolveExtVersion(): string {
@@ -229,7 +258,7 @@ export class MCPServer {
         this.host = host;
         this.terminal = terminal;
         this.terminalProvider = terminalProvider;
-        this.twilightGate = twilightGate ?? process.env[TWILIGHT_GATE_ENV] === '1';
+        this.twilightGate = twilightGate ?? readTwilightConfig();
         this.toolConfig = toolConfig || {
             file: true,
             edit: true,

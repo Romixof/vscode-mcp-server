@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { MCPServer, ToolConfiguration, resetTwilightForTests, isTwilightUnlocked } from '../server';
+import { MCPServer, ToolConfiguration, resetTwilightForTests, isTwilightUnlocked, setTwilightConfigSource } from '../server';
 
 const ALL_ON = {
 	file: true, edit: true, shell: true, diagnostics: true, symbol: true,
@@ -17,8 +17,9 @@ interface TwSession {
 	connect: Promise<unknown>;
 }
 
-function startSession(twilightGate: boolean): TwSession {
-	const host = new MCPServer(3400, '127.0.0.1', undefined, ALL_ON, undefined, twilightGate);
+function startSession(twilightGate: boolean, applyGateArg = true): TwSession {
+	const gateArg = applyGateArg ? twilightGate : undefined;
+	const host = new MCPServer(3400, '127.0.0.1', undefined, ALL_ON, undefined, gateArg);
 	host.setFileListingCallback(async () => []);
 	const inner = (host as unknown as { buildSessionServer(): McpServer }).buildSessionServer();
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -31,9 +32,18 @@ async function ready(session: TwSession): Promise<{ client: Client; host: MCPSer
 	return { client: session.client, host: session.host };
 }
 
+function simulateVsCodeConfig(values: Record<string, unknown>): void {
+	const store = new Map(Object.entries(values));
+	setTwilightConfigSource({
+		get: <T>(section: string, key: string, defaultValue?: T): T =>
+			((store.has(key) ? (store.get(key) as T) : defaultValue!) as T)
+	});
+}
+
 suite('twilight gate (Mammouth one-tool listing)', () => {
 	setup(() => {
 		resetTwilightForTests();
+		simulateVsCodeConfig({});
 		process.env.VSCODE_MCP_TWILIGHT_GATE = '1';
 	});
 
@@ -41,6 +51,7 @@ suite('twilight gate (Mammouth one-tool listing)', () => {
 		delete process.env.VSCODE_MCP_TWILIGHT_GATE;
 		resetTwilightForTests();
 	});
+	// resetTwilightForTests also clears the VS Code config source
 
 	test('gate armed: tools/list shows exactly one tool, session_bootstrap_code', async () => {
 		const { client } = await ready(startSession(true));
@@ -68,6 +79,25 @@ suite('twilight gate (Mammouth one-tool listing)', () => {
 		const second = await ready(startSession(true));
 		const { tools } = await second.client.listTools();
 		assert.ok(tools.filter(t => t.name.endsWith('_code')).length >= 88, `after the gate passed the catalog must be listed, got ${tools.length}`);
+	});
+
+	test('the setting vscode-mcp-server.twilightGate also arms the gate', async () => {
+		simulateVsCodeConfig({ 'twilightGate': true });
+		const first = await ready(startSession(true, false));
+		const { tools } = await first.client.listTools();
+		assert.deepStrictEqual(tools.map(t => t.name), ['session_bootstrap_code'], 'setting must arm the gate even without the env var');
+		await first.client.callTool({ name: 'session_bootstrap_code', arguments: {} });
+		assert.ok(isTwilightUnlocked(), 'the bootstrap call still passes the gate');
+		simulateVsCodeConfig({});
+	});
+
+	test('env=0 wins over the setting (explicit opt-out)', async () => {
+		simulateVsCodeConfig({ 'twilightGate': true });
+		process.env.VSCODE_MCP_TWILIGHT_GATE = '0';
+		const { client } = await ready(startSession(true, false));
+		const { tools } = await client.listTools();
+		assert.ok(tools.filter(t => t.name.endsWith('_code')).length >= 88, 'env=0 must disable the gate even with the setting on');
+		simulateVsCodeConfig({});
 	});
 
 	test('clientInfo declares the gate: listChanged stays advertised', async () => {
