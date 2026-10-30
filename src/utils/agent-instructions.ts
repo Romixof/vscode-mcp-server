@@ -21,11 +21,11 @@ const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
  * self-sufficient for clients that only fetch this text.
  */
 export const DEFAULT_AGENT_INSTRUCTIONS: string = [
-        'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response. That tool is absent from some client lists. When it is missing, ONE get_agent_instructions_code() call returns this same guide, so you are never left without it.',
+        'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response. That tool is absent from some client lists. When it is missing, ONE get_agent_instructions_code() call returns this same guide, so you are never left without it. When your client lists nothing but session_bootstrap_code, every tool still runs through the relay it provides (see TOOL BUDGET).',
         '',
         `TOOL INDEX (${TOOL_CATALOG_SIZE} tools — the full cards are listed below; lookup_tool_code(query) returns the exact signature, params, RO/MUT/DST class, when NOT to use it):`,
         '',
-        'TOOL BUDGET: your client may expose only a subset of the tools below as callable, and which ones changes between requests. Every tool in the index IS callable by name even when unlisted: fetch its card with ONE lookup_tool_code(query="<task>"), then call it exactly as the card shows. Never claim a tool is unavailable without trying; never silently skip the step. Never list a folder when the user already gave the path; never re-read a file you just wrote. Chain shell steps into one call (cmd1 && cmd2).',
+        'TOOL BUDGET: your client may expose only a subset of the tools below as callable — sometimes session_bootstrap_code alone. Every tool in the index IS callable by name even when unlisted, through the bootstrap relay: session_bootstrap_code(action="call", tool="<name>", args={...}) runs the named tool and returns its result. Fetch a card first when unsure of a signature — directly when listed: lookup_tool_code(query="<task>"), or via the relay: session_bootstrap_code(action="call", tool="lookup_tool_code", args={query:"<task>"}). Never claim a tool is unavailable without trying the relay; never silently skip the step. Never list a folder when the user already gave the path; never re-read a file you just wrote. Chain shell steps into one call (cmd1 && cmd2).',
         '',
         'EDIT RULE: change existing code with edit_file_code(path, old_string, new_string) — exact-text match, refuses ambiguity. If old_string matches more than once (2+ matches), nothing is applied: extend old_string with surrounding lines to make it unique, or pass replace_all=true to change every occurrence. create_file_code only for a new file or whole-file rewrite; replace_lines_code for a pure insertion/deletion at a known line; rename_symbol_code for renames — never manual search/replace.',
         '',
@@ -38,7 +38,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS: string = [
         'APPROVALS: [RO] tools are auto-approved - call them freely. [MUT] and [DST] may require manual approval - for multi-step modifications present a short plan first, then execute it.'
 ].join('\n');
 
-export const AGENT_INSTRUCTIONS_VERSION = '20';
+export const AGENT_INSTRUCTIONS_VERSION = '21';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -80,7 +80,7 @@ const WORKFLOW_RULES = [
         '6. Builds/tests: run_task_code / run_tests_code / build_project_code. execute_shell_command_code is LAST RESORT (~27s max); longer runs via background_task_code, poll action="output".',
         '7. End finished work with ONE session_end_code(summary, …); handoff_code at mid-task switches; memory_save_code for durable facts.',
         '',
-        'TOOL BUDGET: your client may expose only a subset of the tools below, changing between requests. Every tool in the index IS callable by name even when unlisted: fetch its card with ONE lookup_tool_code(query="<task>"), then call it exactly as the card shows. Never claim a tool is unavailable without trying; never silently skip the step. Never list a given folder; never re-read a file you just wrote. Chain shell steps into one call (cmd1 && cmd2).',
+        'TOOL BUDGET: your client may expose only a subset of the tools below, changing between requests — sometimes session_bootstrap_code alone. Every tool in the index IS callable by name even when unlisted, through the bootstrap relay: session_bootstrap_code(action="call", tool="<name>", args={...}). Fetch a card when unsure: lookup_tool_code(query="<task>"), directly or via the relay. Never claim a tool is unavailable without trying the relay; never silently skip the step. Never list a given folder; never re-read a file you just wrote. Chain shell steps into one call (cmd1 && cmd2).',
         '',
         `TOOL INDEX (${TOOL_CATALOG_SIZE} tools — full card via lookup_tool_code(query)):`,
         compactCatalogIndex(),

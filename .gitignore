@@ -1,12 +1,37 @@
-out
-dist
-node_modules
-.vscode/
-.vscode-test/
+# Build artifacts & dependencies
+node_modules/
+out/
+dist/
 *.vsix
-.serena
-plans
+*.zip
+tsconfig.tsbuildinfo
+
+# Test / CI scaffolding
+.vscode-test/
+.vscode-test.mjs
+.serena/
+plans/
+
+# Local tooling state
+.vscode/
+.codegraph/
+.vscode-mcp/
+.swarm/
+.agents/
+.omo/
+.freebuff/
+
+# Internal working docs & AI session notes 
 CLAUDE.md
-*.test
+AGENTS.md
 *_LOG.md
+*_STATE.md
+COMMIT.md
+CONTEXT.md
+SECURITY-*.md
+AUDIT-EXTENSION.md
+docs/
 RELEASE-NOTES-*.md
+TODO-remaining.md
+Task histoire*.txt
+*.bak-*

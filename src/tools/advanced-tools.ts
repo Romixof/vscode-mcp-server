@@ -176,22 +176,51 @@ export function registerAdvancedTools(server: McpServer, endpoint: { host: strin
 }
 
 
+/**
+ * The relay: run another registered tool by name on behalf of a client whose
+ * callable list is capped to session_bootstrap_code (twilight strict mode).
+ * The handler looked up on _registeredTools is the scope-wrapped one when
+ * enforceScopesOn has run, so audit, deny and journaling still apply. Errors
+ * become isError results instead of throws so the model can read and recover.
+ */
+async function relayToolCall(server: McpServer, tool: string | undefined, args: Record<string, unknown> | undefined): Promise<CallToolResult> {
+        const err = (text: string): CallToolResult => ({ content: [{ type: 'text', text }], isError: true });
+        if (!tool || tool.trim() === '') {
+                return err('Relay call incomplete: pass tool="<name>" and args={...}, e.g. session_bootstrap_code(action="call", tool="read_file_code", args={"path":"a.txt"}).');
+        }
+        if (tool === 'session_bootstrap_code') {
+                return err('Do not relay session_bootstrap_code through itself — you are already inside it. Name the tool you actually need, e.g. session_bootstrap_code(action="call", tool="read_file_code", args={...}).');
+        }
+        const registered = (server as unknown as { _registeredTools?: Record<string, { handler?: (args: unknown, extra: unknown) => Promise<CallToolResult> }> })._registeredTools;
+        const entry = registered ? registered[tool] : undefined;
+        if (!entry || typeof entry.handler !== 'function') {
+                return err(`No registered tool "${tool}". Check the exact name in the TOOL INDEX, or find it with session_bootstrap_code(action="call", tool="lookup_tool_code", args={"query":"<task>"}).`);
+        }
+        return entry.handler(args ?? {}, { signal: new AbortController().signal, requestId: 'relay' })
+                .then(result => result)
+                .catch(e => err(`Tool "${tool}" failed via relay: ${e instanceof Error ? e.message : String(e)}`));
+}
+
 export function registerSessionBootstrapTool(server: McpServer, guideOverride?: () => string | undefined): void {
         let deliveredGuide = '';
         server.tool(
                 'session_bootstrap_code',
-                `ONE-CALL session start: persistent memory (global + project), workspace folders + root layout, skills list, and the full agent guide in one response.
+                `ONE-CALL session start: memory + layout + skills + the full agent guide in one response.
 
-        WHEN TO USE: ONCE at the very start of every conversation — replaces four separate opening calls. Clients cap tool calls per response: spend them on the task, not on loading context.
+ONCE per conversation; mode="compact" re-anchors mid-conversation — never repeatedly.
 
-        Refresh only known sections with sections=[...] (e.g. ["memory","layout"]); omit it for all four.
-
-        COMPACT: mode="compact" returns ONLY the state snapshot plus a pointer to the full call (~800 tokens) — for re-anchoring mid-conversation after a model switch or context trim.`, {
-                        sections: z.array(z.enum(['memory', 'guide', 'skills', 'layout'])).optional().describe('Parts to return; omit for all four. "layout" is 1 level deep, 40 entries max.'),
-                        mode: z.enum(['full', 'compact']).optional().default('full').describe('compact = state snapshot + pointer only, for re-anchoring mid-conversation'),
+RELAY: action="call" runs any tool by name when it is not in your client list — every tool in the index, incl. lookup_tool_code.`, {
+                        action: z.enum(['bootstrap', 'call']).optional().default('bootstrap').describe('bootstrap = default; call = RELAY: run "tool" with "args" even though it is not in your client list.'),
+                        tool: z.string().optional().describe('action="call" only: the tool to run'),
+                        args: z.record(z.unknown()).optional().describe('action="call" only: the tool arguments'),
+                        sections: z.array(z.enum(['memory', 'guide', 'skills', 'layout'])).optional().describe('Parts to return; omit for all four.'),
+                        mode: z.enum(['full', 'compact']).optional().default('full').describe('compact = state snapshot only, for re-anchoring mid-conversation'),
                         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
                 },
-                async ({ sections, mode = 'full', workspace }): Promise<CallToolResult> => {
+                async ({ action = 'bootstrap', tool, args, sections, mode = 'full', workspace }): Promise<CallToolResult> => {
+                        if (action === 'call') {
+                                return relayToolCall(server, tool, args);
+                        }
                         const want = (name: 'memory' | 'guide' | 'skills' | 'layout'): boolean => !sections || sections.includes(name);
                         const memory = want('memory');
                         const guide = want('guide');
@@ -205,8 +234,8 @@ export function registerSessionBootstrapTool(server: McpServer, guideOverride?: 
                                 // A file that exists but is blank (whitespace-only) reads as '' —
                                 // not null — so a plain ?? would serve an empty section. Treat
                                 // any blank read the same as a missing file.
-                                parts.push(state && state.trim() ? state : '*No workspace state recorded yet — call the full session_bootstrap_code() or workspace_state_code(action="write", …) to create one.*');
-                                parts.push(`\n\nFull re-anchor (memory + layout + skills + guide): call session_bootstrap_code() with no arguments.`);
+                                parts.push(state && state.trim() ? state : '*No workspace state recorded yet — record one with workspace_state_code(action="write", …).*');
+                                parts.push(`\n\nDo NOT call session_bootstrap_code again — one re-anchor per context trim is enough; repeating it only loops. If a tool you need is not in your callable list, run it through the relay: session_bootstrap_code(action="call", tool="<name>", args={...}) — it works for every tool in the index, including lookup_tool_code for a full card.`);
                                 return { content: [{ type: 'text', text: parts.join('\n') }] };
                         }
                         if (memory) {
@@ -262,7 +291,7 @@ export function registerSessionBootstrapTool(server: McpServer, guideOverride?: 
                                 const override = guideOverride ? guideOverride() : undefined;
                                 const text = resolveAgentInstructions(override);
                                 if (deliveredGuide === text) {
-                                        parts.push(`\n\n## Agent guide\n\nv${AGENT_INSTRUCTIONS_VERSION} was already sent in this VS Code window. If it is missing from your context, ONE get_agent_instructions_code() returns it, or lookup_tool_code(query) when only a tool card is needed.`);
+                                        parts.push(`\n\n## Agent guide\n\nv${AGENT_INSTRUCTIONS_VERSION} was already sent in this VS Code window. If it is missing from your context, ONE get_agent_instructions_code() returns it — directly or via the relay: session_bootstrap_code(action="call", tool="get_agent_instructions_code", args={}). For a single tool card, same route with lookup_tool_code(query).`);
                                 } else {
                                         parts.push(`\n\n## Agent guide\n\n${text}\n\n[agent guide v${AGENT_INSTRUCTIONS_VERSION}]`);
                                         deliveredGuide = text;

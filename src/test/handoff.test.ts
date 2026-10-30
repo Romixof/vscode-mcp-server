@@ -132,7 +132,7 @@ suite('handoff_code merge semantics', () => {
 suite('session_bootstrap_code compact mode', () => {
         const stateFile = path.join(wsRoot, 'handoff-test_STATE.md');
 
-        test('compact returns the state snapshot and a pointer, not the guide or layout', async () => {
+        test('compact returns the state snapshot and the relay reminder, not the guide or layout', async () => {
                 const advanced = proxyquire('../tools/advanced-tools', {
                         '../utils/workspace': workspaceStub,
                         '../utils/workspace-state': stateModule()
@@ -145,7 +145,11 @@ suite('session_bootstrap_code compact mode', () => {
                 assert.ok(!text.includes('FULL TOOL CATALOG'), `compact must not ship the guide: ${text.slice(0, 200)}`);
                 assert.ok(!/Root of "/.test(text), `compact must not ship the root layout: ${text.slice(0, 200)}`);
                 assert.ok(text.length < 2400, `compact must stay lean, got ${text.length} chars`);
-                assert.ok(/call session_bootstrap_code\(\) with no arguments/.test(text), `compact must point back to the full call: ${text.slice(0, 400)}`);
+                // v21 anti-loop: a live Mammouth session looped ~20 re-anchors because the
+                // compact text told it to re-call the full bootstrap. The pointer is gone;
+                // the relay is the way forward instead.
+                assert.ok(!/call session_bootstrap_code\(\) with no arguments/.test(text), `compact must not advertise the full re-anchor that loops: ${text.slice(0, 400)}`);
+                assert.ok(/action="call"/.test(text), `compact must teach the relay: ${text.slice(0, 400)}`);
         });
 
         test('a state file that exists but is blank reads as nothing recorded, not as an empty section', async () => {

@@ -37,6 +37,21 @@ suite('agent guide', () => {
                 );
         });
 
+        test('teaches the bootstrap relay for clients that list one tool only', () => {
+                assert.ok(
+                        /session_bootstrap_code\(action="call", tool="<name>", args=\{\.\.\.\}\)/.test(guide),
+                        'guide does not teach the relay invocation shape'
+                );
+                assert.ok(
+                        /session_bootstrap_code\(action="call", tool="lookup_tool_code"/.test(guide),
+                        'guide does not show how to fetch a card through the relay'
+                );
+                assert.ok(
+                        /bootstrap relay/i.test(guide),
+                        'guide does not name the mechanism the relay answers'
+                );
+        });
+
         test('carries a version tag', () => {
                 assert.ok(/^\d+$/.test(AGENT_INSTRUCTIONS_VERSION), `version looks wrong: ${AGENT_INSTRUCTIONS_VERSION}`);
         });
