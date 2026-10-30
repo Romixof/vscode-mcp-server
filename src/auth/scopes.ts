@@ -27,6 +27,7 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'list_skills_code', 'validate_skill_code',
         'pdf_needs_ocr_code',
         'search_workspace_code', 'retrieve_output_code', 'get_agent_instructions_code',
+        'lookup_tool_code',
         'session_bootstrap_code',
         'find_secrets_code', 'security_scan_code', 'regex_tester_code',
         'find_dead_code_code', 'find_duplicate_code_code', 'suggest_refactoring_code',

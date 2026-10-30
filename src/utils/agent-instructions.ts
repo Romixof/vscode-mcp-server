@@ -1,9 +1,44 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { TOOL_HINTS } from './tool-annotations';
+import { z } from 'zod';
+import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { TOOL_HINTS, ToolHints } from './tool-annotations';
+import { searchCatalog, renderToolCard, compactCatalogIndex, CATALOG } from './tool-catalog';
+import type { ToolMeta } from './tool-catalog';
 
+/**
+ * Size the compact index claims. Derived from TOOL_HINTS, and asserted equal
+ * to the CATALOG/tool registry by the integrity tests, so a tool added to one
+ * map but not the other fails loudly instead of drifting.
+ */
 const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
 
-export const AGENT_INSTRUCTIONS_VERSION = '17';
+/**
+ * Full guide text: the workflow rules plus every tool as one detailed card.
+ * Composed from the catalog so it cannot drift: every tool contributes one
+ * detailed entry built from its card. The TOOL INDEX header states the card
+ * count derived from TOOL_HINTS, and the TOOL BUDGET + EDIT RULE paragraphs
+ * teach the partial-list and ambiguous-edit behavior, so the guide stays
+ * self-sufficient for clients that only fetch this text.
+ */
+export const DEFAULT_AGENT_INSTRUCTIONS: string = [
+        'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response. That tool is absent from some client lists. When it is missing, ONE get_agent_instructions_code() call returns this same guide, so you are never left without it.',
+        '',
+        `TOOL INDEX (${TOOL_CATALOG_SIZE} tools — the full cards are listed below; lookup_tool_code(query) returns the exact signature, params, RO/MUT/DST class, when NOT to use it):`,
+        '',
+        'TOOL BUDGET: your client may expose only a subset of the tools below as callable, and which ones changes between requests. If a tool you need is missing from your callable list, NAME IT in your reply and carry on — never silently skip the step. Never list a folder when the user already gave the path; never re-read a file you just wrote. Chain shell steps into one call (cmd1 && cmd2).',
+        '',
+        'EDIT RULE: change existing code with edit_file_code(path, old_string, new_string) — exact-text match, refuses ambiguity. If old_string matches more than once (2+ matches), nothing is applied: extend old_string with surrounding lines to make it unique, or pass replace_all=true to change every occurrence. create_file_code only for a new file or whole-file rewrite; replace_lines_code for a pure insertion/deletion at a known line; rename_symbol_code for renames — never manual search/replace.',
+        '',
+        `FULL TOOL CATALOG — ${TOOL_CATALOG_SIZE} detailed cards, one per tool with signature, params and RO/MUT/DST class:`,
+        '',
+        (Object.entries(CATALOG) as Array<[string, ToolMeta]>).map(([name, meta]) => `${renderToolCard({ name, meta, hints: TOOL_HINTS[name] ?? {} })}`).join('\n'),
+        '',
+        'LEGEND: [RO] = readOnlyHint, read-only, auto-approved, use freely. [MUT] modifies files or state, may need manual approval. [DST] destructive or runs arbitrary commands, needs approval. Multi-root: every path tool accepts workspace="<folder name or 1-based index>"; results come back as "FolderName/path" and resolve if you feed them back as-is.',
+        '',
+        'APPROVALS: [RO] tools are auto-approved - call them freely. [MUT] and [DST] may require manual approval - for multi-step modifications present a short plan first, then execute it.'
+].join('\n');
+
+export const AGENT_INSTRUCTIONS_VERSION = '19';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -12,8 +47,8 @@ export function environmentSection(platform: NodeJS.Platform = process.platform)
                         'ENVIRONMENT (Windows conventions — get_server_info_code reports what this machine actually has):',
                         '- Interpreter: `python` or `py`, never `python3`, which is not a Windows executable name.',
                         '- Search with `grep`; `rg` may not be installed.',
-                        '- No `fc-list`: that is a Linux font tool. Fonts are registered in the generator script, not hunted in the shell.',
                         '- Paths: `d:/...` or `/d/...` for a drive. A `/mnt/...` or a `C:` drive-letter path does not resolve in the integrated bash.',
+                        '- Fonts: `fc-list` does not exist on Windows — never probe for fonts; render_pdf_pages_code and ocr_pdf_code need no system font query.',
                         '- Shell: read it, do not assume it. `get_server_info_code` reports the live one.'
                 ].join('\n');
         }
@@ -24,153 +59,33 @@ export function environmentSection(platform: NodeJS.Platform = process.platform)
         ].join('\n');
 }
 
-export const DEFAULT_AGENT_INSTRUCTIONS = [
-    'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response. That tool is absent from some client lists. When it is missing, ONE get_agent_instructions_code() call returns this same guide, so you are never left without it.',
-    '',
-    'LEGEND: [RO] = readOnlyHint, read-only, auto-approved, use freely. [MUT] modifies files or state, may need manual approval. [DST] destructive or runs arbitrary commands, needs approval. Multi-root: every path tool accepts workspace="<folder name or 1-based index>"; results come back as "FolderName/path" and resolve if you feed them back as-is.',
-    '',
-    'NON-NEGOTIABLE WORKFLOW:',
-    '1. Start with ONE session_bootstrap_code() call — it returns memory, layout, skills and this guide in a single response, then work from this map. Rejoining a session mid-conversation (model was switched, context was trimmed): call it once again first to re-anchor on memory + state. memory_load_code() is only for a conversation already bootstrapped without its "memory" section.',
-    '2. Explore with list_files_code(path=".") (never recursive on the root). Read with read_file_code(path, startLine, endLine) using ranges for large files. Prefer structure first: get_document_symbols_code(path) for an outline, search_symbols_code(query) to locate a function or class, get_symbol_definition_code(path, line, symbol) for its definition and type.',
-    '3. Search text with search_workspace_code(pattern, glob) - NEVER use shell commands to read or search files.',
-    '4. Edit existing code with edit_file_code(path, old_string, new_string): it matches the text you quote, so it cannot break when the file shifts under it. It refuses to guess when old_string appears more than once and hands you every location instead. Reach for create_file_code(path, content, overwrite=true) only for a new file or a whole-file rewrite, and replace_lines_code only for a pure insertion or deletion at a known line. Rename code symbols only with rename_symbol_code(oldName, newName), never by manual search/replace.',
-    '5. After EVERY batch of changes run get_diagnostics_code(). Before ANY commit run find_secrets_code() then security_scan_code() and fix what they flag.',
-    '6. Builds and tests go through run_task_code / run_tests_code / build_project_code. execute_shell_command_code is the LAST RESORT for anything else - never for reading, and it is bounded at 27s: the client disconnects whatever timeout you pass, so a wrong-shell retry gets only what is left of that budget. Anything that outlasts it runs detached through background_task_code(action="start", command) -> poll action="output".',
-    '7. When a unit of work finishes, is handed off, or is abandoned, close it with ONE session_end_code(summary, version, branch, status, inProgress, nextStep) as your last tool call. The summary is the part no tool can infer: intent, decisions and why, and what you deliberately skipped. Write it for someone with no memory of this conversation. Update workspace_state_code(action="write") mid-task only when the working state changes materially.',
-    '',
-    'TOOL BUDGET (clients cap tool calls per response - make every call count):',
-    '- Your client may expose only a SUBSET of these tools as callable, and which ones changes between requests. If a tool you need is missing from your callable list, NAME IT in your reply and carry on with the rest - never substitute a worse tool and never silently skip the step.',
-    '- Open with ONE session_bootstrap_code() call instead of memory_load + guide + folders + list_files, or with ONE get_agent_instructions_code() call when session_bootstrap_code is not in your callable list. Do NOT reload memory or this guide again in the same conversation.',
-    '- Never list a folder when the user already gave the path; never re-read a file you just wrote; never paste file contents into chat when a create_file_code call can carry them.',
-    '- Chain shell steps into one call (cmd1 && cmd2): generate + verify (pdfinfo, ls) together.',
-    '- Copy annex files (scripts, templates) with copy_file_code or shell cp - never retype them.',
-    '- Write deliverables FIRST (create_file_code), verify after: if the budget runs out mid-task, the files must already exist. When the working context changes materially (model switch, direction change, pause), close the gap with ONE handoff_code(inProgress, lastTool, nextStep) — session_end_code stays for finished units only.',
-    '',
-    `FULL TOOL CATALOG (${TOOL_CATALOG_SIZE} tools):`,
-    '',
-    'FILES AND WORKSPACE:',
-    '[RO] list_workspace_folders_code() - list open workspace folders; this is where the workspace="<folder name or 1-based index>" values come from.',
-    '[RO] list_files_code(path, recursive, limit, offset) - directory listing; never recursive=true on the root.',
-    '[RO] read_file_code(path, startLine, endLine, maxCharacters, encoding) - file content; use line ranges for large files.',
-    '[RO] search_workspace_code(pattern, path, glob, caseSensitive, maxResults, skipCommon) - regex search grouped by file with 1-based line numbers; glob "*.ts" matches a file name at any depth.',
-    '[DST] move_file_code(sourcePath, targetPath, overwrite) / copy_file_code(sourcePath, targetPath, overwrite) / rename_file_code(filePath, newName, overwrite).',
-    '[MUT] convert_encoding_code(path, action="detect"|"convert", from, to).',
-    '[MUT] snapshot_workspace_code(action="save"|"compare", name, baseline) - SHA-256 point-in-time snapshots of every file.',
-    '[RO] diff_preview_code(op, ...) - dry-run of replace_lines/create/move/rename: prints the unified diff, applies nothing. Validate before edits.',
-    '[MUT] checkpoint_code(action="save"|"list"|"restore"|"drop", name, confirm) - one-call undo point (non-destructive git stash). Save before risky work; restore needs confirm=true.',
-    '',
-    'CODE STRUCTURE (read-only):',
-    '[RO] get_document_symbols_code(path, maxDepth, maxItems) - outline of classes, functions, methods of one file.',
-    '[RO] search_symbols_code(query, maxResults) - find symbols by name across the whole workspace.',
-    '[RO] get_symbol_definition_code(path, line, symbol) - definition and type info at a position.',
-    '[RO] call_graph_code(symbol, depth=3, direction="callees"|"callers") - who calls it / what it calls, via the .codegraph/ index (built on first use, incremental).',
-    '[RO] test_impact_code(files) - changed files -> tests that transitively import them (defaults to git changes).',
-    '[RO] migration_diff_code(base, head="HEAD") - two revisions: files changed, declarations added, BREAKING removals.',
-    '',
-    'EDITS AND REFACTORING:',
-    '[MUT] edit_file_code(path, old_string, new_string, replace_all) - THE way to change existing code: finds the exact text, no line numbers to go stale. Fails on 0 matches; refuses and lists every location on 2+ matches unless replace_all.',
-    '[MUT] replace_lines_code(path, startLine, endLine, content, originalCode) - pure insertion or deletion at a known line; originalCode must match exactly.',
-    '[MUT] create_file_code(path, content, overwrite, ignoreIfExists) - new file or complete rewrite.',
-    '[MUT] rename_symbol_code(oldName, newName, dryRun, exclude) - workspace-wide rename with word-boundary matching; use dryRun=true to preview.',
-    '[MUT] extract_function_code(path, startLine, endLine, functionName, params) - extract a line range into a new function.',
-    '[MUT] generate_docstring_code(path, symbol, line, style) - docstring generation.',
-    '[MUT] format_document_code(path, formatter, checkOnly) / lint_and_fix_code(path, linter, fix=true).',
-    '',
-    'DIAGNOSTICS AND CODE QUALITY:',
-    '[RO] get_diagnostics_code(path, severities, format) - VS Code problems (errors, warnings); run after every edit batch.',
-    '[RO] find_todo_code(path, include, format, groupBy) - TODO/FIXME/HACK/XXX/NOTE/BUG markers.',
-    '[RO] find_dead_code_code(path, maxResults) - exported symbols never referenced anywhere.',
-    '[RO] find_duplicate_code_code(path, minLines, exclude) - duplicated code blocks with all locations.',
-    '[RO] suggest_refactoring_code(path, maxLines, maxParams, maxComplexity) - long, complex or deeply nested functions.',
-    '[RO] regex_tester_code(pattern, flags, text, filePath, replace) - test a regex live.',
-    '[MUT] get_test_coverage_code(path, format, framework).',
-    '',
-    'TESTS AND BUILDS:',
-    '[MUT] run_tests_code(pattern, framework, args, cwd) - auto-detects vitest, jest, pytest, mocha, playwright, cypress. Ask test_impact_code first for which tests matter.',
-    '[MUT] run_task_code(task, args, cwd, timeout) - call with NO arguments first to list available tasks, then run by name.',
-    '[MUT] build_project_code(command, cwd, timeout).',
-    '[MUT] background_task_code(action="start"|"list"|"output"|"kill", command, cwd, task_id) - long builds/tests DETACHED, poll output later; no 10s truncation.',
-    '[DST] restart_dev_server_code(script, command, cwd, port, killTimeout, startupTimeout).',
-    '[DST] profile_command_code(command, runs) - wall-clock timing statistics.',
-    '[RO] analyze_bundle_code(dir="dist", top) - build output sizes and largest files.',
-    '',
-    'GIT:',
-    '[RO] get_git_diff_code(path, staged) / get_blame_code(path, startLine, endLine) / get_file_history_code(path, maxCommits, includeDiff) / list_conflicts_code().',
-    '[MUT] commit_changes_code(message, addAll=true, amend, noVerify) - omit message for an auto-generated conventional commit.',
-    '[MUT] create_branch_code(name, from, checkout, listOnly=true to list).',
-    '[DST] stash_changes_code(action="push"|"pop"|"apply"|"list"|"show"|"drop", message, index, includeUntracked).',
-    '',
-    'SHELL AND SYSTEM:',
-    '[DST] execute_shell_command_code(command, cwd, timeout, outputMode="compact") - LAST RESORT for builds, tests, git and other mutations; never for reading or searching files; output is compacted, recall the full text with retrieve_output_code(handle).',
-    '[RO] retrieve_output_code(handle, offset, maxChars) - full original output behind a "[@vscode-mcp ... retrieve_output_code]" notice.',
-    '[DST] run_alias_code(name, args) - run a configured shell alias.',
-    '[DST] run_sql_query_code(query, database, connectionString, databaseName, filePath, format) - SQL against a configured or file-backed database.',
-    '[RO] get_open_ports_code(port, protocol, state) / check_env_vars_code(checkCodeUsage, envFiles, revealValues=false: .env values redacted to length+sha fingerprint unless revealValues=true) / get_server_info_code() - server version, enabled tool groups.',
-    '',
-    'PERSISTENT MEMORY AND SESSION:',
-    '[RO] session_bootstrap_code(sections, workspace) - ONE-CALL session start: memory + workspace folders + root layout + skills + this guide. Replaces four opening calls; use it FIRST, every conversation. sections=["memory","guide","skills","layout"] picks a subset; omit it for all four.',
-    '[RO] memory_load_code() - memory only (when the session was opened with a partial bootstrap).',
-    '[MUT] memory_save_code(section, entry, scope="global"|"project") - append a dated entry; save durable facts and decisions.',
-    '[RO] workspace_state_code(action="read"|"write", version, branch, status, inProgress, nextStep) - the CURRENT snapshot of where the work stands: which version/branch, what is in progress, the next step. Overwritten, never grows. Loaded by session_bootstrap_code.',
-    '[MUT] session_end_code(summary, version, branch, status, inProgress, nextStep) - close a work session: writes the state snapshot and appends a dated summary to the log. Call as the LAST tool call of a finished, handed-off or abandoned unit of work.',
-    '[MUT] handoff_code(action="write"|"read", inProgress, lastTool, nextStep, status) - replaces ONLY the fields provided on top of the current state (read shows the file). Use at a context switch, not at a close: what changed, which tool last moved it, what to do next. Loaded by session_bootstrap_code.',
-    '[RO] workspace_log_code(count) - recent session history with files touched and commands run, when the state snapshot is not enough detail.',
-    '[RO] memory_search_code(query, scope) - search memory by keyword.',
-    '[DST] memory_clear_code(section, entry, scope) - remove wrong or outdated entries.',
-    '',
-    'SECURITY:',
-    '[RO] find_secrets_code(path, maxResults) - hardcoded API keys, tokens, private keys; run before every commit.',
-    '[RO] security_scan_code(path, severity, maxResults) - eval, innerHTML sinks, SQL concatenation, shell=True, disabled TLS.',
-    '[RO] get_audit_log_code(limit, kind) - recent tool calls, denied tools, blocked commands.',
-    '[RO] expose_audit_code(last, topTools) - clients with tool counts, denied/blocked events, rate-limit top IPs. "Is the funnel being scanned?".',
-    '[RO] check_dependencies_vulnerabilities_code() - npm audit with severities and patched versions (uses network).',
-    '',
-    'ACCESS CONTROL (admin - primary key only):',
-    '[MUT] scope_keys_code(action="create"|"list"|"revoke", scope="read-only"|"standard"|"full", label, key_id) - scoped mcpk_ keys; read-only = no shell/edits/SQL, admin never included. Key shown ONCE.',
-    '[MUT] secret_rotate_code(confirm=true) - regenerate the primary API key, old key dies at once. After any exposure.',
-    '',
-    'PROJECT AND DOCS:',
-    '[RO] get_project_context_code(depth, sections, workspace) - stack, structure, entry points, scripts; good second call after memory_load_code. sections=["scripts","config","readme"] picks a subset; omit it for all three.',
-    '[RO] get_package_dependencies_code(ecosystem, includeOutdated) - dependencies across npm, pip, cargo, go, composer.',
-    '[RO] list_extensions_code(filter, missingOnly) / list_snippets_code(prefixFilter).',
-    '[MUT] generate_ics_code(path, output, calendarName, keywords) - extract events into an .ics calendar file.',
-    '',
-    'SKILLS:',
-    '[RO] list_skills_code(root) - list agent skills (SKILL.md frontmatter); root auto-detects "skills" then ".claude/skills" when omitted / validate_skill_code(path) - validate one SKILL.md.',
-    '[MUT] create_skill_code(name, description, root, overwrite) / package_skill_code(skillPath, outputPath, exclude).',
-    '',
-    'FRONTEND:',
-    '[RO] analyze_css_code(path) - duplicate selectors, repeated properties, !important abuse, empty rules.',
-    '[RO] audit_accessibility_code(path) - missing alt and labels, positive tabindex, clickable divs, empty links.',
-    '[RO] find_unused_css_code(path) - selectors never used in markup or scripts.',
-    '[RO] inspect_element_code(selector, path) - where a selector appears in markup and every CSS rule styling it.',
-    '',
-    'PDF AND OCR (entirely local, nothing leaves the machine):',
-    '[RO] pdf_needs_ocr_code(pdfPath, minCharsPerPage) - decide first: existing text layer or scanned document.',
-    '[RO] render_pdf_pages_code(pdfPath, firstPage, lastPage, dpi) - page images the vision model reads directly.',
-    '[MUT] ocr_pdf_code(pdfPath, engine="auto"|"tesseract"|"vision", language, firstPage, lastPage, outputPath, timeoutMs) - extracted text; auto returns an existing text layer directly.',
-    '',
-    'NETWORK AND MISC:',
-    '[MUT] test_api_endpoint_code(url, method, headers, body, timeout, validateStatus, allowPrivateNetwork=false) - live HTTP checks. Loopback always allowed; private/link-local/metadata IPs (169.254.169.254, RFC1918, tailnet 100.64/10) are blocked unless allowPrivateNetwork=true. Body capped at 1 MB.',
-    '[RO] get_performance_report_code() - server footprint and workspace weight.',
-    '[RO] get_agent_instructions_code() - this guide.',
-    '[RO] brew_coffee_code(sugar) - easter egg, brews nothing.',
-    '',
-    'PLANNING:',
-    '[MUT] plan_mode_code(enabled) - while ON, execution tools (shell, SQL, tasks, builds, tests, restarts, profiling, aliases) only DESCRIBE what they would run, nothing executes; reads keep working.',
-    '',
-    'COMMON RECIPES:',
-    '- Understand the project: session_bootstrap_code() (memory + layout + skills + guide in one call), or get_agent_instructions_code() when that one is not callable -> get_project_context_code() only if the stack is still unknown.',
-    '- Locate an implementation: search_workspace_code(pattern) -> get_symbol_definition_code(...) -> read_file_code(...) on the exact range.',
-    '- Change code safely: diff_preview_code(op="replace_lines", path, startLine, endLine, content) -> edit_file_code(path, old_string, new_string) -> get_diagnostics_code() -> test_impact_code() -> run_tests_code(...).',
-    '- When the user says "this" or "here", call get_active_editor_code() before guessing a path; list_open_tabs_code() when they name a file by role.',
-    '- Big refactor: checkpoint_code(action="save") first; restore with confirm=true if it went wrong.',
-    '- Risky commands: plan_mode_code(enabled=true) -> draft the calls (they only describe) -> present the plan -> enabled=false.',
-    '- Long build/test (>10s): background_task_code(action="start", command) -> poll action="output".',
-    '- Ship a change: find_secrets_code() -> security_scan_code() -> get_git_diff_code(staged=true) -> commit_changes_code(message).',
-    '- Read a PDF: pdf_needs_ocr_code() -> text layer: ocr_pdf_code(engine="auto"); scanned: render_pdf_pages_code() (vision) or ocr_pdf_code(engine="tesseract").',
-    '',
-    'APPROVALS: [RO] tools are auto-approved - call them freely. [MUT] and [DST] may require manual approval - for multi-step modifications present a short plan first, then execute it.'
+/**
+ * v17 shipped a ~30K-token catalog inline in the bootstrap answer, and clients
+ * that keep tool results (Mammouth) re-posted it with every message. v18 serves
+ * a compact guide instead: the abbreviated workflow rules plus a names-only
+ * index grouped by section. The precise signature, parameter names and
+ * approval class of the tools a task needs come from
+ * lookup_tool_code(query), which scores the same catalog lexically (English
+ * or French keywords) and returns only the few relevant cards.
+ */
+const WORKFLOW_RULES = [
+        'You work in a VS Code workspace via the "vscode-mcp-server" MCP server.',
+        '',
+        'NON-NEGOTIABLE WORKFLOW:',
+        '1. ONE session_bootstrap_code() first — memory + layout + skills + guide; re-call when rejoining mid-conversation.',
+        '2. Explore: list_files_code (never recursive=true on the root), read_file_code with ranges; get_document_symbols_code to outline, search_symbols_code to locate, get_symbol_definition_code to define.',
+        '3. Search text with search_workspace_code — NEVER shell commands for reading or searching files.',
+        '4. Edit with edit_file_code (exact-text match, refuses ambiguity); create_file_code for new files/rewrites, replace_lines_code to insert/delete at a line, rename_symbol_code for renames.',
+        '5. After EVERY change batch run get_diagnostics_code(). Before ANY commit run find_secrets_code() then security_scan_code().',
+        '6. Builds/tests: run_task_code / run_tests_code / build_project_code. execute_shell_command_code is LAST RESORT (~27s max); longer runs via background_task_code, poll action="output".',
+        '7. End finished work with ONE session_end_code(summary, …); handoff_code at mid-task switches; memory_save_code for durable facts.',
+        '',
+        'TOOL BUDGET: your client may expose only a subset of the tools below, changing between requests. If a tool you need is missing, NAME IT in your reply and carry on — never silently skip the step. Never list a given folder; never re-read a file you just wrote. Chain shell steps into one call (cmd1 && cmd2).',
+        '',
+        `TOOL INDEX (${TOOL_CATALOG_SIZE} tools — full card via lookup_tool_code(query)):`,
+        compactCatalogIndex(),
+        '',
+        'LEGEND: [RO] auto-approved; [MUT]/[DST] may need approval. Path tools accept workspace="<folder name or 1-based index>".'
 ].join('\n');
 
 export function resolveAgentInstructions(override?: string, platform: NodeJS.Platform = process.platform): string {
@@ -181,13 +96,31 @@ export function resolveAgentInstructions(override?: string, platform: NodeJS.Pla
                         return `${trimmed}\n${environment}`;
                 }
         }
-        return `${DEFAULT_AGENT_INSTRUCTIONS}\n${environment}`;
+        return `${WORKFLOW_RULES}\n${environment}`;
+}
+
+export function resolveAgentInstructionsOverride(): string | undefined {
+        return undefined;
 }
 
 export function registerAgentInstructionsTool(server: McpServer, getOverride?: () => string | undefined): void {
-    server.tool('get_agent_instructions_code', `Loads the vscode-mcp-server agent guide: the COMPLETE catalog of all ${TOOL_CATALOG_SIZE} tools with their key parameters, grouped by task, plus workflow rules, common recipes and approval behavior. Read-only, auto-approved, returns text and touches nothing. Call it once at the start of a conversation when session_bootstrap_code() is not in your callable list - it is the same guide without the memory, workspace layout and skills. Re-run after every server update.`, {}, async () => {
+    server.tool('get_agent_instructions_code', `Loads the vscode-mcp-server agent guide: the workflow rules plus the compact TOOL INDEX covering all ${TOOL_CATALOG_SIZE} tools (names grouped by section). Full tool cards come from ONE lookup_tool_code(query) call. Read-only, auto-approved, returns text and touches nothing. Call it once at the start of a conversation when session_bootstrap_code() is not in your callable list. Re-run after every server update.`, {}, async () => {
         const override = getOverride ? getOverride() : undefined;
         const text = resolveAgentInstructions(override);
         return { content: [{ type: 'text', text: `${text}\n\n[vscode-mcp-server agent guide v${AGENT_INSTRUCTIONS_VERSION}]` }] };
+    });
+}
+
+export function registerLookupTool(server: McpServer): void {
+    server.tool('lookup_tool_code', `Returns the full cards (exact signature, parameters, RO/MUT/DST approval class, keywords) of the tools that match a task description, in English or French — e.g. "read the PDF", "run the tests then commit", "find where this function is defined". The compact TOOL INDEX in the guide gives one line per tool only; call this instead of guessing a signature. Read-only, auto-approved, touches nothing.`, {
+        query: z.string().describe('The task, in your own words. Use several targeted keywords; avoid full sentences.'),
+        limit: z.number().optional().default(8).describe('Max cards returned, 1-20, default 8.')
+    }, async ({ query, limit = 8 }): Promise<CallToolResult> => {
+        const cards = searchCatalog(query, limit);
+        if (cards.length === 0) {
+            return { content: [{ type: 'text', text: `No tool matches "${query}". Try shorter, concrete keywords (read, search, test, commit, pdf, memory…), or list the folder first to see what kind of thing you are handling.` }] };
+        }
+        const text = cards.map(renderToolCard).join('\n');
+        return { content: [{ type: 'text', text }] };
     });
 }

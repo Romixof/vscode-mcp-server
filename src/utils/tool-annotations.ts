@@ -23,6 +23,7 @@ export const TOOL_HINTS: Record<string, ToolHints> = {
     list_files_code: RO,
     read_file_code: RO,
     search_workspace_code: RO,
+    lookup_tool_code: RO,
     get_agent_instructions_code: RO,
     get_diagnostics_code: RO,
     search_symbols_code: RO,

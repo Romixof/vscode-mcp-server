@@ -261,8 +261,8 @@ export function registerSessionBootstrapTool(server: McpServer, guideOverride?: 
                         if (guide) {
                                 const override = guideOverride ? guideOverride() : undefined;
                                 const text = resolveAgentInstructions(override);
-                                if (text === deliveredGuide) {
-                                        parts.push(`\n\n## Agent guide\n\nv${AGENT_INSTRUCTIONS_VERSION} was already sent in this VS Code session. If you do not have it in context, call get_agent_instructions_code() once.`);
+                                if (deliveredGuide === text) {
+                                        parts.push(`\n\n## Agent guide\n\nv${AGENT_INSTRUCTIONS_VERSION} was already sent in this VS Code window. If it is missing from your context, ONE get_agent_instructions_code() returns it, or lookup_tool_code(query) when only a tool card is needed.`);
                                 } else {
                                         parts.push(`\n\n## Agent guide\n\n${text}\n\n[agent guide v${AGENT_INSTRUCTIONS_VERSION}]`);
                                         deliveredGuide = text;

@@ -344,7 +344,7 @@ Actions: read (default) prints it; write {version, branch, status, inProgress, n
 
 WHEN TO USE: as the LAST tool call of a task, right before reporting completion. Not every reply — only a finished, handed-off or abandoned unit of work.
 
-Writes the state snapshot (version, branch, in progress, next step) that session_bootstrap_code loads next time, and appends a dated summary to the workspace log. The summary carries what no tool can infer: intent, decisions and why, deliberate skips.`, {
+Writes the state snapshot (version, branch, in progress, next step) that session_bootstrap_code loads next time, and appends a dated summary to the workspace log: intent, decisions and why, deliberate skips.`, {
                 summary: z.string().describe('What was done, what was decided and why, what was deliberately skipped. Concrete, not generic.'),
                 version: z.string().optional().describe('Version or build identifier this session was working on'),
                 branch: z.string().optional().describe('Current git branch or tag'),

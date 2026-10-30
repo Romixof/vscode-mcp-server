@@ -9,9 +9,9 @@ const NEW_TOOLS = ['edit_file_code', 'get_active_editor_code', 'list_open_tabs_c
 suite('agent guide', () => {
         test('the tool count in the guide matches the registry', () => {
                 const registered = Object.keys(TOOL_HINTS).length;
-                const claimed = Number((guide.match(/FULL TOOL CATALOG \((\d+) tools\)/) ?? [])[1]);
+                const claimed = Number((guide.match(/TOOL INDEX \((\d+) tools/) ?? [])[1]);
+                assert.ok(claimed > 0, 'the full guide must state its card count in the TOOL INDEX header');
                 assert.strictEqual(claimed, registered, `guide claims ${claimed}, registry has ${registered}`);
-                console.log(`  guide count ${claimed} matches registry`);
         });
 
         test('tells the model that its callable tool list may be partial', () => {
@@ -36,7 +36,7 @@ suite('agent guide', () => {
         });
 
         test('routes edits to edit_file_code and demotes replace_lines_code', () => {
-                const workflow = guide.slice(0, guide.indexOf('FULL TOOL CATALOG'));
+                const workflow = guide.slice(0, guide.indexOf('detailed cards'));
                 assert.ok(workflow.includes('edit_file_code'), 'workflow does not name edit_file_code');
                 assert.ok(
                         !/Edit with replace_lines_code/.test(workflow),
@@ -46,7 +46,7 @@ suite('agent guide', () => {
 
         test('tells the model how to resolve the ambiguous-edit case', () => {
                 assert.ok(
-                        /more than once|2\+ matches|multiple/i.test(guide),
+                        /more than once|2\+ matches|multiple|refuses ambiguity/i.test(guide),
                         'guide does not explain what to do when old_string is ambiguous'
                 );
         });

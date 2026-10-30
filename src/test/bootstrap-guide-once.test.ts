@@ -36,11 +36,11 @@ suite('session_bootstrap_code guide delivery', () => {
         test('the first call carries the catalog, the second is a short notice', async () => {
                 await withServer(newServer(), async call => {
                         const first = await call();
-                        assert.ok(first.includes('FULL TOOL CATALOG'), 'the first call must carry the catalog');
+                        assert.ok(first.includes('TOOL INDEX'), 'the first call must carry the compact catalog index');
                         assert.ok(first.includes(`[agent guide v${AGENT_INSTRUCTIONS_VERSION}]`), 'the first call must carry the version tag');
 
                         const second = await call();
-                        assert.ok(!second.includes('FULL TOOL CATALOG'), 'the catalog must not be sent twice on one server');
+                        assert.ok(!second.includes('TOOL INDEX'), 'the catalog must not be sent twice on one server');
                         assert.ok(
                                 second.includes(`v${AGENT_INSTRUCTIONS_VERSION} was already sent`),
                                 `the second call must say the guide was already sent: ${second}`
@@ -81,11 +81,11 @@ suite('session_bootstrap_code guide delivery', () => {
 
         test('a second server does not inherit the first server delivery', async () => {
                 const first = await withServer(newServer(), async call => call());
-                assert.ok(first.includes('FULL TOOL CATALOG'), 'the first server must carry the catalog');
+                assert.ok(first.includes('TOOL INDEX'), 'the first server must carry the catalog');
 
                 const second = await withServer(newServer(), async call => call());
                 assert.ok(
-                        second.includes('FULL TOOL CATALOG'),
+                        second.includes('TOOL INDEX'),
                         'a freshly registered server must carry the catalog, not a notice it never earned'
                 );
                 assert.ok(
@@ -107,7 +107,7 @@ suite('session_bootstrap_code guide delivery', () => {
                         assert.ok(/## 📍 Memory/.test(text), `memory is a default section: ${text.slice(0, 200)}`);
                         assert.ok(/## Workspace/.test(text), 'layout is a default section');
                         assert.ok(/## Skills/.test(text), 'skills is a default section');
-                        assert.ok(/FULL TOOL CATALOG|was already sent/.test(text), 'the guide is a default section');
+                        assert.ok(/TOOL INDEX|was already sent/.test(text), 'the guide is a default section');
                 });
         });
 
@@ -117,7 +117,7 @@ suite('session_bootstrap_code guide delivery', () => {
                         assert.ok(/## Skills/.test(text), 'the named section must be returned');
                         assert.ok(!/## 📍 Memory/.test(text), `an unnamed section must be absent: ${text.slice(0, 200)}`);
                         assert.ok(!/## Workspace/.test(text), 'layout was not named');
-                        assert.ok(!/FULL TOOL CATALOG|was already sent/.test(text), 'the guide was not named');
+                        assert.ok(!/TOOL INDEX|was already sent/.test(text), 'the guide was not named');
                 });
         });
 
@@ -127,7 +127,7 @@ suite('session_bootstrap_code guide delivery', () => {
                         assert.ok(/## Workspace/.test(text), 'layout was named');
                         assert.ok(/## Skills/.test(text), 'skills was named');
                         assert.ok(!/## 📍 Memory/.test(text), 'memory was not named');
-                        assert.ok(!/FULL TOOL CATALOG|was already sent/.test(text), 'the guide was not named');
+                        assert.ok(!/TOOL INDEX|was already sent/.test(text), 'the guide was not named');
                 });
         });
 });

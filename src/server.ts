@@ -37,7 +37,7 @@ import { registerSkillsTools } from './tools/skills-tools';
 import { EXTENSION_ID } from './tools/advanced-tools';
 import { registerOcrTools } from './tools/ocr-tools';
 import { registerTokenEfficiencyTools } from './utils/token-efficiency';
-import { registerAgentInstructionsTool, resolveAgentInstructions } from './utils/agent-instructions';
+import { registerAgentInstructionsTool, registerLookupTool, resolveAgentInstructions } from './utils/agent-instructions';
 import { recordToolCall, setRegisteredTools } from './utils/usage';
 import { logger } from './utils/logger';
 import { setClusterRootsProvider, resolveInputPath } from './utils/workspace';
@@ -523,6 +523,7 @@ export class MCPServer {
         registerKeyAdminTools(server);
         registerExposeAuditTool(server);
         registerAgentInstructionsTool(server, () => this.currentAgentInstructionsOverride());
+        registerLookupTool(server);
         registerSessionBootstrapTool(server, () => this.currentAgentInstructionsOverride());
         const annotationReport = applyToolAnnotations(server);
         if (annotationReport.unknown.length > 0) {

@@ -1278,8 +1278,7 @@ Aggregates package.json, configs, file structure, languages, frameworks, entry p
 
 WHEN TO USE: Technical debt tracking, sprint planning, code quality reviews.
 
-Supports custom patterns, filtering by path/file type, grouping by file or tag, and context lines.
-Returns structured data with severity classification (high/medium/low).`, {
+Supports custom patterns, path/file-type filters, grouping by file or tag, context lines, severity classification.`, {
 		customPatterns: z.array(z.string()).optional().describe('Additional tag patterns on top of the defaults'),
 		path: z.string().optional().describe('Search path (default: workspace root)'),
 		include: z.array(z.string()).optional().describe('Glob patterns to include'),

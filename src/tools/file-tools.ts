@@ -327,11 +327,11 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
         'list_files_code',
         `Explores directory structure in VS Code workspace.
 
-        WHEN TO USE: Understanding project structure, finding files before read/modify operations.
+WHEN TO USE: Understanding project structure, finding files before read/modify operations.
 
-        CRITICAL: NEVER set recursive=true on root directory (.) - output too large. Use recursive only on specific subdirectories.
+CRITICAL: NEVER set recursive=true on root directory (.) - output too large. Use recursive only on specific subdirectories.
 
-        Returns one line per entry: path, then size and last-modified for files. Start with path='.' to explore root, then dive into specific subdirectories with recursive=true. Supports pagination via limit/offset for large directories. Build noise (__pycache__, node_modules, .git, dist, out, virtualenvs) is skipped — you never need to list it.`,
+Returns one line per entry: path, then size and last-modified for files. Start with path='.' to explore root, then dive into specific subdirectories with recursive=true. Supports pagination via limit/offset for large directories. Build noise (__pycache__, node_modules, .git, dist, out, virtualenvs) is skipped — you never need to list it.`,
         {
             path: z.string().describe('The path to list files from'),
             recursive: z.boolean().optional().default(false).describe('Whether to list files recursively'),
@@ -382,17 +382,17 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
         'read_file_code',
         `File contents with size limits and partial reading.
 
-        WHEN TO USE: reading code, config files, analyzing implementations.
+WHEN TO USE: reading code, config files, analyzing implementations.
 
-        Encoding: text encodings (utf-8, latin1, …); "base64" for the raw string. startLine/endLine (1-based) read a section of a large file.
+Encoding: text encodings (utf-8, latin1, …); "base64" for the raw string. startLine/endLine (1-based) read a section of a large file.
 
-        Images: .png/.jpg/.gif/.webp/.bmp come back as a picture with pixel size and token cost.
+Images: .png/.jpg/.gif/.webp/.bmp come back as a picture with pixel size and token cost.
 
-        A PDF, .docx or .zip is binary and refused: a PDF is read by ocr_pdf_code (text) or render_pdf_pages_code (page images).
+A PDF, .docx or .zip is binary and refused: a PDF is read by ocr_pdf_code (text) or render_pdf_pages_code (page images).
 
-        Re-reading: a file already in context comes back as a one-line notice, never a second copy.
+Re-reading: a file already in context comes back as a one-line notice, never a second copy.
 
-        Missing a tool? session_bootstrap_code has the catalog; if not callable, get_agent_instructions_code does.`,
+No opener tool? get_agent_instructions_code returns the full guide.`,
         {
             path: z.string().describe('The path to the file to read'),
             encoding: z.string().optional().default('utf-8').describe('Encoding to convert the file content to a string. Use "base64" for base64-encoded string'),
@@ -473,11 +473,9 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
         'move_file_code',
         `Moves a file or directory to a new location using VS Code's WorkspaceEdit API.
 
-        WHEN TO USE: Reorganizing project structure, moving files between directories.
+WHEN TO USE: Reorganizing project structure, moving files between directories.
 
-        This operation uses VS Code's refactoring capabilities to ensure imports and references are updated correctly.
-
-        IMPORTANT: This will update all references to the moved file in the workspace.`,
+Uses refactoring, so all references to the moved file are updated across the workspace.`,
         {
             sourcePath: z.string().describe('The current path of the file or directory to move'),
             targetPath: z.string().describe('The new path where the file or directory should be moved to'),
@@ -525,11 +523,9 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
         'rename_file_code',
         `Renames a file or directory using VS Code's WorkspaceEdit API.
 
-        WHEN TO USE: Renaming files to follow naming conventions, refactoring code.
+WHEN TO USE: Renaming files to follow naming conventions, refactoring code.
 
-        This operation uses VS Code's refactoring capabilities to ensure imports and references are updated correctly.
-
-        IMPORTANT: This will update all references to the renamed file in the workspace.`,
+Uses refactoring, so all references to the renamed file are updated across the workspace.`,
         {
             filePath: z.string().describe('The current path of the file or directory to rename'),
             newName: z.string().describe('The new name for the file or directory'),
@@ -577,9 +573,9 @@ ${WORKSPACE_PARAM_LONG_DESCRIPTION}`,
         'copy_file_code',
         `Copies a file to a new location.
 
-        WHEN TO USE: Creating backups, duplicating files for testing, creating template files.
+WHEN TO USE: Creating backups, duplicating files for testing, creating template files.
 
-        LIMITATION: Only works for files, not directories.`,
+LIMITATION: Only works for files, not directories.`,
         {
             sourcePath: z.string().describe('The path of the file to copy'),
             targetPath: z.string().describe('The path where the copy should be created'),

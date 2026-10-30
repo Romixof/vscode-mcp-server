@@ -489,13 +489,13 @@ export function registerShellTools(server: McpServer, terminal?: vscode.Terminal
         'execute_shell_command_code',
         `Executes shell commands in the VS Code integrated terminal.
 
-WHEN TO USE: builds, tests, installs, git operations, anything that actually mutates. For reads (file contents, listings, text search, git status/diff/log, diagnostics) prefer the dedicated read-only tools — they auto-approve without a prompt, so keeping this tool for real mutations makes approval the exception.
+WHEN TO USE: builds, tests, installs, git operations, anything that mutates. For reads (contents, listings, text search, git status/diff/log, diagnostics) prefer the dedicated read-only tools — they auto-approve, keeping this tool's approval the exception.
 
-Timeout: default ${SHELL_TIMEOUT_MS}ms. The calling client disconnects at ${CLIENT_CEILING_MS}ms whatever you pass, so a larger timeout returns nothing at all. A request over the ${CLIENT_BUDGET_MS}ms budget is clamped and the clamp is reported back. That budget covers the WHOLE call: if a wrong-shell retry is needed, the retry gets whatever is left of it, never a fresh timeout. A command that runs past the budget returns what was captured with exit code 124. Anything that legitimately takes minutes (builds, test suites, installs) belongs in background_task_code, which detaches and never blocks. The terminal runs one command at a time: a call that arrives while the terminal is already busy is rejected when the wait cannot fit in the budget, rather than queued past the client's ceiling.
+Timeout: default ${SHELL_TIMEOUT_MS}ms; the client disconnects at ${CLIENT_CEILING_MS}ms whatever you pass, so a larger timeout returns nothing, and a request over the ${CLIENT_BUDGET_MS}ms budget is clamped and reported. That budget covers the WHOLE call: a wrong-shell retry gets whatever is left of it, never a fresh timeout, and a command running past the budget returns what was captured with exit code 124. Minutes-long work (builds, test suites, installs) belongs in background_task_code, which detaches and never blocks. The terminal runs one command at a time: a call arriving while it is busy is rejected when the wait cannot fit in the budget, rather than queued past the client's ceiling.
 
-Shell: ${shellDeclaration(terminal)}. Write syntax for that shell. Sending the other family's syntax fails before your command runs, and the server retries once in the other family with the remaining budget.
+Shell: ${shellDeclaration(terminal)}. Write syntax for that shell; the other family's syntax fails before the command runs, and the server retries once in the other family with the remaining budget.
 
-Token efficiency: output is compacted by default (progress bars stripped, repeated lines collapsed, long lines truncated, head+tail capped, with category filters for git, installs, test runners and builds). A notice carries a retrieve_output_code handle for the full original. Pass outputMode "raw" to skip compaction.
+Token efficiency: output is compacted by default (progress bars stripped, repeated lines collapsed, long lines truncated, head+tail capped, category filters for git, installs, test runners, builds); a notice carries a retrieve_output_code handle for the full original. Pass outputMode "raw" to skip compaction.
 
 cwd defaults to the workspace root.`,
         {

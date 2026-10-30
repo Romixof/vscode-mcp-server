@@ -474,13 +474,13 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
     });
     server.tool('ocr_pdf_code', `OCR on a scanned/image-only PDF.
 
-WHEN TO USE: "tesseract" for PDFs pdf_needs_ocr_code flagged as scanned — on a text-layer PDF it is slower and lossier. "auto" is safe on any PDF: it returns the existing text layer verbatim when most pages have one.
+WHEN TO USE: "tesseract" on PDFs pdf_needs_ocr_code flagged as scanned — slower and lossier on a text-layer PDF. "auto" is safe on any PDF: returns the existing text layer verbatim when most pages have one.
 
-PAGE CAPS: the client enforces a ~30s ceiling that timeoutMs cannot extend. One call caps at ${MAX_PAGES_PER_CALL.tesseract} pages ("tesseract"), ${MAX_PAGES_PER_CALL.auto} ("auto"), ${MAX_PAGES_PER_CALL.vision} ("vision"); longer work = repeated calls over small ranges with the same outputPath and append:true.
+PAGE CAPS: client ceiling ~30s, timeoutMs cannot extend it. One call caps at ${MAX_PAGES_PER_CALL.tesseract} pages ("tesseract"), ${MAX_PAGES_PER_CALL.auto} ("auto"), ${MAX_PAGES_PER_CALL.vision} ("vision"); longer work = repeated calls over small ranges with the same outputPath and append:true.
 
 ENGINES:
 - "tesseract" (default): fast, weak on handwriting and faint scans.
-- "vision": local Ollama transcription (slow, nothing leaves the machine). Prefer render_pdf_pages_code to read the pages yourself.
+- "vision": local Ollama transcription (slow, fully local). Prefer render_pdf_pages_code to read the pages yourself.
 - "auto": text layer first, else tesseract, then vision escalation for low-confidence pages.
 
 Output is compacted; a retrieve_output_code handle in the notice gives the full text when no outputPath was set.`, {

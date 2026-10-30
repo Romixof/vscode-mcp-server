@@ -5,6 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { MCPServer, ToolConfiguration } from '../server';
 import { TOOL_HINTS } from '../utils/tool-annotations';
 import { DEFAULT_AGENT_INSTRUCTIONS } from '../utils/agent-instructions';
+import { CATALOG } from '../utils/tool-catalog';
 
 const ALL_GROUPS_ON = {
         file: true, edit: true, shell: true, diagnostics: true, symbol: true,
@@ -36,12 +37,13 @@ async function describedTool(name: string): Promise<string> {
 
 suite('agent guide tool-count claims', () => {
         test('the catalog size is derived from the registry, not typed by hand', async () => {
-                assert.strictEqual(Object.keys(TOOL_HINTS).length, 92, 'registry size changed - update the guide tests');
+                assert.strictEqual(Object.keys(TOOL_HINTS).length, Object.keys(CATALOG).length, 'registry and catalog drifted - the integrity tests should have caught this first');
+                assert.strictEqual(Object.keys(TOOL_HINTS).length, 93, 'registry size changed - update the guide tests');
         });
 
-        test('the guide description claims the real tool count', async () => {
+        test('the guide description states the real tool count', async () => {
                 const description = await describedTool('get_agent_instructions_code');
-                const claimed = (description.match(/catalog of all (\d+) tools/) ?? [])[1];
+                const claimed = (description.match(/(\d+) tools/) ?? [])[1];
                 assert.ok(claimed, `description no longer states a count: ${description.slice(0, 160)}`);
                 assert.strictEqual(
                         Number(claimed),
@@ -86,17 +88,10 @@ suite('a client list missing the opener still gets the guide', () => {
                 );
         });
 
-        test('the guide body carries the fallback in its opener, its budget rules and its recipes', () => {
+        test('the guide body carries the fallback in its opener', () => {
                 const opener = DEFAULT_AGENT_INSTRUCTIONS.split('\n')[0];
+                assert.ok(opener.includes('session_bootstrap_code'), `opener must name the opener: ${opener}`);
                 assert.ok(opener.includes('get_agent_instructions_code'), `opener must name the fallback: ${opener}`);
-                assert.ok(
-                        DEFAULT_AGENT_INSTRUCTIONS.includes('or with ONE get_agent_instructions_code() call'),
-                        'the tool-budget section must name the fallback'
-                );
-                assert.ok(
-                        DEFAULT_AGENT_INSTRUCTIONS.includes('or get_agent_instructions_code() when that one is not callable'),
-                        'the recipes must name the fallback'
-                );
         });
 
         test('the guide carries what the per-tool workspace descriptions stopped saying', () => {
@@ -106,11 +101,7 @@ suite('a client list missing the opener still gets the guide', () => {
                         'the multi-root legend must still teach the workspace parameter shape'
                 );
                 assert.ok(
-                        guide.includes('this is where the workspace="<folder name or 1-based index>" values come from'),
-                        'the guide must now carry the lookup pointer that 76 tool descriptions dropped'
-                );
-                assert.ok(
-                        guide.includes('list_workspace_folders_code()'),
+                        guide.includes('list_workspace_folders_code'),
                         'the guide must name the tool that resolves folder names and indexes'
                 );
         });

@@ -128,7 +128,7 @@ suite('twilight gate (Mammouth one-tool listing)', () => {
 		const result = await runWithScopes(ALL_SCOPES, 'twilight-test', () =>
 			client.callTool({ name: 'get_agent_instructions_code', arguments: {} })) as { content?: Array<{ text?: string }>; isError?: boolean };
 		assert.ok(!result.isError, `the unlisted tool call must not refuse: ${JSON.stringify(result).slice(0, 300)}`);
-		assert.ok((result.content ?? []).length > 0 && (result.content?.[0]?.text ?? '').includes('FULL TOOL CATALOG'), 'the call must return the real agent guide');
+		assert.ok((result.content ?? []).length > 0 && (result.content?.[0]?.text ?? '').includes('TOOL INDEX'), 'the call must return the real agent guide');
 	});
 
 	test('clientInfo declares the gate: listChanged stays advertised', async () => {
