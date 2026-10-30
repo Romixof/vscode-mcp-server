@@ -4,6 +4,17 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.36-twilight.2] - 2026-10-11
+### Fixed
+
+- **Guide v20 — the partial-list advice now routes through the catalog.** A live Mammouth session asked for "read page 2 of the PDF" while only session_bootstrap_code was listed: the model obeyed the old TOOL BUDGET advice ("name it in your reply and carry on") and refused instead of acting. The paragraph now teaches the real flow: every indexed tool IS callable by name even when unlisted — fetch its card with ONE lookup_tool_code(query="<task>"), then call it exactly as the card shows; never claim a tool is unavailable without trying. `agent-guide.test.ts` now pins the new behavior and bans the old advice from coming back (a live session proved the model stops there).
+
+## [0.20.36-twilight.1] - 2026-10-11
+### Added
+
+- **Tool catalog RAG (`lookup_tool_code`)**: the agent guide slimmed to a compact index (~1800 tok) plus a per-task lookup. The model describes its task in natural language (EN or FR, diacritic-free), the catalog returns the top tool cards with their RO/MUT/DST tag, signature and keywords, ready to copy verbatim. 93 catalog cards, one per registered tool, integrity-checked (no card without a tool, no tool without a card).
+- Tool descriptions rewritten across file/shell/ocr/database/memory/calendar/documentation tools to fit the payload budget: tools/list now costs 26596/26600 tok (p95 415 tok/tool), `read_file_code` names the `get_agent_instructions_code` fallback in its description.
+
 ## [0.20.35-twilight.2] - 2026-10-11
 ### Added
 

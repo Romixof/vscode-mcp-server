@@ -16,12 +16,24 @@ suite('agent guide', () => {
 
         test('tells the model that its callable tool list may be partial', () => {
                 assert.ok(
-                        /name it in your reply/i.test(guide),
-                        'guide does not tell the model to name a tool it cannot call'
+                        /lookup_tool_code\(query/i.test(guide),
+                        'guide does not route a missing tool through lookup_tool_code'
+                );
+                assert.ok(
+                        /IS callable by name/i.test(guide),
+                        'guide does not state that an indexed tool is callable even when unlisted'
+                );
+                assert.ok(
+                        /without trying/i.test(guide),
+                        'guide does not forbid claiming a tool unavailable without trying'
                 );
                 assert.ok(
                         /never silently skip/i.test(guide),
                         'guide does not forbid silently dropping the step'
+                );
+                assert.ok(
+                        !/name it in your reply/i.test(guide),
+                        'the old \'name it and carry on\' advice must not come back: a live session proved the model stops there'
                 );
         });
 
