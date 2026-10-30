@@ -25,6 +25,9 @@ const MAX_PAGES_PER_CALL = {
     vision: 3
 };
 const DEFAULT_OCR_TIMEOUT_MS = 25000;
+// Rough per-page cost of pdftoppm raster + tesseract on a mid-range Windows
+// machine, used to cap a no-range OCR call to pages the budget can afford.
+const ESTIMATED_MS_PER_OCR_PAGE = 8000;
 const MIN_METADATA_BUDGET_MS = 1000;
 const PDFINFO_TIMEOUT_MS = 2000;
 function shellSingleQuote(value: string): string {
@@ -41,13 +44,25 @@ function getOcrTerminal(): vscode.Terminal {
         ? vscode.window.createTerminal({ name: OCR_TERMINAL_NAME, shellPath: bashPath })
         : vscode.window.createTerminal(OCR_TERMINAL_NAME);
 }
+// A resolved binary path is stable for the process lifetime, and re-resolving
+// costs 2+ shell round-trips per binary — on a slow Windows machine that burned
+// ~5-10s of the OCR budget before tesseract ever ran. Cache only successful
+// resolutions; a "not found" stays uncached so a fresh install is picked up.
+const resolvedBinaryCache = new Map<string, string>();
+
 async function resolveBinary(terminal: vscode.Terminal, cwd: string, bin: string, timeoutMs: number = 5000): Promise<string | undefined> {
+    const cached = resolvedBinaryCache.get(bin);
+    if (cached) {
+        return cached;
+    }
     const check = await executeShellCommand(terminal, `command -v ${bin}`, cwd, timeoutMs).catch(() => ({ output: '', exitCode: 1 }));
     if (check.exitCode === 0) {
+        resolvedBinaryCache.set(bin, bin);
         return bin;
     }
     const winCheck = await executeShellCommand(terminal, `where.exe ${bin}`, cwd, timeoutMs).catch(() => ({ output: '', exitCode: 1 }));
     if (winCheck.exitCode === 0) {
+        resolvedBinaryCache.set(bin, bin);
         return bin;
     }
     for (const dir of WINDOWS_FALLBACK_DIRS[bin] || []) {
@@ -55,11 +70,16 @@ async function resolveBinary(terminal: vscode.Terminal, cwd: string, bin: string
 
         const probe = await executeShellCommand(terminal, `test -f ${shellSingleQuote(exePath)}`, cwd, timeoutMs).catch(() => ({ output: '', exitCode: 1 }));
         if (probe.exitCode === 0) {
+            resolvedBinaryCache.set(bin, exePath);
             return exePath;
         }
     }
     if (process.platform === 'win32' && (WINDOWS_FALLBACK_DIRS[bin] || []).some(dir => windowsBinaryExists(dir, bin))) {
-        return (WINDOWS_FALLBACK_DIRS[bin] || []).map(dir => `${dir}/${bin}.exe`).find(p => windowsBinaryExists(path.dirname(p), bin));
+        const resolved = (WINDOWS_FALLBACK_DIRS[bin] || []).map(dir => `${dir}/${bin}.exe`).find(p => windowsBinaryExists(path.dirname(p), bin));
+        if (resolved) {
+            resolvedBinaryCache.set(bin, resolved);
+        }
+        return resolved;
     }
     return undefined;
 }
@@ -563,13 +583,20 @@ Output is compacted; a retrieve_output_code handle in the notice gives the full 
             }
             tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-ocr-'));
             const pagePrefix = path.join(tmpDir, 'page');
+            // Without an explicit lastPage, pdftoppm rasterizes to the end of the
+            // document — at ~1s/page that alone ate the whole 25s budget before
+            // tesseract ran once (live Mammouth session: 10 pages rastered, 10
+            // skipped). Cap the raster to roughly what the remaining budget can
+            // actually OCR; the footer below tells the model how to continue.
+            const firstRasterPage = firstPage ?? 1;
+            const rasterCappedLast = !lastPage
+                ? firstRasterPage + Math.max(1, Math.floor(budgetLeft() / ESTIMATED_MS_PER_OCR_PAGE)) - 1
+                : undefined;
             let rasterCmd = `${shellSingleQuote(pdftoppmBin)} -r ${dpi} -png`;
             if (firstPage) {
                 rasterCmd += ` -f ${firstPage}`;
             }
-            if (lastPage) {
-                rasterCmd += ` -l ${lastPage}`;
-            }
+            rasterCmd += ` -l ${lastPage ?? rasterCappedLast}`;
             rasterCmd += ` ${shellSingleQuote(fileUri.fsPath)} ${shellSingleQuote(pagePrefix)}`;
             const rasterResult = await executeShellCommand(terminal, rasterCmd, cwd, Math.max(1000, Math.min(timeoutMs, 60000, budgetLeft())));
             if (rasterResult.exitCode !== 0 && rasterResult.exitCode !== 124) {
@@ -681,6 +708,9 @@ Output is compacted; a retrieve_output_code handle in the notice gives the full 
             const rasterFooter = rasterResult.exitCode === 124
                 ? `\n\n⚠️ pdftoppm hit this call's time budget, so only the pages above were rasterized — continue OCR with a later firstPage.`
                 : '';
+            const cappedFooter = rasterCappedLast !== undefined && images.length >= rasterCappedLast - firstRasterPage + 1
+                ? `\n\n⚠️ Without lastPage, a call only OCRs the first ${images.length} page(s) from ${firstRasterPage} — later pages were not attempted (the document may have more). Continue with firstPage=${rasterCappedLast + 1}, and pass lastPage to bound the range.`
+                : '';
             const combined = pageResults
                 .map(p => `--- Page ${p.pageNum} (${p.engineUsed}) ---\n${p.text}`)
                 .join('\n\n');
@@ -689,7 +719,7 @@ Output is compacted; a retrieve_output_code handle in the notice gives the full 
             return finalizeOcrText({
                 combined,
                 header: `OCR done — ${images.length} page(s)${engineNote}, ${combined.length} characters total.`,
-                tailNote: skipFooter + rasterFooter,
+                tailNote: skipFooter + rasterFooter + cappedFooter,
                 outputPath,
                 append,
                 workspace,

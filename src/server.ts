@@ -396,7 +396,18 @@ export class MCPServer {
                             if (!tool) {
                                 return { content: [{ type: 'text', text: `Tool ${req.params.name} not found` }], isError: true };
                             }
-                            return await tool.handler(req.params.arguments ?? {}, extra);
+                            // Zod strips unknown argument keys silently, which once
+                            // turned a guessed pages=[2] into a page-1 render (live
+                            // Mammouth session). Name the offenders instead, so the
+                            // model can self-correct against the declared schema.
+                            const declaredShape = (tool as { inputSchema?: { shape?: Record<string, unknown> } }).inputSchema?.shape ?? {};
+                            const callArgs = req.params.arguments ?? {};
+                            const unknownArgs = Object.keys(callArgs).filter(k => !(k in declaredShape));
+                            if (unknownArgs.length > 0) {
+                                const validArgs = Object.keys(declaredShape);
+                                return { content: [{ type: 'text', text: `Unknown argument(s): ${unknownArgs.join(', ')}. Valid parameters: ${validArgs.join(', ')}.` }], isError: true };
+                            }
+                            return await tool.handler(callArgs, extra);
                         } catch (error) {
                             return { content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true };
                         }

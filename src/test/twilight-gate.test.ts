@@ -131,6 +131,19 @@ suite('twilight gate (Mammouth one-tool listing)', () => {
 		assert.ok((result.content ?? []).length > 0 && (result.content?.[0]?.text ?? '').includes('TOOL INDEX'), 'the call must return the real agent guide');
 	});
 
+	test('strict mode: a guessed argument name is rejected instead of silently stripped', async () => {
+		const { client } = await ready(startSession(true, true, true));
+		// Live Mammouth session: render_pdf_pages_code(pages=[2]) had its unknown
+		// key stripped by zod, firstPage fell back to 1, and the model was shown
+		// the wrong page with no hint anything went wrong.
+		const result = await runWithScopes(ALL_SCOPES, 'twilight-test', () =>
+			client.callTool({ name: 'render_pdf_pages_code', arguments: { pdfPath: 'x.pdf', pages: [2] } })) as { content?: Array<{ text?: string }>; isError?: boolean };
+		assert.ok(result.isError, `unknown args must be an error, not a silent default: ${JSON.stringify(result).slice(0, 200)}`);
+		const out = (result.content ?? []).map(c => c.text ?? '').join('');
+		assert.ok(out.includes('pages'), `the error must name the offending key: ${out}`);
+		assert.ok(out.includes('firstPage'), `the error must teach the valid parameters: ${out}`);
+	});
+
 	test('clientInfo declares the gate: listChanged stays advertised', async () => {
 		const { client } = await ready(startSession(true));
 		// The server capabilities come back in the initialize result; assert

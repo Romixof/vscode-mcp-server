@@ -4,6 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.36-twilight.3] - 2026-10-11
+### Fixed
+
+- **Relay verified live — three PDF-tool bugs it surfaced are fixed.** Lía called read_file_code/ocr_pdf_code/render_pdf_pages_code through session_bootstrap_code(action="call") exactly as designed, but: (1) a no-range ocr_pdf_code rasterized all 10 pages then skipped every one — the raster now caps to what the remaining budget can actually OCR, with a continue footer; (2) resolveBinary re-ran 2+ shell probes per binary every call, burning ~5-10s of budget before tesseract — successful resolutions are now cached for the process lifetime; (3) render_pdf_pages_code(pages=[2]) had the guessed key stripped silently by zod and rendered page 1 — the strict tools/call wrapper now rejects unknown argument keys and lists the valid parameters (pinned by a twilight-gate test).
+
 ## [0.20.36-twilight.2] - 2026-10-11
 ### Fixed
 
