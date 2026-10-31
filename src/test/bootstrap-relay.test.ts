@@ -85,6 +85,38 @@ suite('session_bootstrap_code relay (action="call")', () => {
                 assert.ok(text(result).includes('intended failure'), `the cause must be visible: ${text(result)}`);
         });
 
+        test('missing required argument is a clean validation error, not a handler crash', async () => {
+                // Regression: list_files_code without path crashed inside the
+                // handler with "Cannot read properties of undefined (reading
+                // 'trim')" because the relay skipped schema validation.
+                const server = newServer(s => {
+                        s.tool('fragile_tool_x', 'crashes on undefined string', { path: z.string() },
+                                async ({ path }) => ({ content: [{ type: 'text', text: `P:${path.trim()}` }] }));
+                });
+                const result = await call('session_bootstrap_code', {
+                        action: 'call', tool: 'fragile_tool_x', args: {}
+                }, server);
+                assert.ok(result.isError, 'missing arg must be an error result');
+                assert.ok(!/Cannot read properties of undefined/.test(text(result)),
+                        `raw crash leaked to the model: ${text(result)}`);
+                assert.ok(/rejected its arguments/.test(text(result)) && /path/.test(text(result)),
+                        `error must name the offending argument: ${text(result)}`);
+                assert.ok(/lookup_tool_code/.test(text(result)), `error must teach the card escape hatch: ${text(result)}`);
+        });
+
+        test('relay applies schema defaults like a normal tools/call', async () => {
+                const server = newServer(s => {
+                        s.tool('defaulted_tool_x', 'echoes a defaulted arg',
+                                { depth: z.number().optional().default(3) },
+                                async ({ depth }) => ({ content: [{ type: 'text', text: `D:${depth}` }] }));
+                });
+                const result = await call('session_bootstrap_code', {
+                        action: 'call', tool: 'defaulted_tool_x', args: {}
+                }, server);
+                assert.ok(!result.isError, `relay must not fail: ${text(result)}`);
+                assert.ok(text(result).includes('D:3'), `schema defaults must reach the handler: ${text(result)}`);
+        });
+
         test('relay mode ignores sections and mode: no bootstrap header leaks into the result', async () => {
                 const server = newServer(s => {
                         s.tool('echo_tool_x', 'echoes its input', { message: z.string() },
@@ -101,19 +133,21 @@ suite('session_bootstrap_code relay (action="call")', () => {
 
         test('bootstrap mode is unaffected: sections and guide still work', async () => {
                 const server = newServer();
-                const result = await call('session_bootstrap_code', { sections: ['guide'] }, server);
+                // v24: full is opt-in — the suite asserts on the full guide payload.
+                const result = await call('session_bootstrap_code', { sections: ['guide'], mode: 'full' }, server);
                 assert.ok(!result.isError, `plain bootstrap must still work: ${text(result)}`);
                 assert.ok(text(result).includes('TOOL INDEX'), 'plain bootstrap still serves the guide');
         });
 
-        test('compact re-anchor no longer tells the model to re-call bootstrap (anti-loop)', async () => {
+        test('compact re-anchor re-runs every message but never the full bootstrap (anti-loop)', async () => {
                 const server = newServer();
                 const result = await call('session_bootstrap_code', { mode: 'compact' }, server);
                 const out = text(result);
                 assert.ok(!/call session_bootstrap_code\(\) with no arguments/.test(out),
                         `compact still advertises the full re-anchor that caused ~20 loops: ${out}`);
-                assert.ok(/Do NOT call session_bootstrap_code again/i.test(out),
-                        `compact must warn against re-calling: ${out}`);
+                assert.ok(/re-run on each new user message/i.test(out),
+                        `compact must teach the per-message re-anchor: ${out}`);
+
                 assert.ok(/action="call"/.test(out), `compact must teach the relay: ${out}`);
         });
 });

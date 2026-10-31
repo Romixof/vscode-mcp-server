@@ -7,6 +7,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { resolveInputPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { executeShellCommand, CLIENT_BUDGET_MS } from './shell-tools';
+import { quoteArg, shellSafeInputPath } from '../utils/shell-quote';
 import { compactOcrText, rememberOriginal, formatCompactionNotice } from '../utils/token-efficiency';
 import { assertUrlSafe } from '../utils/security-helpers';
 import { WINDOWS_FALLBACK_DIRS, findGitBash, POPPLER_HINT, windowsBinaryExists } from '../utils/binaries';
@@ -30,9 +31,9 @@ const DEFAULT_OCR_TIMEOUT_MS = 25000;
 const ESTIMATED_MS_PER_OCR_PAGE = 8000;
 const MIN_METADATA_BUDGET_MS = 1000;
 const PDFINFO_TIMEOUT_MS = 2000;
-function shellSingleQuote(value: string): string {
-    return `'${value.replace(/'/g, `'\\''`)}'`;
-}
+// Bash-only escaping ('\'') is not safe in PowerShell: quoteArg refuses
+// quotes instead (see utils/shell-quote.ts).
+const shellSingleQuote = quoteArg;
 const OCR_TERMINAL_NAME = 'MCP OCR';
 function getOcrTerminal(): vscode.Terminal {
     const existing = vscode.window.terminals.find(t => t.name === OCR_TERMINAL_NAME && t.exitStatus === undefined);
@@ -229,7 +230,7 @@ async function tryTextLayer(options: {
     ].filter(Boolean).join(' ');
     const textResult = await executeShellCommand(
         terminal,
-        `${shellSingleQuote(pdftotextBin)}${rangeArgs ? ` ${rangeArgs}` : ''} ${shellSingleQuote(fileUri.fsPath)} -`,
+        `${shellSingleQuote(pdftotextBin)}${rangeArgs ? ` ${rangeArgs}` : ''} ${shellSingleQuote(shellSafeInputPath(fileUri.fsPath))} -`,
         cwd,
         Math.min(20000, budgetLeft())
     ).catch(() => ({ output: '', exitCode: 1 }));
@@ -362,11 +363,11 @@ If most pages report text, ocr_pdf_code(engine="auto") returns that text directl
             let totalPages: number | undefined;
             const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo', Math.min(5000, Math.max(750, needsOcrLeft())));
             if (pdfinfoBin && needsOcrLeft() > 2000) {
-                const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(fileUri.fsPath)}`, cwd, Math.min(8000, needsOcrLeft()));
+                const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(shellSafeInputPath(fileUri.fsPath))}`, cwd, Math.min(8000, needsOcrLeft()));
                 const pagesMatch = infoResult.output.match(/^Pages:\s*(\d+)/m);
                 totalPages = pagesMatch ? parseInt(pagesMatch[1], 10) : undefined;
             }
-            const textResult = await executeShellCommand(terminal, `${shellSingleQuote(pdftotextBin)} ${shellSingleQuote(fileUri.fsPath)} -`, cwd, Math.min(20000, Math.max(1000, needsOcrLeft())));
+            const textResult = await executeShellCommand(terminal, `${shellSingleQuote(pdftotextBin)} ${shellSingleQuote(shellSafeInputPath(fileUri.fsPath))} -`, cwd, Math.min(20000, Math.max(1000, needsOcrLeft())));
             if (textResult.exitCode !== 0) {
                 return { content: [{ type: 'text' as const, text: `pdftotext failed:\n${textResult.output}` }], isError: true };
             }
@@ -439,7 +440,7 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
                 const pdfinfoBin = await resolveBinary(terminal, cwd, 'pdfinfo', bounded(5000));
                 if (pdfinfoBin && remainingBudget() >= MIN_METADATA_BUDGET_MS) {
                     const infoTimeout = Math.max(500, Math.min(PDFINFO_TIMEOUT_MS, remainingBudget() - MIN_METADATA_BUDGET_MS / 2));
-                    const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(fileUri.fsPath)}`, cwd, infoTimeout).catch(() => ({ output: '', exitCode: 1 }));
+                    const infoResult = await executeShellCommand(terminal, `${shellSingleQuote(pdfinfoBin)} ${shellSingleQuote(shellSafeInputPath(fileUri.fsPath))}`, cwd, infoTimeout).catch(() => ({ output: '', exitCode: 1 }));
                     const pagesMatch = infoResult.output.match(/^Pages:\s*(\d+)/m);
                     const parsed = pagesMatch ? parseInt(pagesMatch[1], 10) : NaN;
                     if (Number.isFinite(parsed) && parsed > 0) {
@@ -457,7 +458,7 @@ Returns at most ${MAX_RENDER_PAGES} pages per call — each rendered image can b
             }
             tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-render-'));
             const pagePrefix = path.join(tmpDir, 'page');
-            const rasterCmd = `${shellSingleQuote(pdftoppmBin)} -r ${dpi} -png -f ${firstPage} -l ${effectiveLast} ${shellSingleQuote(fileUri.fsPath)} ${shellSingleQuote(pagePrefix)}`;
+            const rasterCmd = `${shellSingleQuote(pdftoppmBin)} -r ${dpi} -png -f ${firstPage} -l ${effectiveLast} ${shellSingleQuote(shellSafeInputPath(fileUri.fsPath))} ${shellSingleQuote(pagePrefix)}`;
             const rasterResult = await executeShellCommand(terminal, rasterCmd, cwd, Math.min(60000, remainingBudget()));
             const images = fs.readdirSync(tmpDir)
                 .filter(f => f.startsWith('page') && f.endsWith('.png'))
@@ -597,7 +598,7 @@ Output is compacted; a retrieve_output_code handle in the notice gives the full 
                 rasterCmd += ` -f ${firstPage}`;
             }
             rasterCmd += ` -l ${lastPage ?? rasterCappedLast}`;
-            rasterCmd += ` ${shellSingleQuote(fileUri.fsPath)} ${shellSingleQuote(pagePrefix)}`;
+            rasterCmd += ` ${shellSingleQuote(shellSafeInputPath(fileUri.fsPath))} ${shellSingleQuote(pagePrefix)}`;
             const rasterResult = await executeShellCommand(terminal, rasterCmd, cwd, Math.max(1000, Math.min(timeoutMs, 60000, budgetLeft())));
             if (rasterResult.exitCode !== 0 && rasterResult.exitCode !== 124) {
                 return { content: [{ type: 'text' as const, text: `pdftoppm failed:\n${rasterResult.output}` }], isError: true };

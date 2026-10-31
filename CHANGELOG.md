@@ -4,6 +4,33 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.38-twilight.3] - 2026-10-31
+### Security
+
+- **No more command injection through the read-only git tools.** `get_file_history_code` pasted `since`, `until`, `author`, `grep` and the path into a terminal command between double quotes, and `get_blame_code` did the same with the path; PowerShell runs `$(...)` inside double quotes, so a read-only key could execute commands. Every git tool now runs git directly (`execFile`, arguments as an array, no shell), `list_conflicts_code` reads files with `fs` instead of `cat`, and a client revision starting with `-` is refused.
+- **`/invoke` and `/__mcp_cluster/*` are closed to the tunnel.** These routes run tools without the MCP scope check and only exist for other VS Code windows on the same machine. Tailscale Funnel relays internet traffic from 127.0.0.1, so they now answer 404 unless the socket is loopback, the Host header is a loopback address and no proxy header (`X-Forwarded-*`, `Forwarded`, `Tailscale-*`) is present; they also require the master credential (a scoped `mcpk_` key or an OAuth token is refused) and `/invoke` re-checks scopes.
+- **`auth.mode = "none"` serves this machine only.** A relayed or remote request gets 403 instead of reaching the server without authentication.
+- **Security settings are machine-scoped.** `port`, `host`, `auth.*`, `security.sandbox.*` and the browser launch/confirmation settings can no longer be overridden by a project's `.vscode/settings.json`. Set them in your user settings; a value left in a workspace file is now ignored.
+- **Shell quoting safe in bash and PowerShell.** The OCR and skill packaging tools used bash escaping (`'\''`), which PowerShell does not understand. Arguments are now single-quoted only when they hold no quote; an input PDF whose name contains an apostrophe is processed through a temporary copy with a plain name.
+
+## [0.20.38-twilight.2] - 2026-10-31
+### Added
+
+- **Your own Chrome, or a profile that keeps its logins** (`vscode-mcp-server.browser.profile`): `dedicated` (default, separate window, cookies kept between sessions, folder set by `browser.userDataDir`), `myChrome` (attaches to the Chrome you already have open through chrome-devtools-mcp `--autoConnect`: your tabs, cookies and logins; Chrome 144+, remote debugging switched on once at chrome://inspect/#remote-debugging) or `isolated` (throwaway). Replaces `browser.isolated`.
+- **No more "controlled by automated test software" bar** (`browser.hideAutomationBanner`, on by default): Chrome does not let that text be changed, so the switch that shows it (`--enable-automation`) is dropped when the extension launches Chrome.
+- **Screenshots the user can see**: Mammouth never displays an image block returned by a tool, so each screenshot is also served at an expiring, unguessable URL on this server (`/browser-shot/<128-bit id>`, public on purpose since an `<img>` sends no key, 30 min, 20 kept) and the result tells the model to paste `![screenshot](url)` in its reply.
+
+### Fixed
+
+- **Guessed browser tool names now work.** A live Mammouth session called `browser_tabs` and `browser_take_screenshot` (Playwright MCP names) through the relay and got "No registered tool". The relay and the strict tools/call path now translate Playwright-style names and raw Chrome DevTools MCP names (`take_screenshot`, `list_pages`...) to the real tools, run them, and add a note naming the right tool. Unknown names also get the three closest catalog names.
+
+## [0.20.38-twilight.1] - 2026-10-31
+### Added
+
+- **Browser tools through Chrome DevTools MCP.** The extension starts `chrome-devtools-mcp` (pinned 1.12.0, via npx) on the first browser call and relays it on the same `/mcp` endpoint, so Mammouth drives Chrome through its existing connector and Tailscale funnel. Seven tools: `browser_open_code`, `browser_snapshot_code`, `browser_screenshot_code`, `browser_click_code`, `browser_fill_code`, `browser_close_code`, and `browser_call_code` for every other upstream tool (`tool="list"` lists them). One shared browser per VS Code window, dedicated Chrome profile, auto-close after 30 idle minutes, new `MCP Server: Close Browser` command and `vscode-mcp-server.browser.*` settings.
+- **Safety for a public endpoint**: browser tools refuse to run with `auth.mode=none`, need a full-access key (`net:out`), block `file://` navigation unless `browser.allowFileUrls`, and wait for a modal confirmation in VS Code before sensitive calls (script evaluation, uploads, local file paths, injected scripts, non-web URLs; `browser.confirm=actions` extends it to every page action). Unanswered dialogs are refused after two minutes.
+- Guide v25 teaches the snapshot → uid → click/fill loop. Tool count 93 → 100; tools/list payload ceiling raised deliberately to 27500 tok (measured 27464).
+
 ## [0.20.36-twilight.3] - 2026-10-11
 ### Fixed
 

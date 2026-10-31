@@ -1,32 +1,24 @@
-import * as vscode from 'vscode';
 import { z } from 'zod';
 import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { executeShellCommand } from './shell-tools';
+import * as fs from 'fs';
+import * as nodePath from 'path';
+import { runGit, gitRevision } from '../utils/git-exec';
 
 function getWorkspaceRoot(ref?: string): string {
 	return resolveWorkspaceFolder(ref).uri.fsPath;
 }
 
-function getTerminal(): vscode.Terminal {
-	const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('MCP Git');
-	return terminal;
-}
-
-async function runGitCommand(command: string, cwd?: string): Promise<{ output: string; exitCode: number }> {
-	const terminal = getTerminal();
+// Git runs without a shell (execFile, arguments as an array): client input
+// such as a path or a stash message can never be read as shell syntax.
+async function runGitCommand(args: string[], cwd?: string): Promise<{ output: string; exitCode: number }> {
 	const workspaceRoot = cwd || getWorkspaceRoot();
 	try {
-
-		return await executeShellCommand(terminal, command, workspaceRoot, 30000);
+		return await runGit(args, workspaceRoot, 30000);
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		return { output: errorMessage, exitCode: 1 };
 	}
-}
-
-function shellSingleQuote(value: string): string {
-	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function generateCommitMessage(diffOutput: string): string {
@@ -97,33 +89,33 @@ Auto-stages all changes by default. Use amend=true to modify last commit.`, {
 	}, async ({ message, addAll = true, amend = false, noVerify = false, workspace }) => {
 		try {
 			const cwd = getWorkspaceRoot(workspace);
-			const repoCheck = await runGitCommand('git rev-parse --git-dir', cwd);
+			const repoCheck = await runGitCommand(['rev-parse', '--git-dir'], cwd);
 			if (repoCheck.exitCode !== 0) {
 				throw new Error('Not a git repository');
 			}
-			const status = await runGitCommand('git status --porcelain', cwd);
+			const status = await runGitCommand(['status', '--porcelain'], cwd);
 			if (!status.output.trim() && !amend) {
 				return { content: [{ type: 'text', text: 'No changes to commit. Working tree clean.' }] };
 			}
 			if (addAll && !amend) {
-				await runGitCommand('git add -A', cwd);
+				await runGitCommand(['add', '-A'], cwd);
 			}
 			let commitMessage = message;
 			if (!commitMessage && !amend) {
-				const diff = await runGitCommand('git diff --cached --name-status', cwd);
+				const diff = await runGitCommand(['diff', '--cached', '--name-status'], cwd);
 				commitMessage = generateCommitMessage(diff.output);
 			}
 			if (!commitMessage) {
 				commitMessage = 'chore: update';
 			}
-			let commitCmd = 'git commit';
+			const commitCmd = ['commit'];
 			if (amend) {
-				commitCmd += ' --amend --no-edit';
+				commitCmd.push('--amend', '--no-edit');
 			} else {
-				commitCmd += ` -m ${shellSingleQuote(commitMessage)}`;
+				commitCmd.push('-m', commitMessage);
 			}
 			if (noVerify) {
-				commitCmd += ' --no-verify';
+				commitCmd.push('--no-verify');
 			}
 			const result = await runGitCommand(commitCmd, cwd);
 			return {
@@ -152,8 +144,8 @@ Creates branch from current HEAD by default. Use 'from' to specify source. Set c
 		try {
 			const cwd = getWorkspaceRoot(workspace);
 			if (listOnly) {
-				const local = await runGitCommand('git branch', cwd);
-				const remote = await runGitCommand('git branch -r', cwd);
+				const local = await runGitCommand(['branch'], cwd);
+				const remote = await runGitCommand(['branch', '-r'], cwd);
 				return {
 					content: [{
 						type: 'text',
@@ -165,10 +157,10 @@ Creates branch from current HEAD by default. Use 'from' to specify source. Set c
 			if (slugifiedName !== name) {
 				console.log(`[create_branch_code] Slugified branch name: ${name} -> ${slugifiedName}`);
 			}
-			const exists = await runGitCommand(`git rev-parse --verify "${slugifiedName}"`, cwd);
+			const exists = await runGitCommand(['rev-parse', '--verify', slugifiedName], cwd);
 			if (exists.exitCode === 0) {
 				if (checkout) {
-					const switchResult = await runGitCommand(`git checkout "${slugifiedName}"`, cwd);
+					const switchResult = await runGitCommand(['checkout', slugifiedName], cwd);
 					return {
 						content: [{
 							type: 'text',
@@ -184,13 +176,12 @@ Creates branch from current HEAD by default. Use 'from' to specify source. Set c
 				};
 			}
 			const source = from || 'HEAD';
-			let createCmd = `git branch "${slugifiedName}" ${shellSingleQuote(source)}`;
-			const createResult = await runGitCommand(createCmd, cwd);
+			const createResult = await runGitCommand(['branch', slugifiedName, gitRevision(source)], cwd);
 			if (createResult.exitCode !== 0) {
 				throw new Error(`Failed to create branch: ${createResult.output}`);
 			}
 			if (checkout) {
-				const switchResult = await runGitCommand(`git checkout "${slugifiedName}"`, cwd);
+				const switchResult = await runGitCommand(['checkout', slugifiedName], cwd);
 				return {
 					content: [{
 						type: 'text',
@@ -223,15 +214,15 @@ Supports line ranges. Returns author, commit hash, date, and line content.`, {
 	}, async ({ path, startLine, endLine, format = 'text', workspace }) => {
 		try {
 			const target = resolveRelativeToolPath(path, workspace);
-			const fileCheck = await runGitCommand(`git ls-files "${target.gitPath}"`, target.root);
+			const fileCheck = await runGitCommand(['ls-files', '--', target.gitPath], target.root);
 			if (fileCheck.exitCode !== 0 || !fileCheck.output.trim()) {
 				throw new Error(`File not tracked by git: ${path}`);
 			}
-			let blameCmd = `git blame --line-porcelain "${target.gitPath}"`;
+			let blameCmd = ['blame', '--line-porcelain', '--', target.gitPath];
 			if (startLine && endLine) {
-				blameCmd = `git blame -L ${startLine},${endLine} --line-porcelain "${target.gitPath}"`;
+				blameCmd = ['blame', '-L', `${Math.trunc(startLine)},${Math.trunc(endLine)}`, '--line-porcelain', '--', target.gitPath];
 			} else if (startLine) {
-				blameCmd = `git blame -L ${startLine},${startLine} --line-porcelain "${target.gitPath}"`;
+				blameCmd = ['blame', '-L', `${Math.trunc(startLine)},${Math.trunc(startLine)}`, '--line-porcelain', '--', target.gitPath];
 			}
 			const result = await runGitCommand(blameCmd, target.root);
 			if (result.exitCode !== 0) {
@@ -296,7 +287,7 @@ Shows conflicted files and the actual conflict sections (<<<<<<< HEAD ... >>>>>>
 	}, async ({ workspace }) => {
 		try {
 			const cwd = getWorkspaceRoot(workspace);
-			const diffCheck = await runGitCommand('git diff --name-only --diff-filter=U', cwd);
+			const diffCheck = await runGitCommand(['diff', '--name-only', '--diff-filter=U'], cwd);
 			let conflictedFiles = diffCheck.output.split('\n').map(l => l.trim()).filter(l => l && !l.includes(' '));
 			if (conflictedFiles.length === 0) {
 				return {
@@ -306,7 +297,12 @@ Shows conflicted files and the actual conflict sections (<<<<<<< HEAD ... >>>>>>
 			let output = `Found ${conflictedFiles.length} conflicted file(s):\n\n`;
 			for (const file of conflictedFiles) {
 				output += `=== ${file} ===\n`;
-				const fileContent = await runGitCommand(`cat "${file}"`, cwd);
+				let fileContent: { output: string; exitCode: number };
+				try {
+					fileContent = { output: fs.readFileSync(nodePath.join(cwd, file), 'utf-8'), exitCode: 0 };
+				} catch (readError) {
+					fileContent = { output: readError instanceof Error ? readError.message : String(readError), exitCode: 1 };
+				}
 				const lines = fileContent.output.split('\n');
 				let inConflict = false;
 				let conflictSection = '';
@@ -351,7 +347,7 @@ Default action: push with auto-generated WIP message.`, {
 			const cwd = getWorkspaceRoot(workspace);
 			switch (action) {
 				case 'list': {
-					const result = await runGitCommand('git stash list', cwd);
+					const result = await runGitCommand(['stash', 'list'], cwd);
 					return {
 						content: [{
 							type: 'text',
@@ -360,7 +356,7 @@ Default action: push with auto-generated WIP message.`, {
 					};
 				}
 				case 'show': {
-					const result = await runGitCommand(`git stash show -p 'stash@{${index}}'`, cwd);
+					const result = await runGitCommand(['stash', 'show', '-p', `stash@{${Math.trunc(index)}}`], cwd);
 					return {
 						content: [{
 							type: 'text',
@@ -369,7 +365,7 @@ Default action: push with auto-generated WIP message.`, {
 					};
 				}
 				case 'push': {
-					const status = await runGitCommand('git status --porcelain', cwd);
+					const status = await runGitCommand(['status', '--porcelain'], cwd);
 					if (!status.output.trim() && !includeUntracked) {
 						return {
 							content: [{ type: 'text', text: 'No changes to stash. Working tree clean.' }]
@@ -377,13 +373,13 @@ Default action: push with auto-generated WIP message.`, {
 					}
 					let stashMsg = message;
 					if (!stashMsg) {
-						const branch = await runGitCommand('git branch --show-current', cwd);
-						const commit = await runGitCommand('git log -1 --pretty=format:"%h %s"', cwd);
+						const branch = await runGitCommand(['branch', '--show-current'], cwd);
+						const commit = await runGitCommand(['log', '-1', '--pretty=format:%h %s'], cwd);
 						stashMsg = `WIP on ${branch.output.trim()}: ${commit.output.trim()}`;
 					}
-					let pushCmd = `git stash push -m ${shellSingleQuote(stashMsg)}`;
+					const pushCmd = ['stash', 'push', '-m', stashMsg];
 					if (includeUntracked) {
-						pushCmd += ' -u';
+						pushCmd.push('-u');
 					}
 					const result = await runGitCommand(pushCmd, cwd);
 					return {
@@ -394,7 +390,7 @@ Default action: push with auto-generated WIP message.`, {
 					};
 				}
 				case 'pop': {
-					const result = await runGitCommand(`git stash pop 'stash@{${index}}'`, cwd);
+					const result = await runGitCommand(['stash', 'pop', `stash@{${Math.trunc(index)}}`], cwd);
 					return {
 						content: [{
 							type: 'text',
@@ -403,7 +399,7 @@ Default action: push with auto-generated WIP message.`, {
 					};
 				}
 				case 'apply': {
-					const result = await runGitCommand(`git stash apply 'stash@{${index}}'`, cwd);
+					const result = await runGitCommand(['stash', 'apply', `stash@{${Math.trunc(index)}}`], cwd);
 					return {
 						content: [{
 							type: 'text',
@@ -412,7 +408,7 @@ Default action: push with auto-generated WIP message.`, {
 					};
 				}
 				case 'drop': {
-					const result = await runGitCommand(`git stash drop 'stash@{${index}}'`, cwd);
+					const result = await runGitCommand(['stash', 'drop', `stash@{${Math.trunc(index)}}`], cwd);
 					return {
 						content: [{
 							type: 'text',

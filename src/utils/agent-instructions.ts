@@ -38,7 +38,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS: string = [
         'APPROVALS: [RO] tools are auto-approved - call them freely. [MUT] and [DST] may require manual approval - for multi-step modifications present a short plan first, then execute it.'
 ].join('\n');
 
-export const AGENT_INSTRUCTIONS_VERSION = '21';
+export const AGENT_INSTRUCTIONS_VERSION = '25';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -72,15 +72,16 @@ const WORKFLOW_RULES = [
         'You work in a VS Code workspace via the "vscode-mcp-server" MCP server.',
         '',
         'NON-NEGOTIABLE WORKFLOW:',
-        '1. ONE session_bootstrap_code() first — memory + layout + skills + guide; re-call when rejoining mid-conversation.',
-        '2. Explore: list_files_code (never recursive=true on the root), read_file_code with ranges; get_document_symbols_code to outline, search_symbols_code to locate, get_symbol_definition_code to define.',
+                '1. EVERY user message opens with session_bootstrap_code() — default mode="compact": a light re-anchor (workspace state only). Escalate ONLY if the task needs more: mode="full" for memory + layout + skills + guide, subfolder="<topic dir>" to scope a topic. Small one-off tasks stay compact.',
+        '2. Explore: list_files_code (root: never recursive=true), read_file_code with ranges; get_document_symbols_code to outline, search_symbols_code to locate and define.',
         '3. Search text with search_workspace_code — NEVER shell commands for reading or searching files.',
-        '4. Edit with edit_file_code (exact-text match, refuses ambiguity); create_file_code for new files/rewrites, replace_lines_code to insert/delete at a line, rename_symbol_code for renames.',
+        '4. Edit with edit_file_code (exact match, refuses ambiguity); create_file_code for new files; replace_lines_code to insert/delete at a line; rename_symbol_code for renames.',
         '5. After EVERY change batch run get_diagnostics_code(). Before ANY commit run find_secrets_code() then security_scan_code().',
-        '6. Builds/tests: run_task_code / run_tests_code / build_project_code. execute_shell_command_code is LAST RESORT (~27s max); longer runs via background_task_code, poll action="output".',
-        '7. End finished work with ONE session_end_code(summary, …); handoff_code at mid-task switches; memory_save_code for durable facts.',
+        '6. Builds/tests: run_task_code / run_tests_code / build_project_code. Shell is LAST RESORT (~27s max); long runs: background_task_code, poll action="output".',
+        '7. Web pages: browser_open_code(url) -> browser_snapshot_code() for uids -> browser_click_code / browser_fill_code -> snapshot again; browser_screenshot_code to see it (to show it to the user, paste the ![screenshot](url) it returns into your reply); everything else via browser_call_code(tool, args), tool="list" for the menu. Sensitive browser calls wait for the user to approve in VS Code.',
+        '8. Never stop with work pending: handoff_code(inProgress, lastTool, nextStep) first, then report what remains; close finished work with ONE session_end_code(summary, …).',
         '',
-        'TOOL BUDGET: your client may expose only a subset of the tools below, changing between requests — sometimes session_bootstrap_code alone. Every tool in the index IS callable by name even when unlisted, through the bootstrap relay: session_bootstrap_code(action="call", tool="<name>", args={...}). Fetch a card when unsure: lookup_tool_code(query="<task>"), directly or via the relay. Never claim a tool is unavailable without trying the relay; never silently skip the step. Never list a given folder; never re-read a file you just wrote. Chain shell steps into one call (cmd1 && cmd2).',
+        'TOOL BUDGET: some tools may be unlisted but every one IS callable through the relay: session_bootstrap_code(action="call", tool="<name>", args={...}). Fetch a card when unsure: lookup_tool_code(query="<task>"). Never claim a tool is unavailable without trying the relay. Never list a given folder; never re-read a file you just wrote. Chain shell steps (cmd1 && cmd2).',
         '',
         `TOOL INDEX (${TOOL_CATALOG_SIZE} tools — full card via lookup_tool_code(query)):`,
         compactCatalogIndex(),
@@ -104,7 +105,7 @@ export function resolveAgentInstructionsOverride(): string | undefined {
 }
 
 export function registerAgentInstructionsTool(server: McpServer, getOverride?: () => string | undefined): void {
-    server.tool('get_agent_instructions_code', `Loads the vscode-mcp-server agent guide: the workflow rules plus the compact TOOL INDEX covering all ${TOOL_CATALOG_SIZE} tools (names grouped by section). Full tool cards come from ONE lookup_tool_code(query) call. Read-only, auto-approved, returns text and touches nothing. Call it once at the start of a conversation when session_bootstrap_code() is not in your callable list. Re-run after every server update.`, {}, async () => {
+    server.tool('get_agent_instructions_code', `Returns the agent guide: workflow rules + compact TOOL INDEX of all ${TOOL_CATALOG_SIZE} tools; full cards via ONE lookup_tool_code(query). Read-only. The way in when session_bootstrap_code is not in your callable list: call once at conversation start; re-run after a server update.`, {}, async () => {
         const override = getOverride ? getOverride() : undefined;
         const text = resolveAgentInstructions(override);
         return { content: [{ type: 'text', text: `${text}\n\n[vscode-mcp-server agent guide v${AGENT_INSTRUCTIONS_VERSION}]` }] };
@@ -112,7 +113,7 @@ export function registerAgentInstructionsTool(server: McpServer, getOverride?: (
 }
 
 export function registerLookupTool(server: McpServer): void {
-    server.tool('lookup_tool_code', `Returns the full cards (exact signature, parameters, RO/MUT/DST approval class, keywords) of the tools that match a task description, in English or French — e.g. "read the PDF", "run the tests then commit", "find where this function is defined". The compact TOOL INDEX in the guide gives one line per tool only; call this instead of guessing a signature. Read-only, auto-approved, touches nothing.`, {
+    server.tool('lookup_tool_code', `Returns the full cards (signature, params, RO/MUT/DST class, keywords) of tools matching a task, English or French. Call this instead of guessing a signature. Read-only, auto-approved.`, {
         query: z.string().describe('The task, in your own words. Use several targeted keywords; avoid full sentences.'),
         limit: z.number().optional().default(8).describe('Max cards returned, 1-20, default 8.')
     }, async ({ query, limit = 8 }): Promise<CallToolResult> => {

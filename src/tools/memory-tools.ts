@@ -10,7 +10,9 @@ import {
         clip,
         clipLog,
         projectLogPath,
+        projectMemoryPath,
         projectStatePath,
+        SUBFOLDER_PARAM_DESCRIPTION,
         readTextFile,
         renderState,
         tailLog,
@@ -22,14 +24,8 @@ import {
 const MAMMOUTH_DIR = path.join(os.homedir(), 'Mammouth');
 const GLOBAL_MEMORY_FILE = path.join(MAMMOUTH_DIR, 'MEMORY.md');
 
-function getProjectMemoryPath(ref?: string): string | undefined {
-
-        if (listWorkspaceFolders().length === 0) {
-                return undefined;
-        }
-        const folder = resolveWorkspaceFolder(ref);
-        const sanitizedName = folder.name.replace(/[^a-zA-Z0-9_-]/g, '_');
-        return path.join(folder.uri.fsPath, `${sanitizedName}_MEMORY.md`);
+function getProjectMemoryPath(ref?: string, subfolder?: string): string | undefined {
+        return projectMemoryPath(ref, subfolder);
 }
 
 async function ensureDirectoryExists(dirPath: string): Promise<void> {
@@ -173,24 +169,23 @@ function searchMemoryContent(content: string, query: string): Array<{ section: s
         return results;
 }
 
-export async function loadAllMemory(workspace?: string): Promise<{ global: string | null; project: string | null; projectPath: string | undefined }> {
+export async function loadAllMemory(workspace?: string, subfolder?: string): Promise<{ global: string | null; project: string | null; projectPath: string | undefined }> {
         const globalMemory = await readMemoryFile(GLOBAL_MEMORY_FILE);
-        const projectPath = getProjectMemoryPath(workspace);
+        const projectPath = getProjectMemoryPath(workspace, subfolder);
         const projectMemory = projectPath ? await readMemoryFile(projectPath) : null;
         return { global: globalMemory, project: projectMemory, projectPath };
 }
 
 export function registerMemoryTools(server: McpServer): void {
-        server.tool('memory_load_code', `Loads the persistent memory system. Reads global memory (~/Mammouth/MEMORY.md), project memory ({workspaceName}_MEMORY.md in workspace root) and the workspace state snapshot.
+        server.tool('memory_load_code', `Loads persistent memory: global (~/Mammouth/MEMORY.md), project ({workspaceName}_MEMORY.md) and the workspace state snapshot. WHEN TO USE: every user message when session_bootstrap_code is not callable — no context survives between messages. Prefer session_bootstrap_code (context + layout + skills).
 
-WHEN TO USE: ONCE per conversation, on the very first user message only — not before every reply. Skip it when memory is already loaded in the current conversation, even if several turns have passed. Prefer session_bootstrap_code, which returns the same context plus layout and skills in one call.
-
-Long files are trimmed to a budget and the tool reports how much was cut. Pass full=true to get everything verbatim.`, {
+Long files are trimmed to a budget; pass full=true for everything verbatim.`, {
                 full: z.boolean().optional().default(false).describe('Return memory files verbatim instead of trimming them to a budget'),
+                subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-        }, async ({ full = false, workspace }) => {
-                const { global, project, projectPath } = await loadAllMemory(workspace);
-                const statePath = projectStatePath(workspace);
+        }, async ({ full = false, subfolder, workspace }) => {
+                const { global, project, projectPath } = await loadAllMemory(workspace, subfolder);
+                const statePath = projectStatePath(workspace, subfolder);
                 const state = statePath ? await readTextFile(statePath) : null;
                 const budget = (text: string): string => full ? `${text}\n` : `${clip(text, BOOTSTRAP_MEMORY_CHARS)}\n`;
                 let result = '# 🧠 Memory Loaded\n\n';
@@ -218,19 +213,19 @@ Long files are trimmed to a budget and the tool reports how much was cut. Pass f
                 return { content: [{ type: 'text', text: result }] };
         });
 
-        server.tool('memory_save_code', `Saves an entry to memory. Appends a dated entry under a section header in either global or project memory.
+        server.tool('memory_save_code', `Saves a dated entry under a section header in global or project memory.
 
-WHEN TO USE: Remember user preferences, project decisions, snippets, or any context that should persist across sessions.
+WHEN TO USE: remember user preferences, project decisions, snippets, or anything that must persist across sessions.
 
-Scope "global" → ~/Mammouth/MEMORY.md (user identity, preferences, workflow)
-Scope "project" → {workspaceName}_MEMORY.md in workspace root (project rules, decisions, context)`, {
+Scope "global" → ~/Mammouth/MEMORY.md; scope "project" → {workspaceName}_MEMORY.md, or <subfolder>/.mammouth/MEMORY.md when subfolder is passed.`, {
                 section: z.string().describe('Section header (e.g., "Préférences utilisateur", "Contexte projet", "Règles personnelles")'),
                 entry: z.string().describe('The fact/rule/preference to remember'),
                 scope: z.enum(['global', 'project']).optional().default('project').describe('Which memory to save to: "global" for ~/Mammouth/MEMORY.md, "project" for workspace memory'),
                 sectionLevel: z.number().min(1).max(6).optional().default(2).describe('Markdown header level for the section (default: 2 for ##)'),
+                subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-        }, async ({ section, entry, scope = 'project', sectionLevel = 2, workspace }) => {
-                const targetPath = scope === 'global' ? GLOBAL_MEMORY_FILE : getProjectMemoryPath(workspace);
+        }, async ({ section, entry, scope = 'project', sectionLevel = 2, subfolder, workspace }) => {
+                const targetPath = scope === 'global' ? GLOBAL_MEMORY_FILE : getProjectMemoryPath(workspace, subfolder);
                 if (!targetPath) {
                         throw new Error('No workspace open — cannot save to project memory. Use scope="global" or open a workspace.');
                 }
@@ -252,9 +247,10 @@ Scope "project" → {workspaceName}_MEMORY.md in workspace root (project rules, 
 WHEN TO USE: Find previously saved preferences, decisions, or snippets without reading entire memory files.`, {
                 query: z.string().describe('Search term to find in memory entries'),
                 scope: z.enum(['global', 'project', 'both']).optional().default('both').describe('Which memory to search: "global", "project", or "both"'),
+                subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-        }, async ({ query, scope = 'both', workspace }) => {
-                const { global, project, projectPath } = await loadAllMemory(workspace);
+        }, async ({ query, scope = 'both', subfolder, workspace }) => {
+                const { global, project, projectPath } = await loadAllMemory(workspace, subfolder);
                 const results: Array<{ source: string; section: string; line: string; lineNumber: number }> = [];
                 if ((scope === 'global' || scope === 'both') && global) {
                         const globalResults = searchMemoryContent(global, query);
@@ -287,9 +283,10 @@ Provide entry to remove a specific bullet. Omit entry to remove the entire secti
                 section: z.string().describe('Section header to clear from'),
                 entry: z.string().optional().describe('Specific entry text to remove (omit to delete entire section)'),
                 scope: z.enum(['global', 'project']).optional().default('project').describe('Which memory to clear from'),
+                subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-        }, async ({ section, entry, scope = 'project', workspace }) => {
-                const targetPath = scope === 'global' ? GLOBAL_MEMORY_FILE : getProjectMemoryPath(workspace);
+        }, async ({ section, entry, scope = 'project', subfolder, workspace }) => {
+                const targetPath = scope === 'global' ? GLOBAL_MEMORY_FILE : getProjectMemoryPath(workspace, subfolder);
                 if (!targetPath) {
                         throw new Error('No workspace open — cannot clear project memory. Use scope="global" or open a workspace.');
                 }
@@ -322,9 +319,10 @@ Actions: read (default) prints it; write {version, branch, status, inProgress, n
                 status: z.string().optional().describe('write: short overall status, e.g. "tests green", "2 files failing"'),
                 inProgress: z.string().optional().describe('write: what is currently being worked on'),
                 nextStep: z.string().optional().describe('write: the single next action to take on resuming'),
+                subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-        }, async ({ action = 'read', version, branch, status, inProgress, nextStep, workspace }) => {
-                const target = projectStatePath(workspace);
+        }, async ({ action = 'read', version, branch, status, inProgress, nextStep, subfolder, workspace }) => {
+                const target = projectStatePath(workspace, subfolder);
                 if (!target) {
                         throw new Error('No workspace open — workspace state needs an open folder.');
                 }
@@ -338,23 +336,22 @@ Actions: read (default) prints it; write {version, branch, status, inProgress, n
                         return { content: [{ type: 'text', text: `No workspace state yet at ${target}. Use workspace_state_code(action="write", …) to record where the work stands.` }] };
                 }
                 return { content: [{ type: 'text', text: `# Workspace state (${target})\n\n${existing}` }] };
-        });
+        });        server.tool('session_end_code', `Closes a work session so the next conversation resumes instead of starting over.
 
-        server.tool('session_end_code', `Closes a work session: what was done, what remains, the next step — so the next conversation resumes instead of starting over.
+WHEN TO USE: as the LAST tool call of a finished, handed-off or abandoned unit of work — not every reply.
 
-WHEN TO USE: as the LAST tool call of a task, right before reporting completion. Not every reply — only a finished, handed-off or abandoned unit of work.
-
-Writes the state snapshot (version, branch, in progress, next step) that session_bootstrap_code loads next time, and appends a dated summary to the workspace log: intent, decisions and why, deliberate skips.`, {
+Writes the state snapshot (version, branch, in progress, next step) that session_bootstrap_code loads next time, and appends a dated summary to the workspace log.`, {
                 summary: z.string().describe('What was done, what was decided and why, what was deliberately skipped. Concrete, not generic.'),
                 version: z.string().optional().describe('Version or build identifier this session was working on'),
                 branch: z.string().optional().describe('Current git branch or tag'),
                 status: z.string().optional().describe('Short overall status at close, e.g. "builds clean, 1 test skipped"'),
                 inProgress: z.string().optional().describe('Anything still unfinished at close'),
                 nextStep: z.string().optional().describe('The single next action for whoever resumes this'),
+                subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-        }, async ({ summary, version, branch, status, inProgress, nextStep, workspace }) => {
-                const stateTarget = projectStatePath(workspace);
-                const logTarget = projectLogPath(workspace);
+        }, async ({ summary, version, branch, status, inProgress, nextStep, subfolder, workspace }) => {
+                const stateTarget = projectStatePath(workspace, subfolder);
+                const logTarget = projectLogPath(workspace, subfolder);
                 if (!stateTarget || !logTarget) {
                         throw new Error('No workspace open — session_end_code needs an open folder.');
                 }
@@ -377,19 +374,18 @@ Writes the state snapshot (version, branch, in progress, next step) that session
                 };
         });
 
-        server.tool('handoff_code', `Bookmark the current handoff state without a session close: what you are doing, the tool that last moved it, the literal next step.
+        server.tool('handoff_code', `Bookmark the resume point without a session close: what you are doing, the tool that last moved it, the literal next step.
 
-WHEN TO USE: when the work context materially changes (model switch, direction change, long pause) — not every reply. session_end_code owns the close, this owns the resume point. Loaded by session_bootstrap_code.
-
-Omitted fields are filled from the prior state, so restate only what changed.`, {
+WHEN TO USE: when the work context materially changes (model switch, direction change, long pause) — not every reply. Omitted fields are filled from the prior state, so restate only what changed.`, {
                 action: z.enum(['write', 'read']).optional().default('write').describe('write merges each provided field over the current state; read prints the file'),
                 inProgress: z.string().optional().describe('what is being worked on right now'),
-                lastTool: z.string().optional().describe('the tool that last changed this state, persisted as its own line; when nextStep is omitted it also becomes the next step'),
+                lastTool: z.string().optional().describe('the tool that last changed this state; becomes the next step when nextStep is omitted'),
                 nextStep: z.string().optional().describe('the single next action to take on resume'),
                 status: z.string().optional().describe('short status like "2 tests failing"'),
+                subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-        }, async ({ action = 'write', inProgress, lastTool, nextStep, status, workspace }) => {
-                const target = projectStatePath(workspace);
+        }, async ({ action = 'write', inProgress, lastTool, nextStep, status, subfolder, workspace }) => {
+                const target = projectStatePath(workspace, subfolder);
                 if (!target) {
                         throw new Error('No workspace open — handoff_code needs an open folder.');
                 }
@@ -416,9 +412,10 @@ Omitted fields are filled from the prior state, so restate only what changed.`, 
 
 WHEN TO USE: to recover detail that workspace_state_code does not carry — the last few sessions, how a problem was approached before, or why a file looks the way it does. For a keyword lookup prefer memory_search_code.`, {
                 count: z.number().int().min(1).max(20).optional().default(5).describe('How many recent entries to return (default 5)'),
+                subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
                 workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
-        }, async ({ count = 5, workspace }) => {
-                const target = projectLogPath(workspace);
+        }, async ({ count = 5, subfolder, workspace }) => {
+                const target = projectLogPath(workspace, subfolder);
                 if (!target) {
                         throw new Error('No workspace open — workspace log needs an open folder.');
                 }

@@ -102,6 +102,13 @@ export const TOOL_HINTS: Record<string, ToolHints> = {
     scope_keys_code: MUT,
     secret_rotate_code: MUT,
     test_api_endpoint_code: NET_MUT,
+    browser_open_code: NET_MUT,
+    browser_snapshot_code: NET_RO,
+    browser_screenshot_code: NET_RO,
+    browser_click_code: NET_MUT,
+    browser_fill_code: NET_MUT,
+    browser_close_code: MUT,
+    browser_call_code: { ...DST, openWorldHint: true },
     ocr_pdf_code: MUT,
 
     execute_shell_command_code: DST,

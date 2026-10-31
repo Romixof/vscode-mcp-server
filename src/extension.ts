@@ -15,6 +15,7 @@ import { refreshApiKeyCache } from './server';
 import { readAuthConfig } from './auth';
 import { setTwilightConfigSource } from './server';
 import { resolveAgentInstructions } from './utils/agent-instructions';
+import { disposeBrowserBridge } from './tools/browser-tools';
 
 export { MCPServer };
 
@@ -52,7 +53,8 @@ function getToolConfiguration(): ToolConfiguration {
         workflow: enabledTools.workflow ?? true,
         advanced: enabledTools.advanced ?? true,
         skills: enabledTools.skills ?? true,
-        ocr: enabledTools.ocr ?? true
+        ocr: enabledTools.ocr ?? true,
+        browser: enabledTools.browser ?? true
     };
 }
 
@@ -435,7 +437,19 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         );
 
+        const closeBrowserCommand = vscode.commands.registerCommand(
+            'vscode-mcp-server.closeBrowser',
+            async () => {
+                await disposeBrowserBridge();
+                vscode.window.showInformationMessage('MCP browser closed. The next browser call from a client starts it again.');
+            }
+        );
+
         const configChangeListener = vscode.workspace.onDidChangeConfiguration(async (event) => {
+            if (event.affectsConfiguration('vscode-mcp-server.browser')) {
+                // Launch flags changed: the next browser call starts a fresh browser with them.
+                await disposeBrowserBridge();
+            }
             const relevant =
                 event.affectsConfiguration('vscode-mcp-server.enabledTools') ||
                 event.affectsConfiguration('vscode-mcp-server.port') ||
@@ -461,6 +475,7 @@ export async function activate(context: vscode.ExtensionContext) {
             openDashboardCommand,
             copyAuthTokenCommand,
             copyAgentInstructionsCommand,
+            closeBrowserCommand,
             copyApiKeyCommand,
             generateApiKeyCommand,
             configChangeListener,
@@ -475,6 +490,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 export async function deactivate() {
     flushJournalNow();
+    await disposeBrowserBridge().catch(() => undefined);
     await saveUsage();
     if (statusBarItem) {
         statusBarItem.dispose();

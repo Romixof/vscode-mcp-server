@@ -13,20 +13,66 @@ function sanitizeName(name: string): string {
         return name.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
-export function projectStatePath(ref?: string): string | undefined {
-        if (listWorkspaceFolders().length === 0) {
+/**
+ * Description reused by every tool that accepts the subfolder parameter —
+ * kept here next to its validation so the text cannot drift from behavior.
+ */
+export const SUBFOLDER_PARAM_DESCRIPTION = 'Topic subfolder: memory/state/log under <subfolder>/.mammouth/.';
+
+/**
+ * Validates and normalizes a per-topic subfolder. Returns undefined when no
+ * subfolder was requested; throws on anything that could escape the workspace
+ * folder (absolute path, "..", empty segments only).
+ */
+export function normalizeSubfolder(subfolder?: string): string | undefined {
+        const raw = (subfolder ?? '').trim();
+        if (!raw) {
                 return undefined;
         }
-        const folder = resolveWorkspaceFolder(ref);
-        return path.join(folder.uri.fsPath, `${sanitizeName(folder.name)}_STATE.md`);
+        const segments = raw.split(/[\\/]+/).map(s => s.trim()).filter(s => s.length > 0 && s !== '.');
+        if (segments.length === 0) {
+                return undefined;
+        }
+        if (raw.startsWith('/') || /^[a-zA-Z]:/.test(raw) || segments.includes('..')) {
+                throw new Error(`Invalid subfolder "${subfolder}" — use a relative path inside the workspace, without "..".`);
+        }
+        return segments.join(path.sep);
 }
 
-export function projectLogPath(ref?: string): string | undefined {
+function projectContextDir(ref?: string, subfolder?: string): string | undefined {
         if (listWorkspaceFolders().length === 0) {
                 return undefined;
         }
         const folder = resolveWorkspaceFolder(ref);
-        return path.join(folder.uri.fsPath, `${sanitizeName(folder.name)}_LOG.md`);
+        const rel = normalizeSubfolder(subfolder);
+        return rel ? path.join(folder.uri.fsPath, rel, '.mammouth') : folder.uri.fsPath;
+}
+
+export function projectStatePath(ref?: string, subfolder?: string): string | undefined {
+        const dir = projectContextDir(ref, subfolder);
+        if (!dir) {
+                return undefined;
+        }
+        const rel = normalizeSubfolder(subfolder);
+        return path.join(dir, rel ? 'STATE.md' : `${sanitizeName(resolveWorkspaceFolder(ref).name)}_STATE.md`);
+}
+
+export function projectLogPath(ref?: string, subfolder?: string): string | undefined {
+        const dir = projectContextDir(ref, subfolder);
+        if (!dir) {
+                return undefined;
+        }
+        const rel = normalizeSubfolder(subfolder);
+        return path.join(dir, rel ? 'LOG.md' : `${sanitizeName(resolveWorkspaceFolder(ref).name)}_LOG.md`);
+}
+
+export function projectMemoryPath(ref?: string, subfolder?: string): string | undefined {
+        const dir = projectContextDir(ref, subfolder);
+        if (!dir) {
+                return undefined;
+        }
+        const rel = normalizeSubfolder(subfolder);
+        return path.join(dir, rel ? 'MEMORY.md' : `${sanitizeName(resolveWorkspaceFolder(ref).name)}_MEMORY.md`);
 }
 
 async function ensureDir(dirPath: string): Promise<void> {

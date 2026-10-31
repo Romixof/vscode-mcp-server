@@ -24,7 +24,7 @@ suite('section flags replaced the boolean fans', () => {
                 const props = await schemaOf('session_bootstrap_code');
                 // action/tool/args carry the v21 relay: a twilight client that lists
                 // only this tool runs every other tool through action="call".
-                assert.deepStrictEqual(Object.keys(props).sort(), ['action', 'args', 'mode', 'sections', 'tool', 'workspace'], `unexpected shape: ${Object.keys(props).join(', ')}`);
+                assert.deepStrictEqual(Object.keys(props).sort(), ['action', 'args', 'mode', 'sections', 'subfolder', 'tool', 'workspace'], `unexpected shape: ${Object.keys(props).join(', ')}`);
                 assert.deepStrictEqual(enumOf(props.sections), ['memory', 'guide', 'skills', 'layout'], 'the enum must name the four parts it replaced');
                 assert.ok(/omit for all four/i.test(props.sections.description || ''), `the default must be stated: ${props.sections.description}`);
         });

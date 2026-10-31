@@ -11,12 +11,16 @@ import { detectRuntimeFacts, runtimeSection } from '../utils/runtime-facts';
 import { loadAllMemory } from './memory-tools';
 import { collectSkillsList } from './skills-tools';
 import { resolveAgentInstructions, AGENT_INSTRUCTIONS_VERSION } from '../utils/agent-instructions';
+import { resolveBrowserAlias, runBrowserAlias } from './browser-tools';
+import { searchCatalog } from '../utils/tool-catalog';
 import {
         BOOTSTRAP_LOG_ENTRIES,
         BOOTSTRAP_MEMORY_CHARS,
         clip,
+        normalizeSubfolder,
         projectLogPath,
         projectStatePath,
+        SUBFOLDER_PARAM_DESCRIPTION,
         readTextFile,
         tailLog
 } from '../utils/workspace-state';
@@ -191,12 +195,37 @@ async function relayToolCall(server: McpServer, tool: string | undefined, args: 
         if (tool === 'session_bootstrap_code') {
                 return err('Do not relay session_bootstrap_code through itself — you are already inside it. Name the tool you actually need, e.g. session_bootstrap_code(action="call", tool="read_file_code", args={...}).');
         }
-        const registered = (server as unknown as { _registeredTools?: Record<string, { handler?: (args: unknown, extra: unknown) => Promise<CallToolResult> }> })._registeredTools;
+        const registered = (server as unknown as { _registeredTools?: Record<string, { handler?: (args: unknown, extra: unknown) => Promise<CallToolResult>; inputSchema?: unknown }> })._registeredTools;
         const entry = registered ? registered[tool] : undefined;
         if (!entry || typeof entry.handler !== 'function') {
-                return err(`No registered tool "${tool}". Check the exact name in the TOOL INDEX, or find it with session_bootstrap_code(action="call", tool="lookup_tool_code", args={"query":"<task>"}).`);
+                // Models guess Playwright-style browser names first; run the
+                // matching browser tool instead of bouncing the call.
+                const steps = resolveBrowserAlias(tool, args);
+                if (steps) {
+                        return runBrowserAlias(tool, steps, (name, stepArgs) => relayToolCall(server, name, stepArgs));
+                }
+                const near = searchCatalog(tool.replace(/_code$/, '').replace(/[_-]+/g, ' '), 3).map(c => c.name);
+                return err(`No registered tool "${tool}".${near.length ? ` Closest: ${near.join(', ')}.` : ''} Check the exact name in the TOOL INDEX, or find it with session_bootstrap_code(action="call", tool="lookup_tool_code", args={"query":"<task>"}).`);
         }
-        return entry.handler(args ?? {}, { signal: new AbortController().signal, requestId: 'relay' })
+        // A normal tools/call validates arguments against the tool's zod schema
+        // (applying defaults) before the handler runs. The relay bypasses that
+        // SDK path, so parse here — otherwise a missing required arg reaches
+        // the handler as undefined and crashes deep in tool code (observed live:
+        // list_files_code without path -> "Cannot read properties of undefined
+        // (reading 'trim')").
+        let payload: Record<string, unknown> = args ?? {};
+        const schema = entry.inputSchema as z.ZodTypeAny | undefined;
+        if (schema && typeof schema.safeParse === 'function') {
+                const parsed = schema.safeParse(args ?? {});
+                if (!parsed.success) {
+                        const issues = parsed.error.issues
+                                .map(i => `${i.path.length ? i.path.join('.') : 'arguments'}: ${i.message}`)
+                                .join('; ');
+                        return err(`Tool "${tool}" rejected its arguments: ${issues}. Fetch the exact signature with session_bootstrap_code(action="call", tool="lookup_tool_code", args={"query":"${tool}"}).`);
+                }
+                payload = parsed.data as Record<string, unknown>;
+        }
+        return entry.handler(payload, { signal: new AbortController().signal, requestId: 'relay' })
                 .then(result => result)
                 .catch(e => err(`Tool "${tool}" failed via relay: ${e instanceof Error ? e.message : String(e)}`));
 }
@@ -205,19 +234,22 @@ export function registerSessionBootstrapTool(server: McpServer, guideOverride?: 
         let deliveredGuide = '';
         server.tool(
                 'session_bootstrap_code',
-                `ONE-CALL session start: memory + layout + skills + the full agent guide in one response.
+                `Context anchor: memory, layout, skills, agent guide.
 
-ONCE per conversation; mode="compact" re-anchors mid-conversation — never repeatedly.
+CALL ON EVERY USER MESSAGE — no context survives between messages. Default mode="compact": state only; escalate to mode="full" just for memory/layout/skills/guide.
 
-RELAY: action="call" runs any tool by name when it is not in your client list — every tool in the index, incl. lookup_tool_code.`, {
+TOPIC: subfolder="<path>" loads THAT topic's memory, state and log.
+
+RELAY: action="call" runs any unlisted tool by name — every tool in the index, incl. lookup_tool_code.`, {
                         action: z.enum(['bootstrap', 'call']).optional().default('bootstrap').describe('bootstrap = default; call = RELAY: run "tool" with "args" even though it is not in your client list.'),
                         tool: z.string().optional().describe('action="call" only: the tool to run'),
                         args: z.record(z.unknown()).optional().describe('action="call" only: the tool arguments'),
                         sections: z.array(z.enum(['memory', 'guide', 'skills', 'layout'])).optional().describe('Parts to return; omit for all four.'),
-                        mode: z.enum(['full', 'compact']).optional().default('full').describe('compact = state snapshot only, for re-anchoring mid-conversation'),
+                        mode: z.enum(['full', 'compact']).optional().default('compact').describe('compact = state only (default); full = the rest, when needed'),
+                        subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
                         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
                 },
-                async ({ action = 'bootstrap', tool, args, sections, mode = 'full', workspace }): Promise<CallToolResult> => {
+                async ({ action = 'bootstrap', tool, args, sections, mode = 'full', subfolder, workspace }): Promise<CallToolResult> => {
                         if (action === 'call') {
                                 return relayToolCall(server, tool, args);
                         }
@@ -228,21 +260,21 @@ RELAY: action="call" runs any tool by name when it is not in your client list �
                         const layout = want('layout');
                         const parts: string[] = ['# 🚀 Session bootstrap'];
                         if (mode === 'compact') {
-                                const statePath = projectStatePath(workspace);
+                                const statePath = projectStatePath(workspace, subfolder);
                                 const state = statePath ? await readTextFile(statePath) : null;
-                                parts.push('\n## 🧭 Workspace state (compact re-anchor)\n');
+                                parts.push(`\n## 🧭 Workspace state (compact re-anchor${subfolder ? `, topic: ${normalizeSubfolder(subfolder)}` : ''})\n`);
                                 // A file that exists but is blank (whitespace-only) reads as '' —
                                 // not null — so a plain ?? would serve an empty section. Treat
                                 // any blank read the same as a missing file.
                                 parts.push(state && state.trim() ? state : '*No workspace state recorded yet — record one with workspace_state_code(action="write", …).*');
-                                parts.push(`\n\nDo NOT call session_bootstrap_code again — one re-anchor per context trim is enough; repeating it only loops. If a tool you need is not in your callable list, run it through the relay: session_bootstrap_code(action="call", tool="<name>", args={...}) — it works for every tool in the index, including lookup_tool_code for a full card.`);
+                                parts.push(`\n\nThis compact anchor is what you re-run on each new user message — the light default. Full memory/layout/skills/guide: a second call with mode="full" when the task needs them. If a tool you need is not in your callable list, run it through the relay: session_bootstrap_code(action="call", tool="<name>", args={...}) — it works for every tool in the index, including lookup_tool_code for a full card.`);
                                 return { content: [{ type: 'text', text: parts.join('\n') }] };
                         }
                         if (memory) {
-                                const { global, project, projectPath } = await loadAllMemory(workspace);
-                                const statePath = projectStatePath(workspace);
+                                const { global, project, projectPath } = await loadAllMemory(workspace, subfolder);
+                                const statePath = projectStatePath(workspace, subfolder);
                                 const state = statePath ? await readTextFile(statePath) : null;
-                                const logPath = projectLogPath(workspace);
+                                const logPath = projectLogPath(workspace, subfolder);
                                 const log = logPath ? await readTextFile(logPath) : null;
                                 const budgeted = (text: string | null): string => text === null ? '' : clip(text, BOOTSTRAP_MEMORY_CHARS);
                                 if (state) {
@@ -254,7 +286,7 @@ RELAY: action="call" runs any tool by name when it is not in your client list �
                                 if (project) {
                                         parts.push(`\n\n## 📁 Project Memory (${projectPath})\n\n${budgeted(project)}`);
                                 } else if (projectPath) {
-                                        parts.push('\n\n## 📁 Project Memory\n\n*No project memory found. Use memory_save_code with scope="project" to create it.*');
+                                        parts.push(`\n\n## 📁 Project Memory (${projectPath})\n\n*No project memory found. Use memory_save_code with scope="project"${subfolder ? ` and subfolder="${normalizeSubfolder(subfolder)}"` : ''} to create it.*`);
                                 }
                                 if (log) {
                                         const { text: recent } = tailLog(log, BOOTSTRAP_LOG_ENTRIES);
@@ -272,14 +304,19 @@ RELAY: action="call" runs any tool by name when it is not in your client list �
                                 } else {
                                         folders.forEach((f, i) => parts.push(`${i + 1}. ${f.name} -> ${f.uri.fsPath}`));
                                         const first = folders[0];
+                                        // With a topic subfolder the listing shows THAT folder —
+                                        // the model bootstrapped into it, so show its contents.
+                                        const rel = normalizeSubfolder(subfolder);
+                                        const listingLabel = rel ? `Folder "${rel}"` : `Root of "${first.name}"`;
+                                        const targetUri = rel ? vscode.Uri.file(path.join(first.uri.fsPath, rel)) : first.uri;
                                         try {
-                                                const entries = await vscode.workspace.fs.readDirectory(first.uri);
+                                                const entries = await vscode.workspace.fs.readDirectory(targetUri);
                                                 entries.sort((a, b) => (((b[1] & vscode.FileType.Directory) - (a[1] & vscode.FileType.Directory)) || a[0].localeCompare(b[0])));
                                                 const shown = entries.slice(0, 40);
-                                                parts.push(`\nRoot of "${first.name}" (${entries.length} entries${entries.length > shown.length ? ', first 40 shown' : ''}):`);
+                                                parts.push(`\n${listingLabel} (${entries.length} entries${entries.length > shown.length ? ', first 40 shown' : ''}):`);
                                                 parts.push(shown.map(([name, type]) => `- ${name}${(type & vscode.FileType.Directory) ? '/' : ''}`).join('\n'));
                                         } catch {
-                                                parts.push('\n(root listing unavailable)');
+                                                parts.push(rel ? `\n(subfolder "${rel}" not found or unreadable)` : '\n(root listing unavailable)');
                                         }
                                 }
                         }

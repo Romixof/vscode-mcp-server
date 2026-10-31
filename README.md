@@ -231,6 +231,22 @@ Reading scanned documents runs entirely on your machine: for every engine, no pa
 - **render_pdf_pages_code**: rasterizes pages to images returned in the tool result, so whichever vision-capable model drives the conversation reads them itself. Params: `pdfPath`, `firstPage`, `lastPage`, `dpi`.
 - **ocr_pdf_code**: extracts text from a scanned PDF. Engines: `tesseract` (local binary; common Windows install paths are probed, including `%LOCALAPPDATA%\Programs\Tesseract-OCR`), `vision` (a local Ollama vision model), or `auto`. Page ranges are supported; long jobs run the passes under a shared deadline (`timeoutMs`) and come back with partial results and a note saying which pages were skipped instead of failing whole. Params: `pdfPath`, `engine` (default tesseract), `language` (default eng, combos like `fra+eng`), `firstPage`, `lastPage`, `dpi`, `ollamaUrl`, `visionModel`, `outputPath` (full text also written to disk), `timeoutMs`.
 
+### Browser (Chrome DevTools MCP)
+
+The server can drive a Chrome browser for the model through [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp). Nothing runs until the first browser call: the extension then starts `npx -y chrome-devtools-mcp@1.12.0` in the background (Node.js 20+ and Chrome must be installed) and relays its tools on the same `/mcp` endpoint, so a remote client such as Mammouth gets the browser through the connector it already has. Which Chrome it drives is set by `browser.profile`: `dedicated` (default) opens a separate window whose profile keeps cookies and logins between sessions, so you sign in once; `myChrome` attaches to the Chrome you already have open, with your tabs and logins (Chrome 144+; switch remote debugging on once at `chrome://inspect/#remote-debugging`; a remote client then acts with your sessions, so keep the API key secret); `isolated` is a throwaway profile. The "controlled by automated test software" bar is hidden by default (`browser.hideAutomationBanner`); Chrome does not allow changing its text. The browser closes after `browser.idleTimeoutMinutes` without a call.
+
+Screenshots come back as an image for the model and as a 30-minute link (`/browser-shot/<random id>` on this server) the model pastes as `![screenshot](url)` so the user sees it in the chat. Tool names that models guess from other browser servers (`browser_tabs`, `browser_take_screenshot`, `browser_navigate`, raw Chrome DevTools names...) are translated to the tools below.
+
+- **browser_open_code**: open a URL in the selected tab, or in a new one with `newTab=true`. Params: `url`, `newTab`.
+- **browser_snapshot_code**: text snapshot of the page; every element carries the `uid` the other tools need. Params: `verbose`.
+- **browser_screenshot_code**: image of the page or of one element. Params: `fullPage`, `uid`, `format`.
+- **browser_click_code**: click an element. Params: `uid`, `dblClick`.
+- **browser_fill_code**: fill one field, or a whole form with `elements=[{uid,value}]`. Params: `uid`, `value`, `elements`.
+- **browser_call_code**: any other Chrome DevTools MCP tool (tabs, keyboard, `wait_for`, dialogs, console, network, performance traces, Lighthouse, `evaluate_script`...). `tool="list"` returns them all with their parameters. Params: `tool`, `args`.
+- **browser_close_code**: close the browser. **MCP Server: Close Browser** does the same from the command palette.
+
+Safety: browser tools refuse to run when `auth.mode` is `none`, need a full-access key (scope `net:out`), and `file://` URLs are blocked unless `browser.allowFileUrls` is on. Sensitive calls open a confirmation dialog in VS Code first (JavaScript evaluation, file uploads, anything that reads or writes a local file, injected scripts, non-web URLs); with `browser.confirm` set to `actions` every click, navigation and form fill asks too. A dialog nobody answers within two minutes counts as a refusal.
+
 ### Agent guide and housekeeping (always on)
 - **session_bootstrap_code**: one-call session start — memory, workspace layout, skills and the complete 85-tool catalog in a single response, described in the agent guide section above.
 - **brew_coffee_code**: brews nothing. Params: `sugar`.
@@ -240,7 +256,7 @@ Reading scanned documents runs entirely on your machine: for every engine, no pa
 * `vscode-mcp-server.port`: server port (default 3400)
 * `vscode-mcp-server.host`: bind address (default 127.0.0.1)
 * `vscode-mcp-server.defaultEnabled`: start the server automatically on launch
-* `vscode-mcp-server.enabledTools`: which of the 19 groups above are active, all on by default. Changing it restarts the server.
+* `vscode-mcp-server.enabledTools`: which of the 20 groups above are active, all on by default. Changing it restarts the server.
 * `vscode-mcp-server.auth.mode`: how clients authenticate: `session-token` (default), `static-token`, `api-key`, `oauth` or `none` (unsafe). See Security below.
 * `vscode-mcp-server.auth.staticToken`: the secret required when mode is `static-token`.
 * `vscode-mcp-server.auth.apiKey`: the key required when mode is `api-key`. Left empty, a key is generated on first activation and stored in VS Code SecretStorage.
@@ -248,6 +264,10 @@ Reading scanned documents runs entirely on your machine: for every engine, no pa
 * `vscode-mcp-server.auth.allowNoOrigin`: accept Origin-less requests (curl, SDK clients). On by default; browsers always send Origin so drive-by protection is unaffected.
 * `vscode-mcp-server.agentInstructions`: replaces the built-in text returned by `get_agent_instructions_code` and copied by **MCP Server: Copy Agent Instructions**. Empty means the built-in guide.
 * `vscode-mcp-server.security.sandbox.mode`: filesystem confinement for authenticated tools. `workspace` (default): only folders open in this window plus `allowPaths`. `home`: the user profile directory. `full`: no restriction, dangerous with remote clients.
+* `vscode-mcp-server.browser.confirm`: `sensitive` (default), `actions` or `off`, see Browser above.
+* `vscode-mcp-server.browser.profile`: `dedicated` (default), `myChrome` or `isolated`, see Browser above. `browser.userDataDir` moves the dedicated profile.
+* `vscode-mcp-server.browser.headless`, `browser.hideAutomationBanner`, `browser.executablePath`, `browser.browserUrl`: hide the Chrome window, hide the automation bar (default on), pick the Chrome binary, or attach to a Chrome you started with `--remote-debugging-port`.
+* `vscode-mcp-server.browser.allowFileUrls`, `browser.idleTimeoutMinutes` (default 30), `browser.package`, `browser.command`, `browser.extraArgs`: file:// access, auto-close delay, and how Chrome DevTools MCP is launched.
 * `vscode-mcp-server.security.sandbox.allowPaths`: extra absolute paths allowed in `workspace` mode (e.g. `D:\docs`); symlinks pointing outside are refused.
 
 Each request gets its own stateless MCP session, so one slow or hung call never blocks the others.

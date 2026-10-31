@@ -2,7 +2,7 @@ src/**
 out/**
 node_modules/**
 dist/*.map
-media/demo.mp4
+media/*.mp4
 tsconfig.json
 **/.git
 **/.vscode

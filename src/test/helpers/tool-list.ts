@@ -16,7 +16,7 @@ export const ALL_GROUPS_ON = {
         file: true, edit: true, shell: true, diagnostics: true, symbol: true,
         memory: true, test: true, git: true, documentation: true, database: true,
         productivity: true, security: true, performance: true, refactoring: true,
-        frontend: true, workflow: true, advanced: true, skills: true, ocr: true
+        frontend: true, workflow: true, advanced: true, skills: true, ocr: true, browser: true
 } as unknown as ToolConfiguration;
 
 export async function fetchToolList(): Promise<ListedTool[]> {

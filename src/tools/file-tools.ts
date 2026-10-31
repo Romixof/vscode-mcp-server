@@ -333,7 +333,7 @@ CRITICAL: NEVER set recursive=true on root directory (.) - output too large. Use
 
 Returns one line per entry: path, then size and last-modified for files. Start with path='.' to explore root, then dive into specific subdirectories with recursive=true. Supports pagination via limit/offset for large directories. Build noise (__pycache__, node_modules, .git, dist, out, virtualenvs) is skipped — you never need to list it.`,
         {
-            path: z.string().describe('The path to list files from'),
+            path: z.string().optional().default('.').describe('The path to list files from'),
             recursive: z.boolean().optional().default(false).describe('Whether to list files recursively'),
             limit: z.number().optional().default(100).describe('Max entries to return (1-500, default 100) — pagination only kicks in when needed'),
             offset: z.number().optional().default(0).describe('Skip this many entries (pagination offset)'),

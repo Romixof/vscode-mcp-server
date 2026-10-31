@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
   "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.20.36-twilight.3",
+  "version": "0.20.38-twilight.3",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -22,6 +22,7 @@
       "title": "MCP Server",
       "properties": {
         "vscode-mcp-server.port": {
+          "scope": "machine",
           "type": "number",
           "default": 3400,
           "minimum": 1024,
@@ -29,6 +30,7 @@
           "description": "The port number for the MCP server"
         },
         "vscode-mcp-server.host": {
+          "scope": "machine",
           "type": "string",
           "default": "127.0.0.1",
           "description": "Host address for the MCP server"
@@ -39,6 +41,7 @@
           "description": "Whether the MCP server should be enabled by default on VS Code startup"
         },
         "vscode-mcp-server.auth.mode": {
+          "scope": "machine",
           "type": "string",
           "enum": [
             "session-token",
@@ -58,18 +61,21 @@
           "description": "How clients must authenticate to the MCP endpoint."
         },
         "vscode-mcp-server.auth.staticToken": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "Token required when auth.mode is static-token. Pick a long random string (32+ characters).",
           "minLength": 0
         },
         "vscode-mcp-server.auth.apiKey": {
+          "scope": "machine",
           "type": "string",
           "default": "",
           "description": "API key required when auth.mode is api-key. If left empty, a key is auto-generated on first activation and stored securely in VS Code SecretStorage.",
           "minLength": 0
         },
         "vscode-mcp-server.auth.allowedOrigins": {
+          "scope": "machine",
           "type": "array",
           "items": {
             "type": "string"
@@ -78,6 +84,7 @@
           "description": "Extra Origin values allowed besides the server's own (e.g. https://mammouth.ai when it calls through a tunnel). Browser requests from other sites stay blocked."
         },
         "vscode-mcp-server.auth.allowNoOrigin": {
+          "scope": "machine",
           "type": "boolean",
           "default": true,
           "description": "Accept requests that carry no Origin header (curl, SDK clients). Browsers always send Origin on cross-site posts, so this does not weaken the drive-by protection."
@@ -98,6 +105,7 @@
           "description": "Override the agent guide returned by get_agent_instructions_code (and copied by 'MCP Server: Copy Agent Instructions'). Leave empty to use the built-in guide: the complete tool catalog grouped by task with workflow rules, common recipes and approval behavior."
         },
         "vscode-mcp-server.security.sandbox.mode": {
+          "scope": "machine",
           "type": "string",
           "enum": [
             "workspace",
@@ -108,12 +116,106 @@
           "description": "Filesystem confinement for authenticated tools. 'workspace': only folders open in this window plus allowPaths. 'home': the user profile directory. 'full': no restriction (dangerous with remote clients)."
         },
         "vscode-mcp-server.security.sandbox.allowPaths": {
+          "scope": "machine",
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
           "description": "Extra absolute paths allowed when sandbox.mode is 'workspace' (e.g. D:\\Mammouth\\docs). Symlinks pointing outside are still refused."
+        },
+        "vscode-mcp-server.browser.confirm": {
+          "scope": "machine",
+          "type": "string",
+          "enum": [
+            "sensitive",
+            "actions",
+            "off"
+          ],
+          "default": "sensitive",
+          "markdownEnumDescriptions": [
+            "Ask in VS Code before sensitive browser calls: JavaScript evaluation, file uploads, anything that reads or writes a local file, non-web URLs (recommended)",
+            "Also ask before every action that changes the page: navigation, clicks, typing, form filling",
+            "Never ask (only for a trusted, local client)"
+          ],
+          "description": "When browser tools need your confirmation in VS Code."
+        },
+        "vscode-mcp-server.browser.headless": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run Chrome without a visible window."
+        },
+        "vscode-mcp-server.browser.profile": {
+          "scope": "machine",
+          "type": "string",
+          "enum": [
+            "dedicated",
+            "myChrome",
+            "isolated"
+          ],
+          "default": "dedicated",
+          "markdownEnumDescriptions": [
+            "A separate Chrome window with its own profile, kept between sessions (sign in once, cookies stay). Location: #vscode-mcp-server.browser.userDataDir# or ~/.cache/chrome-devtools-mcp",
+            "Your own Chrome, already open, with your tabs, cookies and logins. Needs Chrome 144+ and remote debugging switched on once at chrome://inspect/#remote-debugging. A remote client then acts with your logged-in sessions: keep the API key secret",
+            "A throwaway profile wiped when the browser closes"
+          ],
+          "description": "Which Chrome profile the browser tools use."
+        },
+        "vscode-mcp-server.browser.userDataDir": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "description": "Folder of the dedicated Chrome profile (profile = dedicated). Empty: ~/.cache/chrome-devtools-mcp/chrome-profile. Must not be the profile your everyday Chrome has open."
+        },
+        "vscode-mcp-server.browser.hideAutomationBanner": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hide Chrome's \"controlled by automated test software\" bar (Chrome does not allow changing its text). Applies when the extension launches Chrome."
+        },
+        "vscode-mcp-server.browser.browserUrl": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "description": "Connect to an already running Chrome started with --remote-debugging-port (e.g. http://127.0.0.1:9222) instead of launching one."
+        },
+        "vscode-mcp-server.browser.executablePath": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "description": "Path to the Chrome executable. Empty: the installed stable Chrome."
+        },
+        "vscode-mcp-server.browser.allowFileUrls": {
+          "scope": "machine",
+          "type": "boolean",
+          "default": false,
+          "description": "Allow the browser to open file:// URLs (lets a remote client read local files through the browser)."
+        },
+        "vscode-mcp-server.browser.idleTimeoutMinutes": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "Close the browser after this many minutes without a browser call. 0 keeps it open."
+        },
+        "vscode-mcp-server.browser.package": {
+          "scope": "machine",
+          "type": "string",
+          "default": "chrome-devtools-mcp@1.12.0",
+          "description": "npm package started with npx when browser.command is empty."
+        },
+        "vscode-mcp-server.browser.command": {
+          "scope": "machine",
+          "type": "string",
+          "default": "",
+          "description": "Executable that starts Chrome DevTools MCP (e.g. a global chrome-devtools-mcp install). Empty: npx -y <browser.package>."
+        },
+        "vscode-mcp-server.browser.extraArgs": {
+          "scope": "machine",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra command-line flags for Chrome DevTools MCP (e.g. --viewport=1280x720)."
         },
         "vscode-mcp-server.enabledTools": {
           "type": "object",
@@ -136,7 +238,8 @@
             "workflow": true,
             "advanced": true,
             "skills": true,
-            "ocr": true
+            "ocr": true,
+            "browser": true
           },
           "properties": {
             "file": {
@@ -214,6 +317,10 @@
             "ocr": {
               "type": "boolean",
               "description": "Enable PDF OCR tools (scanned-page detection and text extraction via poppler-utils and tesseract)"
+            },
+            "browser": {
+              "type": "boolean",
+              "description": "Enable browser tools: a Chrome browser driven through Chrome DevTools MCP (started on first use, needs Node.js and Chrome)"
             }
           },
           "description": "Configure which MCP tools are enabled"
@@ -252,13 +359,17 @@
       {
         "command": "vscode-mcp-server.copyAgentInstructions",
         "title": "MCP Server: Copy Agent Instructions"
+      },
+      {
+        "command": "vscode-mcp-server.closeBrowser",
+        "title": "MCP Server: Close Browser"
       }
     ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./ && npm run bundle",
-        "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --platform=node --target=node20 --format=cjs --external:vscode --minify --sourcemap --sources-content=false",
+    "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --platform=node --target=node20 --format=cjs --external:vscode --minify --sourcemap --sources-content=false",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",

@@ -38,7 +38,7 @@ async function describedTool(name: string): Promise<string> {
 suite('agent guide tool-count claims', () => {
         test('the catalog size is derived from the registry, not typed by hand', async () => {
                 assert.strictEqual(Object.keys(TOOL_HINTS).length, Object.keys(CATALOG).length, 'registry and catalog drifted - the integrity tests should have caught this first');
-                assert.strictEqual(Object.keys(TOOL_HINTS).length, 93, 'registry size changed - update the guide tests');
+                assert.strictEqual(Object.keys(TOOL_HINTS).length, 100, 'registry size changed - update the guide tests');
         });
 
         test('the guide description states the real tool count', async () => {

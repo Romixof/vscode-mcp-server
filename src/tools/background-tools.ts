@@ -50,16 +50,16 @@ function taskLine(t: BackgroundTask): string {
 export function registerBackgroundTools(server: McpServer): void {
     server.tool(
         'background_task_code',
-        `Runs a long command detached and returns a task id immediately, so the call is never blocked and nothing is truncated by the 10s terminal timeout.
+        `Runs a long command detached and returns a task id immediately, so the call never blocks and nothing is truncated.
 
-WHEN TO USE: builds, test suites, installs, dev servers — anything that outlives a normal execute_shell_command_code. For quick commands keep that tool.
+WHEN TO USE: builds, test suites, installs, dev servers — anything that outlives execute_shell_command_code.
 
-- start {command, cwd}: launches through the system shell, still subject to the shell policy
+- start {command, cwd}: launches through the system shell, subject to the shell policy
 - list: every task with state, duration, output size
 - output {task_id, offset, maxChars}: polls a running task (tail so far) or pages a finished one
 - kill {task_id}: terminates it
 
-8 concurrent max. Finished tasks are kept 1 hour, output capped at 200 KB with the tail kept.`,
+8 concurrent max; finished tasks kept 1 hour, output capped at 200 KB, tail kept.`,
         {
             action: z.enum(['start', 'list', 'output', 'kill']).describe('Task action'),
             command: z.string().optional().describe('start: the command to run'),

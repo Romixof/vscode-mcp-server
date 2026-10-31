@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { resolveInputPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { executeShellCommand } from './shell-tools';
+import { quoteArg } from '../utils/shell-quote';
 
 const DEFAULT_SKILLS_ROOT = '.claude/skills';
 
@@ -11,9 +12,9 @@ const DEFAULT_SKILLS_ROOT = '.claude/skills';
 export const SKILLS_ROOT_CANDIDATES = ['skills', DEFAULT_SKILLS_ROOT];
 const DEFAULT_EXCLUDES = ['*.bak', '.DS_Store', 'node_modules/*', '__pycache__/*'];
 
-function shellSingleQuote(value: string): string {
-    return `'${value.replace(/'/g, `'\\''`)}'`;
-}
+// Bash-only escaping ('\'') is not safe in PowerShell: quoteArg refuses
+// quotes instead (see utils/shell-quote.ts).
+const shellSingleQuote = quoteArg;
 
 function slugify(name: string): string {
     return name

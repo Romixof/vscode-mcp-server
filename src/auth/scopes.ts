@@ -57,7 +57,9 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'background_task_code'
     ],
     'net:out': [
-        'test_api_endpoint_code', 'check_dependencies_vulnerabilities_code'
+        'test_api_endpoint_code', 'check_dependencies_vulnerabilities_code',
+        'browser_open_code', 'browser_snapshot_code', 'browser_screenshot_code',
+        'browser_click_code', 'browser_fill_code', 'browser_call_code', 'browser_close_code'
     ],
     'mem:write': [
         'memory_save_code', 'memory_clear_code'

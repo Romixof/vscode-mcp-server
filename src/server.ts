@@ -6,6 +6,7 @@ import { generateSessionToken, readAuthConfig, bearerAuth, originGuard, originAl
 import type { RequestHandler } from 'express';
 import { createOAuthRouter } from './auth-oauth';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Server } from 'http';
 import { Request, Response } from 'express';
@@ -36,6 +37,7 @@ import { applyToolAnnotations } from './utils/tool-annotations';
 import { registerSkillsTools } from './tools/skills-tools';
 import { EXTENSION_ID } from './tools/advanced-tools';
 import { registerOcrTools } from './tools/ocr-tools';
+import { registerBrowserTools, disposeBrowserBridge, getShot, SHOT_ROUTE, notePublicOrigin, resolveBrowserAlias, runBrowserAlias } from './tools/browser-tools';
 import { registerTokenEfficiencyTools } from './utils/token-efficiency';
 import { registerAgentInstructionsTool, registerLookupTool, resolveAgentInstructions } from './utils/agent-instructions';
 import { recordToolCall, setRegisteredTools } from './utils/usage';
@@ -54,6 +56,7 @@ import { registerExposeAuditTool } from './tools/expose-audit';
 import { registerCodeGraphTools } from './tools/codegraph-tools';
 import { verifyApiKeyVerdict } from './auth/scoped-keys';
 import { makeRateLimiter } from './auth/ratelimit';
+import { isLocalPeer } from './auth/local-peer';
 import { RATE_LIMIT_GLOBAL_MAX_PER_WINDOW } from './auth/ratelimit';
 import { getApiKeyCache, setApiKeyCache } from './auth/keycache';
 import {
@@ -173,6 +176,7 @@ export interface ToolConfiguration {
     advanced: boolean;
     skills: boolean;
     ocr: boolean;
+    browser?: boolean;
 }
 
 export class MCPServer {
@@ -394,6 +398,16 @@ export class MCPServer {
                             const req = request as { params: { name: string; arguments?: Record<string, unknown> } };
                             const tool = registrations._registeredTools?.[req.params.name];
                             if (!tool) {
+                                const steps = resolveBrowserAlias(req.params.name, req.params.arguments);
+                                if (steps) {
+                                    return await runBrowserAlias(req.params.name, steps, async (name, stepArgs) => {
+                                        const target = registrations._registeredTools?.[name];
+                                        if (!target) {
+                                            return { content: [{ type: 'text', text: `Tool ${name} not found` }], isError: true };
+                                        }
+                                        return await target.handler(stepArgs, extra) as CallToolResult;
+                                    });
+                                }
                                 return { content: [{ type: 'text', text: `Tool ${req.params.name} not found` }], isError: true };
                             }
                             // Zod strips unknown argument keys silently, which once
@@ -515,7 +529,8 @@ export class MCPServer {
                 return `session token — clients send Authorization: Bearer <token> or X-MCP-Token. Token for this installation: ${this.authToken}`;
             }, terminal ? () => describeShellKind(terminal) : undefined)],
             ['skills', c.skills, () => registerSkillsTools(server)],
-            ['ocr', c.ocr, () => registerOcrTools(server)]
+            ['ocr', c.ocr, () => registerOcrTools(server)],
+            ['browser', c.browser ?? true, () => registerBrowserTools(server)]
         ];
 
         for (const [, enabled, register] of groups) {
@@ -601,6 +616,22 @@ export class MCPServer {
             res.json({ ok: true, mode: authCfg().mode });
         });
 
+        // Browser screenshots shown to the user through Markdown: public on
+        // purpose (an <img> sends no bearer key), random 128-bit ids that
+        // expire after 30 minutes. See storeShot in browser-tools.
+        this.app.get(`${SHOT_ROUTE}:id`, (req, res) => {
+            const id = String(req.params.id ?? '');
+            const shot = /^[a-f0-9]{32}\.(png|jpg|webp)$/.test(id) ? getShot(id) : undefined;
+            if (!shot) {
+                res.status(404).end();
+                return;
+            }
+            res.setHeader('Cache-Control', 'private, max-age=1800');
+            res.setHeader('Content-Type', shot.mime);
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.status(200).send(shot.data);
+        });
+
         this.app.get('/favicon.ico', (_req, res) => {
             try {
                 const icon = path.join(__dirname, 'media', 'icon-256.png');
@@ -665,6 +696,24 @@ export class MCPServer {
             || 'unknown';
         const clusterRoutes = [CLUSTER_REGISTER_PATH, CLUSTER_HEARTBEAT_PATH, CLUSTER_DEREGISTER_PATH,
                                CLUSTER_HUB_SHUTDOWN_PATH, INVOKE_PATH];
+        // Master credential only: a scoped key or an OAuth token never reaches
+        // the cluster routes, whatever its preset.
+        const clusterCredentials = (): string[] => {
+            const cfg = authCfg();
+            const out: string[] = [];
+            if (cfg.mode === 'api-key') {
+                const cached = getApiKeyCache();
+                if (cached) {out.push(cached);}
+                if (cfg.apiKey && !out.includes(cfg.apiKey)) {out.push(cfg.apiKey);}
+                return out;
+            }
+            if (cfg.mode === 'static-token') {return cfg.staticToken ? [cfg.staticToken] : [];}
+            if (cfg.mode === 'none') {return [];}
+            for (const t of expectedTokens()) {
+                if (!out.includes(t)) {out.push(t);}
+            }
+            return out;
+        };
 
         this.app.get('/__traffic', async (req, res) => {
             try {
@@ -722,11 +771,47 @@ export class MCPServer {
                         error_description: 'auth.mode is static-token but auth.staticToken is empty — set vscode-mcp-server.auth.staticToken or pick another mode'
                     });
                 }
-                if (req.path === CLUSTER_IDENTITY_PATH) {
-                    const peer = req.socket.remoteAddress?.replace('::ffff:', '');
-                    if (peer === '127.0.0.1' || peer === '::1') {return next();}
+                // Cluster routes (/invoke, /__mcp_cluster/*) exist only for other
+                // VS Code windows on this machine. They run tools without the MCP
+                // scope wrapper, so they are refused to anything relayed (Tailscale
+                // Funnel traffic arrives from 127.0.0.1 too) and, except for the
+                // identity probe, require the master credential.
+                if (req.path === CLUSTER_IDENTITY_PATH || clusterRoutes.includes(req.path)) {
+                    if (!isLocalPeer(req)) {
+                        logger.warn(`[auth] 404 cluster route from non-local peer — ${req.method} ${req.path} from ${clientIp(req)}`);
+                        return res.status(404).end();
+                    }
+                    if (req.path === CLUSTER_IDENTITY_PATH) {return next();}
+                    const candidates = clusterCredentials();
+                    if (candidates.length === 0) {
+                        if (authCfg().mode === 'none') {return runWithScopes(LOCAL_ALL_SCOPES, 'cluster-peer', next);}
+                        return res.status(503).json({
+                            error: 'auth_misconfigured',
+                            error_description: 'no cluster credential available for the current auth mode'
+                        });
+                    }
+                    const clusterHdr = req.headers['x-mcp-cluster'];
+                    const presentedCluster = typeof clusterHdr === 'string' && clusterHdr
+                        ? clusterHdr
+                        : extractToken(req.headers as Record<string, string | string[] | undefined>);
+                    if (presentedCluster && candidates.some(c => tokensMatch(presentedCluster, c))) {
+                        return runWithScopes(LOCAL_ALL_SCOPES, 'cluster-peer', next);
+                    }
+                    logger.warn(`[auth] 401 cluster — ${req.method} ${req.path} (${presentedCluster ? 'not the master credential' : 'no credential'})`);
+                    res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server"');
+                    return res.status(401).json({ error: 'invalid_token' });
                 }
-                if (authCfg().mode === 'none') {return next();}
+                if (authCfg().mode === 'none') {
+                    // No authentication: serve this machine only, never a tunnel.
+                    if (!isLocalPeer(req)) {
+                        logger.warn(`[auth] 403 auth.mode=none refuses remote/relayed request — ${req.method} ${req.path} from ${clientIp(req)}`);
+                        return res.status(403).json({
+                            error: 'auth_disabled_remote',
+                            error_description: 'auth.mode is "none": only local, non-relayed requests are served. Use api-key mode to expose the server.'
+                        });
+                    }
+                    return next();
+                }
                 if (authCfg().mode === 'api-key') {
                     const verdict = await verifyApiKeyVerdict(req, authCfg());
                     if (verdict.ok) {return runWithScopes(verdict.scopes, verdict.client, next);}
@@ -749,25 +834,6 @@ export class MCPServer {
                         return res.status(401).json({ error: 'invalid_token', error_description: 'token revoked' });
                     }
                 }
-                if (clusterRoutes.includes(req.path)) {
-                    const candidates: string[] = [];
-                    const primary = expectedToken();
-                    if (primary) {candidates.push(primary);}
-                    for (const t of expectedTokens()) {
-                        if (!candidates.includes(t)) {candidates.push(t);}
-                    }
-                    if (candidates.length === 0) {
-                        return res.status(503).json({
-                            error: 'auth_misconfigured',
-                            error_description: 'no cluster credential available for the current auth mode'
-                        });
-                    }
-                    const clusterHdr = req.headers['x-mcp-cluster'];
-                    if (typeof clusterHdr === 'string' && clusterHdr && candidates.some(c => tokensMatch(clusterHdr, c))) {return next();}
-                    if (presented && candidates.some(c => tokensMatch(presented, c))) {return next();}
-                    res.setHeader('WWW-Authenticate', 'Bearer realm="vscode-mcp-server"');
-                    return res.status(401).json({ error: 'invalid_token' });
-                }
                 bearerAuth(expectedTokens)(req, res, () => runWithScopes(LOCAL_ALL_SCOPES, 'local-session', next));
             } catch (err) {
                 logger.error(`[auth] middleware error: ${err instanceof Error ? err.message : String(err)}`);
@@ -787,6 +853,7 @@ export class MCPServer {
         const mcpRateLimit = makeRateLimiter();
 
         this.app.post('/mcp', mcpRateLimit, express.json({ limit: '10mb' }), async (req, res) => {
+            notePublicOrigin(req.headers as Record<string, string | string[] | undefined>);
             const headerName = typeof req.headers['x-mcp-client-name'] === 'string' ? (req.headers['x-mcp-client-name'] as string).trim() : '';
             const bodyInfo = (req.body && typeof req.body === 'object') ? (req.body as { params?: { clientInfo?: { name?: unknown } } }).params : undefined;
             const infoNameRaw = bodyInfo?.clientInfo?.name;
@@ -955,6 +1022,13 @@ export class MCPServer {
         if (!handler) {
             throw new Error(`Tool ${tool} not registered`);
         }
+        // Defence in depth: /invoke calls the raw handler, so the scope check
+        // the MCP path does in enforceScopesOn is repeated here.
+        const { scopes, client } = currentScopes();
+        if (!scopeAllowsCached(scopes, tool)) {
+            checkToolAccess(tool, scopes, client);
+            throw new Error(`Tool "${tool}" is not permitted for this caller`);
+        }
         return handler(args, {});
     }
 
@@ -1111,6 +1185,7 @@ export class MCPServer {
             }
 
             await this.cluster.stop();
+            await disposeBrowserBridge().catch(() => undefined);
 
             const totalStopTime = Date.now() - stopStartTime;
             logger.info(`[MCPServer.stop] MCP Server shutdown complete (total: ${totalStopTime}ms)`);

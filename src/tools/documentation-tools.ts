@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { resolveWorkspaceFolder, resolveRelativeToolPath, WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { executeShellCommand } from './shell-tools';
+import { runGit, gitOptionValue } from '../utils/git-exec';
 
 interface DependencyEntry {
 	name: string;
@@ -595,28 +596,30 @@ async function getFileHistory(options: {
 	const includeDiff = options.includeDiff ?? false;
 	const format = options.format ?? 'json';
 
-	let cmd = `git log --follow --pretty=format:"%H|%h|%an|%ae|%ad|%s" --date=iso`;
+	// git runs without a shell: since/until/author/grep and the path are
+	// client input and must never be interpolated into a command line.
+	const args = ['log', '--follow', '--pretty=format:%H|%h|%an|%ae|%ad|%s', '--date=iso'];
 	if (maxCommits) {
-		cmd += ` -n ${maxCommits}`;
+		args.push('-n', String(Math.max(1, Math.trunc(Number(maxCommits)) || 50)));
 	}
 	if (options.since) {
-		cmd += ` --since="${options.since}"`;
+		args.push(`--since=${gitOptionValue('since', options.since)}`);
 	}
 	if (options.until) {
-		cmd += ` --until="${options.until}"`;
+		args.push(`--until=${gitOptionValue('until', options.until)}`);
 	}
 	if (options.author) {
-		cmd += ` --author="${options.author}"`;
+		args.push(`--author=${gitOptionValue('author', options.author)}`);
 	}
 	if (options.grep) {
-		cmd += ` --grep="${options.grep}"`;
+		args.push(`--grep=${gitOptionValue('grep', options.grep)}`);
 	}
 	if (includeStats) {
-		cmd += ` --numstat`;
+		args.push('--numstat');
 	}
-	cmd += ` -- "${filePath}"`;
+	args.push('--', filePath);
 
-	const result = await runCommand(cmd, workspaceRoot);
+	const result = await runGit(args, workspaceRoot, 60000);
 	if (result.exitCode !== 0) {
 		return format === 'json' ? JSON.stringify({ error: result.output }) : result.output;
 	}
@@ -661,7 +664,9 @@ async function getFileHistory(options: {
 			}
 
 			if (includeDiff) {
-				const diffResult = await runCommand(`git show ${commit.hash} -- "${filePath}"`, workspaceRoot);
+				const diffResult = /^[0-9a-f]{7,64}$/i.test(commit.hash)
+					? await runGit(['show', commit.hash, '--', filePath], workspaceRoot, 60000)
+					: { output: '', exitCode: 1 };
 				commit.diff = diffResult.output;
 			}
 
@@ -1276,7 +1281,7 @@ Aggregates package.json, configs, file structure, languages, frameworks, entry p
 
 	server.tool('find_todo_code', `Searches for TODO/FIXME/HACK/XXX/NOTE/BUG/OPTIMIZE/REVIEW comments across the workspace.
 
-WHEN TO USE: Technical debt tracking, sprint planning, code quality reviews.
+WHEN TO USE: technical debt tracking, sprint planning, code reviews.
 
 Supports custom patterns, path/file-type filters, grouping by file or tag, context lines, severity classification.`, {
 		customPatterns: z.array(z.string()).optional().describe('Additional tag patterns on top of the defaults'),

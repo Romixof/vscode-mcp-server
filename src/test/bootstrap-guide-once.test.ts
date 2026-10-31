@@ -5,7 +5,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { registerSessionBootstrapTool } from '../tools/advanced-tools';
 import { AGENT_INSTRUCTIONS_VERSION } from '../utils/agent-instructions';
 
-const ARGS = { sections: ['guide'] };
+// v24: the default bootstrap is compact; every test in this suite asserts on
+// the full payload, so the default args ask for mode="full" explicitly.
+const ARGS = { sections: ['guide'], mode: 'full' };
 
 function newServer(override?: () => string | undefined): McpServer {
         const inner = new McpServer({ name: 'boot', version: 'test' }, {
@@ -33,13 +35,16 @@ async function withServer<T>(server: McpServer, body: (call: (args?: Record<stri
 }
 
 suite('session_bootstrap_code guide delivery', () => {
+        // v24: the default bootstrap is a compact re-anchor; the full payload
+        // (memory, layout, skills, guide) is opt-in via mode="full". Every test
+        // below asserts on the full payload, so it must ask for it explicitly.
         test('the first call carries the catalog, the second is a short notice', async () => {
                 await withServer(newServer(), async call => {
-                        const first = await call();
+                        const first = await call({ mode: 'full' });
                         assert.ok(first.includes('TOOL INDEX'), 'the first call must carry the compact catalog index');
                         assert.ok(first.includes(`[agent guide v${AGENT_INSTRUCTIONS_VERSION}]`), 'the first call must carry the version tag');
 
-                        const second = await call();
+                        const second = await call({ mode: 'full' });
                         assert.ok(!second.includes('TOOL INDEX'), 'the catalog must not be sent twice on one server');
                         assert.ok(
                                 second.includes(`v${AGENT_INSTRUCTIONS_VERSION} was already sent`),
@@ -59,31 +64,31 @@ suite('session_bootstrap_code guide delivery', () => {
         test('a guide whose content changes is delivered again', async () => {
                 let override: string | undefined = 'A FIRST GUIDE';
                 await withServer(newServer(() => override), async call => {
-                        const first = await call();
+                        const first = await call({ mode: 'full' });
                         assert.ok(first.includes('A FIRST GUIDE'), 'the first override must be delivered');
 
-                        const second = await call();
+                        const second = await call({ mode: 'full' });
                         assert.ok(!second.includes('A FIRST GUIDE'), 'an unchanged override must not repeat');
                         assert.ok(second.includes('was already sent'), `the notice must appear: ${second}`);
 
                         override = 'A SECOND AND DIFFERENT GUIDE';
-                        const third = await call();
+                        const third = await call({ mode: 'full' });
                         assert.ok(third.includes('A SECOND AND DIFFERENT GUIDE'), 'a changed guide must be delivered again');
                         assert.ok(
                                 third.includes(`[agent guide v${AGENT_INSTRUCTIONS_VERSION}]`),
                                 'the re-delivered guide must carry the version tag'
                         );
 
-                        const fourth = await call();
+                        const fourth = await call({ mode: 'full' });
                         assert.ok(!fourth.includes('A SECOND AND DIFFERENT GUIDE'), 'the new override must not repeat either');
                 });
         });
 
         test('a second server does not inherit the first server delivery', async () => {
-                const first = await withServer(newServer(), async call => call());
+                const first = await withServer(newServer(), async call => call({ mode: 'full' }));
                 assert.ok(first.includes('TOOL INDEX'), 'the first server must carry the catalog');
 
-                const second = await withServer(newServer(), async call => call());
+                const second = await withServer(newServer(), async call => call({ mode: 'full' }));
                 assert.ok(
                         second.includes('TOOL INDEX'),
                         'a freshly registered server must carry the catalog, not a notice it never earned'
@@ -96,14 +101,14 @@ suite('session_bootstrap_code guide delivery', () => {
 
         test('an empty sections list never mentions the guide', async () => {
                 await withServer(newServer(), async call => {
-                        const text = await call({ sections: [] });
+                        const text = await call({ sections: [], mode: 'full' });
                         assert.ok(!/guide/i.test(text), `sections=[] must be silent about the guide: ${text}`);
                 });
         });
 
         test('omitting sections returns all four, the default the four flags used to express', async () => {
                 await withServer(newServer(), async call => {
-                        const text = await call({});
+                        const text = await call({ mode: 'full' });
                         assert.ok(/## 📍 Memory/.test(text), `memory is a default section: ${text.slice(0, 200)}`);
                         assert.ok(/## Workspace/.test(text), 'layout is a default section');
                         assert.ok(/## Skills/.test(text), 'skills is a default section');
@@ -113,7 +118,7 @@ suite('session_bootstrap_code guide delivery', () => {
 
         test('sections selects exactly the parts named, and no other', async () => {
                 await withServer(newServer(), async call => {
-                        const text = await call({ sections: ['skills'] });
+                        const text = await call({ sections: ['skills'], mode: 'full' });
                         assert.ok(/## Skills/.test(text), 'the named section must be returned');
                         assert.ok(!/## 📍 Memory/.test(text), `an unnamed section must be absent: ${text.slice(0, 200)}`);
                         assert.ok(!/## Workspace/.test(text), 'layout was not named');
@@ -123,7 +128,7 @@ suite('session_bootstrap_code guide delivery', () => {
 
         test('a multi-part selection is honoured part by part', async () => {
                 await withServer(newServer(), async call => {
-                        const text = await call({ sections: ['layout', 'skills'] });
+                        const text = await call({ sections: ['layout', 'skills'], mode: 'full' });
                         assert.ok(/## Workspace/.test(text), 'layout was named');
                         assert.ok(/## Skills/.test(text), 'skills was named');
                         assert.ok(!/## 📍 Memory/.test(text), 'memory was not named');
