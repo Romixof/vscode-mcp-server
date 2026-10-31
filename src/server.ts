@@ -632,17 +632,22 @@ export class MCPServer {
             res.status(200).send(shot.data);
         });
 
-        this.app.get('/favicon.ico', (_req, res) => {
+        // Read once at startup: no file system access per request.
+        let favicon: Buffer | undefined;
+        for (const candidate of [path.join(__dirname, '..', 'media', 'icon-256.png'), path.join(__dirname, 'media', 'icon-256.png')]) {
             try {
-                const icon = path.join(__dirname, 'media', 'icon-256.png');
-                if (fs.existsSync(icon)) {
-                    res.setHeader('Cache-Control', 'public, max-age=86400');
-                    res.setHeader('Content-Type', 'image/png');
-                    res.status(200).sendFile(icon);
-                    return;
-                }
-            } catch { /* fall through to 204 */ }
-            res.status(204).end();
+                favicon = fs.readFileSync(candidate);
+                break;
+            } catch { /* try the next location */ }
+        }
+        this.app.get('/favicon.ico', (_req, res) => {
+            if (!favicon) {
+                res.status(204).end();
+                return;
+            }
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            res.setHeader('Content-Type', 'image/png');
+            res.status(200).send(favicon);
         });
 
         this.app.use((req, res, next) => {
