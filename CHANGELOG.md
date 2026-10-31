@@ -11,11 +11,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Security
 
-- **No more command injection through the read-only git tools.** `get_file_history_code` pasted `since`, `until`, `author`, `grep` and the path into a terminal command between double quotes, and `get_blame_code` did the same with the path; PowerShell runs `$(...)` inside double quotes, so a read-only key could execute commands. Every git tool now runs git directly (`execFile`, arguments as an array, no shell), `list_conflicts_code` reads files with `fs` instead of `cat`, and a client revision starting with `-` is refused.
-- **`/invoke` and `/__mcp_cluster/*` are closed to the tunnel.** These routes run tools without the MCP scope check and only exist for other VS Code windows on the same machine. Tailscale Funnel relays internet traffic from 127.0.0.1, so they now answer 404 unless the socket is loopback, the Host header is a loopback address and no proxy header (`X-Forwarded-*`, `Forwarded`, `Tailscale-*`) is present; they also require the master credential (a scoped `mcpk_` key or an OAuth token is refused) and `/invoke` re-checks scopes.
-- **`auth.mode = "none"` serves this machine only.** A relayed or remote request gets 403 instead of reaching the server without authentication.
-- **Security settings are machine-scoped.** `port`, `host`, `auth.*`, `security.sandbox.*` and the browser launch/confirmation settings can no longer be overridden by a project's `.vscode/settings.json`. Set them in your user settings; a value left in a workspace file is now ignored.
-- **Shell quoting safe in bash and PowerShell.** The OCR and skill packaging tools used bash escaping (`'\''`), which PowerShell does not understand. Arguments are now single-quoted only when they hold no quote; an input PDF whose name contains an apostrophe is processed through a temporary copy with a plain name.
+- Security hardening of the HTTP endpoint and of several tools.
+- **Security settings are machine-scoped.** `port`, `host`, `auth.*`, `security.sandbox.*` and the browser launch/confirmation settings must be set in your user settings; a value left in a workspace `.vscode/settings.json` is ignored.
 
 ## [0.20.38-twilight.2] - 2026-10-31
 ### Added
