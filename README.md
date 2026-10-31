@@ -269,6 +269,17 @@ Safety: browser tools refuse to run when `auth.mode` is `none`, need a full-acce
 * `vscode-mcp-server.browser.headless`, `browser.hideAutomationBanner`, `browser.executablePath`, `browser.browserUrl`: hide the Chrome window, hide the automation bar (default on), pick the Chrome binary, or attach to a Chrome you started with `--remote-debugging-port`.
 * `vscode-mcp-server.browser.allowFileUrls`, `browser.idleTimeoutMinutes` (default 30), `browser.package`, `browser.command`, `browser.extraArgs`: file:// access, auto-close delay, and how Chrome DevTools MCP is launched.
 * `vscode-mcp-server.security.sandbox.allowPaths`: extra absolute paths allowed in `workspace` mode (e.g. `D:\docs`); symlinks pointing outside are refused.
+* `vscode-mcp-server.toolListing`: which tools the server advertises, see Tool listing below.
+
+### Tool listing
+
+Some MCP clients (Mammouth AI among them) call `tools/list` once, cache every schema and send them with every conversation. `vscode-mcp-server.toolListing` decides what that list contains:
+
+* `bootstrapOnly` (default): only `session_bootstrap_code` is ever listed. Every other tool stays callable by name or through `session_bootstrap_code(action="call", tool="<name>", args={...})`, and the agent guide lists them all. Roughly 800 tokens of schema instead of 35k.
+* `unlockOnFirstCall`: only `session_bootstrap_code` is listed until its first call, then the full list is advertised and the client is notified. A client that lists again after that caches every tool.
+* `full`: every tool is listed, as in versions before 0.20.35.
+
+After a change, restart the server, then remove and re-add the connector in your MCP client so it lists the tools again. The older `twilightGate` / `twilightStrict` settings still work when `toolListing` is not set.
 
 Each request gets its own stateless MCP session, so one slow or hung call never blocks the others.
 

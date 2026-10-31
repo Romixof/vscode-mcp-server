@@ -15,7 +15,7 @@ const ALL_GROUPS_ON = {
 } as unknown as ToolConfiguration;
 
 async function describedTool(name: string): Promise<string> {
-        const host = new MCPServer(3400, '127.0.0.1', undefined, ALL_GROUPS_ON);
+        const host = new MCPServer(3400, '127.0.0.1', undefined, ALL_GROUPS_ON, undefined, false, false);
         host.setFileListingCallback(async () => []);
         const inner = new McpServer({ name: 'guide', version: 'test' }, {
                 capabilities: { logging: {}, tools: { listChanged: false } }

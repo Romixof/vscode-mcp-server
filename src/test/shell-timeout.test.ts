@@ -13,7 +13,7 @@ const ALL_GROUPS_ON = {
 } as unknown as ToolConfiguration;
 
 async function shellToolSchema(): Promise<{ description: string; timeoutDefault: number }> {
-        const host = new MCPServer(3400, '127.0.0.1', undefined, ALL_GROUPS_ON);
+        const host = new MCPServer(3400, '127.0.0.1', undefined, ALL_GROUPS_ON, undefined, false, false);
         host.setFileListingCallback(async () => []);
         const inner = new McpServer({ name: 'schema', version: 'test' }, {
                 capabilities: { logging: {}, tools: { listChanged: false } }

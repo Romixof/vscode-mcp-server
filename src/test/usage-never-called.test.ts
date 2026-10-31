@@ -21,7 +21,7 @@ function groupsWith(overrides: Partial<ToolConfiguration>): ToolConfiguration {
 }
 
 async function registerAndList(config: ToolConfiguration): Promise<string[]> {
-        const host = new MCPServer(3400, '127.0.0.1', undefined, config);
+        const host = new MCPServer(3400, '127.0.0.1', undefined, config, undefined, false, false);
         host.setFileListingCallback(async () => []);
         const inner = new McpServer({ name: 'usage', version: 'test' }, {
                 capabilities: { logging: {}, tools: { listChanged: false } }

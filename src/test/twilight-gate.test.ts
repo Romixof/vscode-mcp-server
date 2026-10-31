@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { MCPServer, ToolConfiguration, resetTwilightForTests, isTwilightUnlocked, setTwilightConfigSource } from '../server';
+import { MCPServer, ToolConfiguration, resetTwilightForTests, isTwilightUnlocked, setTwilightConfigSource, resolveToolListing } from '../server';
 import { runWithScopes } from '../auth/toolgate';
 import { ALL_SCOPES } from '../auth/scopes';
 
@@ -38,9 +38,71 @@ function simulateVsCodeConfig(values: Record<string, unknown>): void {
 	const store = new Map(Object.entries(values));
 	setTwilightConfigSource({
 		get: <T>(section: string, key: string, defaultValue?: T): T =>
-			((store.has(key) ? (store.get(key) as T) : defaultValue!) as T)
+			((store.has(key) ? (store.get(key) as T) : defaultValue!) as T),
+		isSet: (_section: string, key: string): boolean => store.has(key)
 	});
 }
+
+suite('toolListing setting', () => {
+	setup(() => {
+		resetTwilightForTests();
+		delete process.env.VSCODE_MCP_TWILIGHT_GATE;
+	});
+
+	teardown(() => {
+		resetTwilightForTests();
+	});
+
+	const listed = async (): Promise<string[]> => {
+		const { client } = await ready(startSession(false, false));
+		return (await client.listTools()).tools.map(t => t.name);
+	};
+
+	test('nothing set: only the bootstrap tool is listed (default bootstrapOnly)', async () => {
+		simulateVsCodeConfig({});
+		assert.strictEqual(resolveToolListing(), 'bootstrapOnly');
+		assert.deepStrictEqual(await listed(), ['session_bootstrap_code']);
+	});
+
+	test('toolListing=full lists every tool', async () => {
+		simulateVsCodeConfig({ toolListing: 'full' });
+		const names = await listed();
+		assert.ok(names.filter(n => n.endsWith('_code')).length >= 88, `full must list the catalog, got ${names.length}`);
+	});
+
+	test('legacy twilightGate=true alone unlocks on the first call', async () => {
+		simulateVsCodeConfig({ twilightGate: true });
+		assert.strictEqual(resolveToolListing(), 'unlockOnFirstCall');
+		const first = await ready(startSession(false, false));
+		assert.deepStrictEqual((await first.client.listTools()).tools.map(t => t.name), ['session_bootstrap_code']);
+		await first.client.callTool({ name: 'session_bootstrap_code', arguments: {} });
+		assert.ok(isTwilightUnlocked(), 'the bootstrap call must pass the gate');
+		const names = await listed();
+		assert.ok(names.length >= 88, `after the unlock the catalog must be listed, got ${names.length}`);
+	});
+
+	test('legacy settings explicitly off mean full', () => {
+		simulateVsCodeConfig({ twilightGate: false });
+		assert.strictEqual(resolveToolListing(), 'full');
+	});
+
+	test('an explicit toolListing beats the legacy settings', async () => {
+		simulateVsCodeConfig({ toolListing: 'full', twilightGate: true, twilightStrict: true });
+		assert.strictEqual(resolveToolListing(), 'full');
+		assert.ok((await listed()).length >= 88);
+		simulateVsCodeConfig({ toolListing: 'bootstrapOnly', twilightGate: false });
+		assert.strictEqual(resolveToolListing(), 'bootstrapOnly');
+	});
+
+	test('env VSCODE_MCP_TWILIGHT_GATE still wins', () => {
+		simulateVsCodeConfig({ toolListing: 'bootstrapOnly' });
+		process.env.VSCODE_MCP_TWILIGHT_GATE = '0';
+		assert.strictEqual(resolveToolListing(), 'full');
+		process.env.VSCODE_MCP_TWILIGHT_GATE = '1';
+		assert.strictEqual(resolveToolListing(), 'unlockOnFirstCall');
+		delete process.env.VSCODE_MCP_TWILIGHT_GATE;
+	});
+});
 
 suite('twilight gate (Mammouth one-tool listing)', () => {
 	setup(() => {

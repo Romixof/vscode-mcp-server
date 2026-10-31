@@ -319,7 +319,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
     setTwilightConfigSource({
         get: <T>(section: string, key: string, defaultValue?: T): T =>
-            vscode.workspace.getConfiguration(section).get<T>(key, defaultValue!)
+            vscode.workspace.getConfiguration(section).get<T>(key, defaultValue!),
+        isSet: (section: string, key: string): boolean => {
+            const info = vscode.workspace.getConfiguration(section).inspect(key);
+            return info?.globalValue !== undefined || info?.workspaceValue !== undefined || info?.workspaceFolderValue !== undefined;
+        }
     });
 
     setSandboxConfigProvider(() => {
@@ -454,7 +458,9 @@ export async function activate(context: vscode.ExtensionContext) {
                 event.affectsConfiguration('vscode-mcp-server.enabledTools') ||
                 event.affectsConfiguration('vscode-mcp-server.port') ||
                 event.affectsConfiguration('vscode-mcp-server.host') ||
-                event.affectsConfiguration('vscode-mcp-server.twilightGate');
+                event.affectsConfiguration('vscode-mcp-server.twilightGate') ||
+                event.affectsConfiguration('vscode-mcp-server.twilightStrict') ||
+                event.affectsConfiguration('vscode-mcp-server.toolListing');
             if (!relevant) {
                 return;
             }

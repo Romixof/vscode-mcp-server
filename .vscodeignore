@@ -24,3 +24,13 @@ CONTEXT.md
 SECURITY-*.md
 *.bak-*
 *.zip
+.cloud-attachments/**
+docs/**
+plans/**
+*.log
+*.vsix
+TODO-remaining.md
+Task histoire*.txt
+CLAUDE.md
+AGENTS.md
+eslint.config.mjs

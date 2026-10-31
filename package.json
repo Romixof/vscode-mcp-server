@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
   "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.20.38-twilight.3",
+  "version": "0.20.38",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -89,13 +89,26 @@
           "default": true,
           "description": "Accept requests that carry no Origin header (curl, SDK clients). Browsers always send Origin on cross-site posts, so this does not weaken the drive-by protection."
         },
+        "vscode-mcp-server.toolListing": {
+          "type": "string",
+          "enum": ["full", "unlockOnFirstCall", "bootstrapOnly"],
+          "enumDescriptions": [
+            "Every tool is listed, as before the twilight gate.",
+            "Only session_bootstrap_code is listed at first; its first call unlocks the full list and notifies the client.",
+            "Only session_bootstrap_code is ever listed. Every other tool stays callable by name or through session_bootstrap_code(action=\"call\"). Keeps the schema cache small in clients that list tools once (Mammouth AI)."
+          ],
+          "default": "bootstrapOnly",
+          "description": "Which tools the server advertises in tools/list. After a change, restart the server, then remove and re-add the connector in your MCP client."
+        },
         "vscode-mcp-server.twilightGate": {
           "type": "boolean",
+          "deprecationMessage": "Replaced by vscode-mcp-server.toolListing.",
           "default": false,
           "description": "Twilight gate: clients that call tools/list once cache every schema forever (Mammouth AI). With the gate on, tools/list returns ONLY session_bootstrap_code; the first session_bootstrap_code call unlocks the whole catalog for the server process. Server restart applies a change; the MCP client must also remove and re-add the connector so it lists again."
         },
         "vscode-mcp-server.twilightStrict": {
           "type": "boolean",
+          "deprecationMessage": "Replaced by vscode-mcp-server.toolListing.",
           "default": false,
           "description": "Twilight strict mode (implies #vscode-mcp-server.twilightGate#): tools/list NEVER returns more than session_bootstrap_code, even after the gate is passed — connector pop-ups that re-list can never re-cache the other schemas. Every other tool stays callable by name (tools/call accepts it) but is never advertised; the agent guide remains their only catalog."
         },

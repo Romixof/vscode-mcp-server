@@ -84,7 +84,19 @@ export const TWILIGHT_GATE_ENV = 'VSCODE_MCP_TWILIGHT_GATE';
 
 interface TwilightConfigSource {
         get<T>(section: string, key: string, defaultValue?: T): T;
+        /** True when the user set the key (any scope), not just the package.json default. */
+        isSet?(section: string, key: string): boolean;
 }
+
+/**
+ * vscode-mcp-server.toolListing — what tools/list advertises.
+ * full: every tool. unlockOnFirstCall: the bootstrap tool until its first
+ * call (twilightGate). bootstrapOnly: the bootstrap tool forever
+ * (twilightGate + twilightStrict).
+ */
+export type ToolListingMode = 'full' | 'unlockOnFirstCall' | 'bootstrapOnly';
+const TOOL_LISTING_MODES: readonly ToolListingMode[] = ['full', 'unlockOnFirstCall', 'bootstrapOnly'];
+export const DEFAULT_TOOL_LISTING: ToolListingMode = 'bootstrapOnly';
 
 let twilightConfigSource: TwilightConfigSource | undefined;
 
@@ -96,22 +108,49 @@ export function setTwilightConfigSource(source: TwilightConfigSource | undefined
         twilightConfigSource = source;
 }
 
-function readTwilightConfig(key: string, fallback: boolean): boolean {
+function isConfigSet(source: TwilightConfigSource, key: string): boolean {
+        if (source.isSet) {
+                return source.isSet('vscode-mcp-server', key);
+        }
+        return source.get<unknown>('vscode-mcp-server', key, undefined) !== undefined;
+}
+
+/**
+ * Precedence: VSCODE_MCP_TWILIGHT_GATE env (1 = unlockOnFirstCall, 0 = full),
+ * then an explicit toolListing, then the legacy twilightStrict/twilightGate
+ * settings if either was set, then the default (bootstrapOnly).
+ */
+export function resolveToolListing(): ToolListingMode {
         try {
                 const envValue = process.env[TWILIGHT_GATE_ENV];
-                if (key === 'twilightGate') {
-                        if (envValue === '1') {
-                                return true;
-                        }
-                        if (envValue === '0') {
-                                return false;
-                        }
+                if (envValue === '1') {
+                        return 'unlockOnFirstCall';
                 }
-                if (twilightConfigSource) {
-                        return twilightConfigSource.get<boolean>('vscode-mcp-server', key, fallback);
+                if (envValue === '0') {
+                        return 'full';
+                }
+                const source = twilightConfigSource;
+                if (source) {
+                        if (isConfigSet(source, 'toolListing')) {
+                                const mode = source.get<string>('vscode-mcp-server', 'toolListing', DEFAULT_TOOL_LISTING);
+                                if ((TOOL_LISTING_MODES as readonly string[]).includes(mode)) {
+                                        return mode as ToolListingMode;
+                                }
+                        }
+                        const strictSet = isConfigSet(source, 'twilightStrict');
+                        const gateSet = isConfigSet(source, 'twilightGate');
+                        if (strictSet || gateSet) {
+                                if (strictSet && source.get<boolean>('vscode-mcp-server', 'twilightStrict', false)) {
+                                        return 'bootstrapOnly';
+                                }
+                                if (gateSet && source.get<boolean>('vscode-mcp-server', 'twilightGate', false)) {
+                                        return 'unlockOnFirstCall';
+                                }
+                                return 'full';
+                        }
                 }
         } catch { /* fall through */ }
-        return fallback;
+        return DEFAULT_TOOL_LISTING;
 }
 
 /**
@@ -265,8 +304,10 @@ export class MCPServer {
         this.host = host;
         this.terminal = terminal;
         this.terminalProvider = terminalProvider;
-        this.twilightGate = twilightGate ?? readTwilightConfig('twilightGate', false);
-        this.twilightStrict = twilightStrict ?? readTwilightConfig('twilightStrict', false);
+        // Explicit constructor arguments win (tests); otherwise toolListing decides.
+        const listing = twilightGate === undefined || twilightStrict === undefined ? resolveToolListing() : undefined;
+        this.twilightGate = twilightGate ?? listing !== 'full';
+        this.twilightStrict = twilightStrict ?? (twilightGate === false ? false : listing === 'bootstrapOnly');
         this.toolConfig = toolConfig || {
             file: true,
             edit: true,

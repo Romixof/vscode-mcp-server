@@ -4,7 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [0.20.38-twilight.3] - 2026-10-31
+## [0.20.38] - 2026-10-31
+### Changed
+
+- New `toolListing` setting replaces twilightGate/twilightStrict; default is now `bootstrapOnly` (one tool listed). The old settings still work.
+
 ### Security
 
 - **No more command injection through the read-only git tools.** `get_file_history_code` pasted `since`, `until`, `author`, `grep` and the path into a terminal command between double quotes, and `get_blame_code` did the same with the path; PowerShell runs `$(...)` inside double quotes, so a read-only key could execute commands. Every git tool now runs git directly (`execFile`, arguments as an array, no shell), `list_conflicts_code` reads files with `fs` instead of `cat`, and a client revision starting with `-` is refused.

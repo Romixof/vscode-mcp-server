@@ -13,7 +13,7 @@ const ALL_GROUPS_ON = {
 } as unknown as ToolConfiguration;
 
 async function listedTools(): Promise<Array<{ name: string; description?: string; inputSchema: { properties?: Record<string, { default?: number }> } }>> {
-        const host = new MCPServer(3400, '127.0.0.1', undefined, ALL_GROUPS_ON);
+        const host = new MCPServer(3400, '127.0.0.1', undefined, ALL_GROUPS_ON, undefined, false, false);
         host.setFileListingCallback(async () => []);
         const inner = new McpServer({ name: 'schema', version: 'test' }, {
                 capabilities: { logging: {}, tools: { listChanged: false } }
@@ -66,7 +66,7 @@ suite('shell clamp and shell disclosure', () => {
                         shellIntegration: undefined
                 } as unknown as NonNullable<ConstructorParameters<typeof MCPServer>[2]>;
 
-                const host = new MCPServer(3400, '127.0.0.1', bashTerminal, ALL_GROUPS_ON);
+                const host = new MCPServer(3400, '127.0.0.1', bashTerminal, ALL_GROUPS_ON, undefined, false, false);
                 host.setFileListingCallback(async () => []);
                 const inner = new McpServer({ name: 'schema', version: 'test' }, {
                         capabilities: { logging: {}, tools: { listChanged: false } }
