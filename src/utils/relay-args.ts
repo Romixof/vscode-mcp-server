@@ -1,5 +1,3 @@
-import { z } from 'zod';
-
 /**
  * Argument repair for the bootstrap relay.
  *
@@ -71,9 +69,11 @@ function escapeRegex(text: string): string {
 
 /** Top-level keys of a tool's input schema, or undefined when not an object schema. */
 export function schemaKeys(schema: unknown): string[] | undefined {
-        const s = schema as z.ZodTypeAny | undefined;
-        if (s && s instanceof z.ZodObject) {
-                return Object.keys(s.shape);
+        // The SDK wraps a raw shape in a zod/mini object, which is not a
+        // z.ZodObject instance, so read the definition instead.
+        const def = (schema as { _zod?: { def?: { type?: string; shape?: Record<string, unknown> } } } | undefined)?._zod?.def;
+        if (def?.type === 'object' && def.shape) {
+                return Object.keys(def.shape);
         }
         return undefined;
 }

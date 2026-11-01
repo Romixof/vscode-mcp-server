@@ -597,7 +597,7 @@ export function registerBrowserTools(server: McpServer): void {
                 'Runs any Chrome DevTools MCP tool by name (list_pages, select_page, press_key, type_text, wait_for, evaluate_script, list_console_messages, list_network_requests, lighthouse_audit...). tool="list" lists them with params. Sensitive calls wait for approval in VS Code.',
                 {
                         tool: z.string(),
-                        args: z.record(z.unknown()).optional()
+                        args: z.record(z.string(), z.unknown()).optional()
                 },
                 async ({ tool, args }): Promise<CallToolResult> => {
                         if (tool === 'list') {

@@ -4,6 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.45] - 2026-11-02
+### Security
+
+- zod upgraded from 3 to 4 (fixes a high-severity memory exhaustion advisory, GHSA-mrhx-c7xc-m3w5). Tool schemas sent to MCP clients are unchanged, and the bootstrap relay still repairs guessed argument names. Validation errors now read "Invalid input: expected string, received number" instead of "Expected string, received number".
+
 ## [0.20.43] - 2026-11-01
 ### Fixed
 

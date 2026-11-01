@@ -181,7 +181,7 @@ Follows redirects by default.`,
         {
             url: z.string().describe('Endpoint URL. http/https only; private and link-local targets need allowPrivateNetwork.'),
             method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']).optional().default('GET').describe('HTTP method'),
-            headers: z.record(z.string()).optional().describe('Request headers'),
+            headers: z.record(z.string(), z.string()).optional().describe('Request headers'),
             body: z.string().optional().describe('Request body (JSON, form data, etc.)'),
             timeout: z.number().optional().default(10000).describe('Request timeout in ms'),
             followRedirects: z.boolean().optional().default(true).describe('Follow redirects'),

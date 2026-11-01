@@ -34,6 +34,7 @@ import { registerAdvancedTools, registerSessionBootstrapTool } from './tools/adv
 import { registerCoffeeTools } from './tools/coffee-tools';
 import { registerSearchTools } from './tools/search-tools';
 import { applyToolAnnotations } from './utils/tool-annotations';
+import { keepListedSchemasStable } from './utils/list-schema-compat';
 import { registerSkillsTools } from './tools/skills-tools';
 import { EXTENSION_ID } from './tools/advanced-tools';
 import { registerOcrTools } from './tools/ocr-tools';
@@ -597,6 +598,7 @@ export class MCPServer {
             logger.warn(`Tool annotations missing for: ${annotationReport.unknown.join(', ')}`);
         }
         this.enforceScopesOn(server);
+        keepListedSchemasStable(server);
         const registered = (server as unknown as { _registeredTools?: Record<string, unknown> })._registeredTools;
         setRegisteredTools(registered ? Object.keys(registered) : []);
     }

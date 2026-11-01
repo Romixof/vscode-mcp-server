@@ -262,7 +262,7 @@ TOPIC: subfolder="<path>" loads THAT topic's memory, state and log.
 RELAY: action="call" runs any unlisted tool by name — every tool in the index, incl. lookup_tool_code.`, {
                         action: z.enum(['bootstrap', 'call']).optional().describe('bootstrap = default; call = RELAY: run "tool" with "args" even though it is not in your client list.'),
                         tool: z.string().optional().describe('action="call" only: the tool to run'),
-                        args: z.record(z.unknown()).optional().describe('action="call" only: the tool arguments'),
+                        args: z.record(z.string(), z.unknown()).optional().describe('action="call" only: the tool arguments'),
                         sections: z.array(z.enum(['memory', 'guide', 'skills', 'layout'])).optional().describe('Parts to return; omit for all four.'),
                         mode: z.enum(['full', 'compact']).optional().default('compact').describe('compact = state only (default); full = the rest, when needed'),
                         subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
