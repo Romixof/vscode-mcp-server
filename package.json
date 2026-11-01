@@ -3,7 +3,7 @@
   "icon": "media/logo.png",
   "displayName": "VSCodium MCP Server",
   "description": "Turn VS Code into an MCP server — file ops, symbols, diagnostics, tests, and persistent memory for AI coding assistants.",
-  "version": "0.20.38",
+  "version": "0.20.43",
   "repository": "https://github.com/Romixof/vscode-mcp-server",
   "publisher": "Romixo",
   "license": "MIT",
@@ -152,6 +152,22 @@
             "Never ask (only for a trusted, local client)"
           ],
           "description": "When browser tools need your confirmation in VS Code."
+        },
+        "vscode-mcp-server.browser.showActivity": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the agent's activity in the page: a glowing frame and a label while it works, and a cursor that moves to each element before a click or a fill. Hidden from screenshots and page snapshots."
+        },
+        "vscode-mcp-server.browser.activityLabel": {
+          "type": "string",
+          "default": "Controlled by VSCodium MCP Server",
+          "maxLength": 80,
+          "description": "Text of the label shown at the bottom of the page while the agent works."
+        },
+        "vscode-mcp-server.browser.bringToFront": {
+          "type": "boolean",
+          "default": true,
+          "description": "Bring the Chrome window to the front after the first page opens (Windows may only flash the taskbar button)."
         },
         "vscode-mcp-server.browser.headless": {
           "type": "boolean",

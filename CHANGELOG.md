@@ -4,6 +4,45 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.43] - 2026-11-01
+### Fixed
+
+- Three relay calls from a live Mammouth session failed and had to be retried:
+  - Line numbers sent as `firstLine`/`lastLine` are now moved to `startLine`/`endLine` (the anchors are text).
+  - `replace_lines_code` without any validation still refuses to write, but the error now shows the real start of both lines and the exact `firstLine`/`lastLine` values to retry with. Anchor mismatches do the same, and a blank end line is named as blank (its anchor is `""`).
+  - `OriginalCode`/`NewCode` on `edit_file_code` map to `old_string`/`new_string`, and `old_string`/`new_string` on `replace_lines_code` map to `originalCode`/`content`.
+
+## [0.20.42] - 2026-11-01
+### Fixed
+
+- **Relay arguments are no longer dropped silently.** Through `session_bootstrap_code(action="call")`, common guessed names now map onto the real parameter (`query` -> `pattern`, `include` -> `glob`, `newText` -> `content`/`new_string`, `StartLine`/`start_line` -> `startLine`, ...), and the result says which names were mapped. `isRegex=false` escapes the pattern. Any key that is still unknown is refused, with the list of valid arguments, and the tool does not run. Before, a search with `include` scanned the whole workspace.
+- **A relay call without `action="call"` now runs.** `tool` + `args` with no `action` is relayed. With `action="bootstrap"` it returns an error saying nothing ran, instead of a plain bootstrap that made the model believe the edit tools were missing.
+- Argument errors through the relay now include the tool signature, so no extra lookup is needed.
+
+### Added
+
+- **`replace_lines_code` can delete long or minified lines.** Validate with `firstLine` + `lastLine` (the start of each end line, 12+ characters) instead of the whole `originalCode`. Omit `content` to delete the lines with their line breaks. On a mismatch the error shows the real lines (or the first differing line for `originalCode`), and nothing is written. `diff_preview_code` previews a deletion the same way.
+
+### Changed
+
+- Agent guide v26: the "TOOL BUDGET" paragraph is now "UNLISTED TOOLS" and says that a client listing only `session_bootstrap_code` limits nothing and that there is no cap on calls or turns. Models read "budget" as a call limit and stopped with the work undone. The duplicated TOOL INDEX header in the compact guide is gone.
+
+## [0.20.41] - 2026-10-31
+### Changed
+
+- Activity overlay teal darkened from `#1ec8a5` to `#0f9a80` (frame light, glow, cursor, highlight, ripple, label dot).
+
+## [0.20.40] - 2026-10-31
+### Changed
+
+- **Activity overlay restyled in the logo colours**: teal `#1ec8a5` on navy `#27333f` instead of violet. The frame now has 18 px rounded corners inset from the page edge, a light that runs around it (rotating conic gradient, masked to a 3 px ring) and a breathing outer glow; the cursor, element highlight, click ripple and label follow the same palette. Animations stop under `prefers-reduced-motion`.
+
+## [0.20.39] - 2026-10-31
+### Added
+
+- **See what the agent does in Chrome** (`vscode-mcp-server.browser.showActivity`, on by default). While the model works, the page gets a pulsing violet frame and a "Controlled by VSCodium MCP Server" label (`browser.activityLabel`); before each click, fill, hover or drag a cursor glides to the element, highlights it and, for a click, shows a ripple. The overlay lives in a closed shadow root on an aria-hidden, pointer-events:none host, so it never takes clicks, stays out of `browser_snapshot_code`, and is hidden while `browser_screenshot_code` captures. It is redrawn after each navigation and fades after 8 s without activity.
+- **The Chrome window comes to the front** after the first page opens (`browser.bringToFront`), instead of working unseen behind VS Code. Best effort on Windows, which can refuse focus changes and flash the taskbar instead.
+
 ## [0.20.38] - 2026-10-31
 ### Changed
 

@@ -246,36 +246,109 @@ Always check with list_files_code first unless you specifically want to overwrit
 
         server.tool(
                 'replace_lines_code',
-                `Replaces a line range in an existing file, validated against the current content.
+                `Replaces or deletes a line range, validated against the current lines. For "find this text, put that text" use edit_file_code.
 
-WHEN TO USE: a pure insertion or deletion at a known line, or an edit larger than a single exact string.
-USE edit_file_code instead for: any change to existing code you can describe as "find this text, put that text there". It survives other edits shifting line numbers, which this tool does not.
-
-CRITICAL: originalCode must match the current file content exactly or the tool fails.
-If it fails: read_file_code on the target lines, then retry.`,
+VALIDATE with originalCode (verbatim) OR firstLine + lastLine (start of each end line, 12+ chars; for long/minified lines). Omit content to delete the lines.`,
                 {
-                        path: z.string().describe('The path to the file to modify'),
-                        startLine: z.number().describe('The start line number (1-based, inclusive)'),
-                        endLine: z.number().describe('The end line number (1-based, inclusive)'),
-                        content: z.string().describe('The new content to replace the lines with'),
-                        originalCode: z.string().describe('The original code for validation - must match exactly'),
+                        path: z.string().describe('File to modify'),
+                        startLine: z.number().describe('1-based, inclusive'),
+                        endLine: z.number().describe('1-based, inclusive'),
+                        content: z.string().optional().describe('New lines; omit to delete'),
+                        originalCode: z.string().optional().describe('Current lines, verbatim'),
+                        firstLine: z.string().optional().describe('Start of line startLine'),
+                        lastLine: z.string().optional().describe('Start of line endLine'),
                         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
                 },
-                async ({ path, startLine, endLine, content, originalCode, workspace }): Promise<CallToolResult> => {
-                        await replaceWorkspaceFileLines(path, startLine - 1, endLine - 1, content, originalCode, workspace);
-                        return { content: [{ type: 'text', text: `Replaced lines ${startLine}-${endLine} in ${path}` }] };
+                async ({ path, startLine, endLine, content, originalCode, firstLine, lastLine, workspace }): Promise<CallToolResult> => {
+                        const removed = await replaceWorkspaceFileLines(path, startLine - 1, endLine - 1, content, { originalCode, firstLine, lastLine }, workspace);
+                        const count = endLine - startLine + 1;
+                        const text = content === undefined
+                                ? `Deleted lines ${startLine}-${endLine} (${count} line${count === 1 ? '' : 's'}) in ${path}. Lines below moved up by ${removed}.`
+                                : `Replaced lines ${startLine}-${endLine} in ${path}`;
+                        return { content: [{ type: 'text', text }] };
                 }
         );
+}
+
+/** Minimum anchor length, so "}" or "<div>" cannot vouch for a whole range. */
+export const MIN_ANCHOR_CHARS = 12;
+
+export interface LineValidation {
+        originalCode?: string;
+        firstLine?: string;
+        lastLine?: string;
+}
+
+const preview = (line: string): string => JSON.stringify(line.length > 120 ? `${line.slice(0, 120)}…` : line);
+
+/**
+ * Checks one anchor against a real line: the anchor (leading whitespace and
+ * trailing "..." ignored) must be a prefix of the line, and long enough to
+ * identify it unless it is the whole line.
+ */
+export function anchorMatches(line: string, anchor: string): boolean {
+        const want = anchor.replace(/^\s+/, '').replace(/(\.\.\.|…)\s*$/, '').replace(/\r$/, '');
+        const have = line.replace(/^\s+/, '');
+        if (want.length === 0) {
+                return have.length === 0;
+        }
+        if (!have.startsWith(want)) {
+                return false;
+        }
+        return want.length >= MIN_ANCHOR_CHARS || want.length === have.length;
+}
+
+/** The anchor a caller should send for this line: its start, trimmed, at most 40 characters. */
+export function suggestAnchor(line: string): string {
+        const t = line.replace(/^\s+/, '');
+        return t.length <= 40 ? t : t.slice(0, 40);
+}
+
+/** Throws with the real lines when the validation does not hold. */
+export function validateLineRange(current: string[], startLine: number, validation: LineValidation): void {
+        const { originalCode, firstLine, lastLine } = validation;
+        const first = startLine + 1;
+        const last = startLine + current.length;
+        if (originalCode !== undefined) {
+                const given = originalCode.replace(/\r\n/g, '\n').split('\n');
+                if (given.join('\n') === current.join('\n')) {
+                        return;
+                }
+                const at = current.findIndex((line, i) => line !== given[i]);
+                const idx = at === -1 ? current.length : at;
+                throw new Error(`Original code validation failed at line ${first + idx}: expected ${preview(current[idx] ?? '<end of range>')}, got ${preview(given[idx] ?? '<missing>')}. `
+                        + `The range ${first}-${last} has ${current.length} line(s); you sent ${given.length}. Nothing was written. `
+                        + 'For long lines, pass firstLine + lastLine (the start of each end line) instead of originalCode.');
+        }
+        // Every failure below shows the real line starts and the exact anchors
+        // to send, so a correct range costs one retry, not a re-read.
+        const head = current[0];
+        const tail = current[current.length - 1];
+        const describe = (n: number, line: string): string => line.trim() === '' ? `line ${n} is blank` : `line ${n} starts with ${preview(line)}`;
+        const retry = `If that range is right, retry with firstLine=${JSON.stringify(suggestAnchor(head))}, lastLine=${JSON.stringify(suggestAnchor(tail))}.`;
+        if (firstLine === undefined || lastLine === undefined) {
+                throw new Error(`Validation required: pass originalCode (the lines verbatim) or firstLine + lastLine (the text line ${first} and line ${last} start with). Nothing was written. ${describe(first, head)}; ${describe(last, tail)}. ${retry}`);
+        }
+        const problems: string[] = [];
+        if (!anchorMatches(head, firstLine)) {
+                problems.push(describe(first, head));
+        }
+        if (!anchorMatches(tail, lastLine) && !(current.length === 1 && problems.length)) {
+                problems.push(describe(last, tail));
+        }
+        if (problems.length) {
+                throw new Error(`Anchor check failed: ${problems.join('; ')}. Nothing was written. Anchors are the start of the line, at least ${MIN_ANCHOR_CHARS} characters or the whole line. ${retry}`);
+        }
 }
 
 export async function replaceWorkspaceFileLines(
         workspacePath: string,
         startLine: number,
         endLine: number,
-        content: string,
-        originalCode: string,
+        content: string | undefined,
+        validation: string | LineValidation,
         workspace?: string
-): Promise<void> {
+): Promise<number> {
         const fileUri = resolveInputPath(workspacePath, workspace);
         const document = await vscode.workspace.openTextDocument(fileUri);
 
@@ -290,18 +363,31 @@ export async function replaceWorkspaceFileLines(
         for (let i = startLine; i <= endLine; i++) {
                 current.push(document.lineAt(i).text);
         }
-        if (current.join('\n') !== originalCode) {
-                throw new Error('Original code validation failed. The current content does not match the provided original code.');
-        }
+        validateLineRange(current, startLine, typeof validation === 'string' ? { originalCode: validation } : validation);
 
-        const range = new vscode.Range(
-                new vscode.Position(startLine, 0),
-                new vscode.Position(endLine, document.lineAt(endLine).text.length)
-        );
+        let range: vscode.Range;
+        if (content !== undefined) {
+                range = new vscode.Range(
+                        new vscode.Position(startLine, 0),
+                        new vscode.Position(endLine, document.lineAt(endLine).text.length)
+                );
+        } else if (endLine + 1 < document.lineCount) {
+                // Delete the lines and the line break after the last one.
+                range = new vscode.Range(new vscode.Position(startLine, 0), new vscode.Position(endLine + 1, 0));
+        } else if (startLine > 0) {
+                // Last lines of the file: take the line break before them instead.
+                range = new vscode.Range(
+                        new vscode.Position(startLine - 1, document.lineAt(startLine - 1).text.length),
+                        new vscode.Position(endLine, document.lineAt(endLine).text.length)
+                );
+        } else {
+                range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(endLine, document.lineAt(endLine).text.length));
+        }
         const edit = new vscode.WorkspaceEdit();
-        edit.replace(document.uri, range, content);
+        edit.replace(document.uri, range, content ?? '');
         if (!await vscode.workspace.applyEdit(edit)) {
                 throw new Error(`Failed to replace lines in file: ${fileUri.fsPath}`);
         }
         await document.save();
+        return content === undefined ? endLine - startLine + 1 : 0;
 }

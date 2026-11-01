@@ -12,7 +12,8 @@ import { loadAllMemory } from './memory-tools';
 import { collectSkillsList } from './skills-tools';
 import { resolveAgentInstructions, AGENT_INSTRUCTIONS_VERSION } from '../utils/agent-instructions';
 import { resolveBrowserAlias, runBrowserAlias } from './browser-tools';
-import { searchCatalog } from '../utils/tool-catalog';
+import { searchCatalog, CATALOG } from '../utils/tool-catalog';
+import { normalizeRelayArgs, schemaKeys } from '../utils/relay-args';
 import {
         BOOTSTRAP_LOG_ENTRIES,
         BOOTSTRAP_MEMORY_CHARS,
@@ -215,18 +216,36 @@ async function relayToolCall(server: McpServer, tool: string | undefined, args: 
         // (reading 'trim')").
         let payload: Record<string, unknown> = args ?? {};
         const schema = entry.inputSchema as z.ZodTypeAny | undefined;
+        // Guessed names (query, include, newText...) used to be stripped
+        // silently, so the call ran without them. Map the common ones onto
+        // the real parameter and refuse whatever is still unknown.
+        let renamedNote = '';
+        const keys = schemaKeys(schema);
+        if (keys) {
+                const normalized = normalizeRelayArgs(args, keys);
+                if (normalized.unknown.length) {
+                        return err(`Tool "${tool}" does not take ${normalized.unknown.map(k => `"${k}"`).join(', ')}. Nothing ran. Valid arguments: ${keys.join(', ')}. Retry with those names, e.g. session_bootstrap_code(action="call", tool="${tool}", args={...}).`);
+                }
+                payload = normalized.args;
+                if (normalized.renamed.length) {
+                        renamedNote = `[relay: ${normalized.renamed.join('; ')}. Use the real names next time.]`;
+                }
+        }
         if (schema && typeof schema.safeParse === 'function') {
-                const parsed = schema.safeParse(args ?? {});
+                const parsed = schema.safeParse(payload);
                 if (!parsed.success) {
                         const issues = parsed.error.issues
                                 .map(i => `${i.path.length ? i.path.join('.') : 'arguments'}: ${i.message}`)
                                 .join('; ');
-                        return err(`Tool "${tool}" rejected its arguments: ${issues}. Fetch the exact signature with session_bootstrap_code(action="call", tool="lookup_tool_code", args={"query":"${tool}"}).`);
+                        const sig = CATALOG[tool]?.sig;
+                        return err(`Tool "${tool}" rejected its arguments: ${issues}. Nothing ran.${sig ? ` Signature: ${sig}.` : ''} Full card: session_bootstrap_code(action="call", tool="lookup_tool_code", args={"query":"${tool}"}).`);
                 }
                 payload = parsed.data as Record<string, unknown>;
         }
         return entry.handler(payload, { signal: new AbortController().signal, requestId: 'relay' })
-                .then(result => result)
+                .then(result => renamedNote
+                        ? { ...result, content: [...(result.content ?? []), { type: 'text' as const, text: renamedNote }] }
+                        : result)
                 .catch(e => err(`Tool "${tool}" failed via relay: ${e instanceof Error ? e.message : String(e)}`));
 }
 
@@ -241,7 +260,7 @@ CALL ON EVERY USER MESSAGE — no context survives between messages. Default mod
 TOPIC: subfolder="<path>" loads THAT topic's memory, state and log.
 
 RELAY: action="call" runs any unlisted tool by name — every tool in the index, incl. lookup_tool_code.`, {
-                        action: z.enum(['bootstrap', 'call']).optional().default('bootstrap').describe('bootstrap = default; call = RELAY: run "tool" with "args" even though it is not in your client list.'),
+                        action: z.enum(['bootstrap', 'call']).optional().describe('bootstrap = default; call = RELAY: run "tool" with "args" even though it is not in your client list.'),
                         tool: z.string().optional().describe('action="call" only: the tool to run'),
                         args: z.record(z.unknown()).optional().describe('action="call" only: the tool arguments'),
                         sections: z.array(z.enum(['memory', 'guide', 'skills', 'layout'])).optional().describe('Parts to return; omit for all four.'),
@@ -249,9 +268,20 @@ RELAY: action="call" runs any unlisted tool by name — every tool in the index,
                         subfolder: z.string().optional().describe(SUBFOLDER_PARAM_DESCRIPTION),
                         workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
                 },
-                async ({ action = 'bootstrap', tool, args, sections, mode = 'full', subfolder, workspace }): Promise<CallToolResult> => {
-                        if (action === 'call') {
+                async ({ action, tool, args, sections, mode = 'full', subfolder, workspace }): Promise<CallToolResult> => {
+                        // A relay call that forgot action="call" used to fall
+                        // back to a plain bootstrap: nothing ran, and the model
+                        // concluded the edit tools were missing. Route it when
+                        // action is omitted; refuse it when action says bootstrap.
+                        const wantsRelay = (typeof tool === 'string' && tool.trim() !== '') || (args !== undefined && Object.keys(args).length > 0);
+                        if (action === 'call' || (action === undefined && wantsRelay)) {
                                 return relayToolCall(server, tool, args);
+                        }
+                        if (wantsRelay) {
+                                return {
+                                        content: [{ type: 'text', text: `Nothing ran: you passed ${tool ? `tool="${tool}"` : 'args'} with action="bootstrap". To run a tool, call session_bootstrap_code(action="call", tool="${tool || '<name>'}", args={...}). Every tool in the index works this way, including edit_file_code and replace_lines_code.` }],
+                                        isError: true
+                                };
                         }
                         const want = (name: 'memory' | 'guide' | 'skills' | 'layout'): boolean => !sections || sections.includes(name);
                         const memory = want('memory');
@@ -267,7 +297,7 @@ RELAY: action="call" runs any unlisted tool by name — every tool in the index,
                                 // not null — so a plain ?? would serve an empty section. Treat
                                 // any blank read the same as a missing file.
                                 parts.push(state && state.trim() ? state : '*No workspace state recorded yet — record one with workspace_state_code(action="write", …).*');
-                                parts.push(`\n\nThis compact anchor is what you re-run on each new user message — the light default. Full memory/layout/skills/guide: a second call with mode="full" when the task needs them. If a tool you need is not in your callable list, run it through the relay: session_bootstrap_code(action="call", tool="<name>", args={...}) — it works for every tool in the index, including lookup_tool_code for a full card.`);
+                                parts.push(`\n\nThis compact anchor is what you re-run on each new user message — the light default. It ran no other tool. Full memory/layout/skills/guide: a second call with mode="full" when the task needs them. If a tool you need is not in your callable list, run it through the relay: session_bootstrap_code(action="call", tool="<name>", args={...}) — it works for every tool in the index (edit_file_code and replace_lines_code included), and there is no limit on how many calls you make.`);
                                 return { content: [{ type: 'text', text: parts.join('\n') }] };
                         }
                         if (memory) {

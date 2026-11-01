@@ -99,7 +99,7 @@ Optional parameters are listed with their defaults.
 
 ### Edit tools
 - **create_file_code**: creates a file or rewrites an existing one completely. Params: `path`, `content`, `overwrite` (default false), `ignoreIfExists` (default false).
-- **replace_lines_code**: replaces a line range, validating against the original text. Params: `path`, `startLine`, `endLine`, `content`, `originalCode`.
+- **replace_lines_code**: replaces or deletes a line range, validated against the current lines. Params: `path`, `startLine`, `endLine`, `content` (omit to delete the lines), and either `originalCode` (verbatim) or `firstLine` + `lastLine` (the start of the first and last line, at least 12 characters; meant for long or minified lines).
 - **diff_preview_code** (read-only): dry-run of the edit tools above and of move/rename — returns the unified diff that would be written without touching anything, and ends with the exact call to apply it. Params: `op` (`replace_lines`, `create`, `move`, `rename`) plus the same parameters the matching tool takes.
 
 ### Search (always on)
@@ -234,6 +234,8 @@ Reading scanned documents runs entirely on your machine: for every engine, no pa
 ### Browser (Chrome DevTools MCP)
 
 The server can drive a Chrome browser for the model through [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp). Nothing runs until the first browser call: the extension then starts `npx -y chrome-devtools-mcp@1.12.0` in the background (Node.js 20+ and Chrome must be installed) and relays its tools on the same `/mcp` endpoint, so a remote client such as Mammouth gets the browser through the connector it already has. Which Chrome it drives is set by `browser.profile`: `dedicated` (default) opens a separate window whose profile keeps cookies and logins between sessions, so you sign in once; `myChrome` attaches to the Chrome you already have open, with your tabs and logins (Chrome 144+; switch remote debugging on once at `chrome://inspect/#remote-debugging`; a remote client then acts with your sessions, so keep the API key secret); `isolated` is a throwaway profile. The "controlled by automated test software" bar is hidden by default (`browser.hideAutomationBanner`); Chrome does not allow changing its text. The browser closes after `browser.idleTimeoutMinutes` without a call.
+
+While the model works, the page shows a pulsing frame, a "Controlled by VSCodium MCP Server" label and a cursor that moves to each element before clicking or typing, and the Chrome window comes to the front after the first page opens (`browser.showActivity`, `browser.activityLabel`, `browser.bringToFront`). The overlay never takes clicks and is left out of snapshots and screenshots.
 
 Screenshots come back as an image for the model and as a 30-minute link (`/browser-shot/<random id>` on this server) the model pastes as `![screenshot](url)` so the user sees it in the chat. Tool names that models guess from other browser servers (`browser_tabs`, `browser_take_screenshot`, `browser_navigate`, raw Chrome DevTools names...) are translated to the tools below.
 

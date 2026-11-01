@@ -204,6 +204,6 @@ suite('v24 guide rules', () => {
         });
 
         test('the guide version moved to 25', () => {
-                assert.strictEqual(agentInstructions.AGENT_INSTRUCTIONS_VERSION, '25');
+                assert.strictEqual(agentInstructions.AGENT_INSTRUCTIONS_VERSION, '26');
         });
 });

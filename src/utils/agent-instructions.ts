@@ -16,18 +16,18 @@ const TOOL_CATALOG_SIZE = Object.keys(TOOL_HINTS).length;
  * Full guide text: the workflow rules plus every tool as one detailed card.
  * Composed from the catalog so it cannot drift: every tool contributes one
  * detailed entry built from its card. The TOOL INDEX header states the card
- * count derived from TOOL_HINTS, and the TOOL BUDGET + EDIT RULE paragraphs
+ * count derived from TOOL_HINTS, and the UNLISTED TOOLS + EDIT RULE paragraphs
  * teach the partial-list and ambiguous-edit behavior, so the guide stays
  * self-sufficient for clients that only fetch this text.
  */
 export const DEFAULT_AGENT_INSTRUCTIONS: string = [
-        'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response. That tool is absent from some client lists. When it is missing, ONE get_agent_instructions_code() call returns this same guide, so you are never left without it. When your client lists nothing but session_bootstrap_code, every tool still runs through the relay it provides (see TOOL BUDGET).',
+        'You are working on an existing codebase through a VS Code workspace served by the "vscode-mcp-server" MCP server. This guide IS your complete tool map: do NOT call tools/list, do NOT explore to discover tools, do NOT guess tool names - every tool with its key parameters is listed below. Open every new conversation with ONE session_bootstrap_code() call: it returns memory + workspace layout + skills + this guide in a single response. That tool is absent from some client lists. When it is missing, ONE get_agent_instructions_code() call returns this same guide, so you are never left without it. When your client lists nothing but session_bootstrap_code, every tool still runs through the relay it provides (see UNLISTED TOOLS).',
         '',
         `TOOL INDEX (${TOOL_CATALOG_SIZE} tools — the full cards are listed below; lookup_tool_code(query) returns the exact signature, params, RO/MUT/DST class, when NOT to use it):`,
         '',
-        'TOOL BUDGET: your client may expose only a subset of the tools below as callable — sometimes session_bootstrap_code alone. Every tool in the index IS callable by name even when unlisted, through the bootstrap relay: session_bootstrap_code(action="call", tool="<name>", args={...}) runs the named tool and returns its result. Fetch a card first when unsure of a signature — directly when listed: lookup_tool_code(query="<task>"), or via the relay: session_bootstrap_code(action="call", tool="lookup_tool_code", args={query:"<task>"}). Never claim a tool is unavailable without trying the relay; never silently skip the step. Never list a folder when the user already gave the path; never re-read a file you just wrote. Chain shell steps into one call (cmd1 && cmd2).',
+        'UNLISTED TOOLS: your client may expose only a subset of the tools below as callable — sometimes session_bootstrap_code alone. That limits nothing and there is no cap on calls or turns. Every tool in the index IS callable by name even when unlisted, through the bootstrap relay: session_bootstrap_code(action="call", tool="<name>", args={...}) runs the named tool and returns its result. Fetch a card first when unsure of a signature — directly when listed: lookup_tool_code(query="<task>"), or via the relay: session_bootstrap_code(action="call", tool="lookup_tool_code", args={query:"<task>"}). Never claim a tool is unavailable without trying the relay; never silently skip the step. Never list a folder when the user already gave the path; never re-read a file you just wrote. Chain shell steps into one call (cmd1 && cmd2).',
         '',
-        'EDIT RULE: change existing code with edit_file_code(path, old_string, new_string) — exact-text match, refuses ambiguity. If old_string matches more than once (2+ matches), nothing is applied: extend old_string with surrounding lines to make it unique, or pass replace_all=true to change every occurrence. create_file_code only for a new file or whole-file rewrite; replace_lines_code for a pure insertion/deletion at a known line; rename_symbol_code for renames — never manual search/replace.',
+        'EDIT RULE: change existing code with edit_file_code(path, old_string, new_string) — exact-text match, refuses ambiguity. If old_string matches more than once (2+ matches), nothing is applied: extend old_string with surrounding lines to make it unique, or pass replace_all=true to change every occurrence. create_file_code only for a new file or whole-file rewrite; replace_lines_code for an insertion/deletion at a known line range (firstLine+lastLine anchors for long lines, omit content to delete); rename_symbol_code for renames — never manual search/replace.',
         '',
         `FULL TOOL CATALOG — ${TOOL_CATALOG_SIZE} detailed cards, one per tool with signature, params and RO/MUT/DST class:`,
         '',
@@ -38,7 +38,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS: string = [
         'APPROVALS: [RO] tools are auto-approved - call them freely. [MUT] and [DST] may require manual approval - for multi-step modifications present a short plan first, then execute it.'
 ].join('\n');
 
-export const AGENT_INSTRUCTIONS_VERSION = '25';
+export const AGENT_INSTRUCTIONS_VERSION = '26';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -75,15 +75,14 @@ const WORKFLOW_RULES = [
                 '1. EVERY user message opens with session_bootstrap_code() — default mode="compact": a light re-anchor (workspace state only). Escalate ONLY if the task needs more: mode="full" for memory + layout + skills + guide, subfolder="<topic dir>" to scope a topic. Small one-off tasks stay compact.',
         '2. Explore: list_files_code (root: never recursive=true), read_file_code with ranges; get_document_symbols_code to outline, search_symbols_code to locate and define.',
         '3. Search text with search_workspace_code — NEVER shell commands for reading or searching files.',
-        '4. Edit with edit_file_code (exact match, refuses ambiguity); create_file_code for new files; replace_lines_code to insert/delete at a line; rename_symbol_code for renames.',
+        '4. Edit with edit_file_code (exact match, refuses ambiguity); create_file_code for new files; replace_lines_code to insert/delete a line range (long lines: firstLine+lastLine anchors instead of originalCode; omit content to delete); rename_symbol_code for renames.',
         '5. After EVERY change batch run get_diagnostics_code(). Before ANY commit run find_secrets_code() then security_scan_code().',
         '6. Builds/tests: run_task_code / run_tests_code / build_project_code. Shell is LAST RESORT (~27s max); long runs: background_task_code, poll action="output".',
         '7. Web: browser_open_code(url) -> browser_snapshot_code() for uids -> browser_click_code / browser_fill_code -> snapshot again; browser_screenshot_code to see it (to show the user, paste the ![screenshot](url) it returns); the rest via browser_call_code(tool, args), tool="list" lists them. Sensitive calls wait for approval in VS Code.',
         '8. Never stop with work pending: handoff_code(inProgress, lastTool, nextStep) first, then report what remains; close finished work with ONE session_end_code(summary, …).',
         '',
-        'TOOL BUDGET: some tools may be unlisted but every one IS callable through the relay: session_bootstrap_code(action="call", tool="<name>", args={...}). Fetch a card when unsure: lookup_tool_code(query="<task>"). Never claim a tool is unavailable without trying the relay. Never list a given folder; never re-read a file you just wrote. Chain shell steps (cmd1 && cmd2).',
+        'UNLISTED TOOLS: your client may list only session_bootstrap_code. That is normal and limits nothing: every tool below, edit tools included, runs through it with session_bootstrap_code(action="call", tool="<name>", args={...}). There is no cap on calls or turns. Use the exact parameter names from the card: lookup_tool_code(query="<task>"). Never tell the user a tool is unavailable without trying the relay. Never list a given folder; never re-read a file you just wrote. Chain shell steps (cmd1 && cmd2).',
         '',
-        `TOOL INDEX (${TOOL_CATALOG_SIZE} tools — full card via lookup_tool_code(query)):`,
         compactCatalogIndex(),
         '',
         'LEGEND: [RO] auto-approved; [MUT]/[DST] may need approval. Path tools accept workspace="<folder name or 1-based index>".'

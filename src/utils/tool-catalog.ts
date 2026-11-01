@@ -34,7 +34,7 @@ export const CATALOG: Record<string, ToolMeta> = {
         test_impact_code: { sig: 'test_impact_code(files)', brief: 'changed files -> tests that transitively import them (defaults to git changes)', kw: 'impact tests affected by change which', sec: 'symbols' },
         migration_diff_code: { sig: 'migration_diff_code(base, head="HEAD")', brief: 'two revisions: files changed, declarations added, BREAKING removals', kw: 'migration diff revisions between commits api', sec: 'symbols' },
         edit_file_code: { sig: 'edit_file_code(path, old_string, new_string, replace_all)', brief: 'THE way to change existing code: exact-text match, no stale line numbers; fails on 0 matches, lists every location on 2+ unless replace_all', kw: 'edit lancer spell change modify replace str_replace patch fix code update', sec: 'edits' },
-        replace_lines_code: { sig: 'replace_lines_code(path, startLine, endLine, content, originalCode)', brief: 'pure insertion or deletion at a known line; originalCode must match exactly', kw: 'insert delete lines replace known line insertion', sec: 'edits' },
+        replace_lines_code: { sig: 'replace_lines_code(path, startLine, endLine, content, originalCode | firstLine+lastLine)', brief: 'insert, replace or delete a line range; validate with originalCode verbatim, or firstLine+lastLine (start of each end line) for long lines; omit content to delete', kw: 'insert delete remove lines replace known line insertion range block supprimer lignes', sec: 'edits' },
         create_file_code: { sig: 'create_file_code(path, content, overwrite, ignoreIfExists)', brief: 'new file or complete rewrite', kw: 'create new file write generate écrire rédiger fichier document creer nouveau', sec: 'edits' },
         rename_symbol_code: { sig: 'rename_symbol_code(oldName, newName, dryRun, exclude)', brief: 'workspace-wide symbol rename with word-boundary matching; use dryRun=true to preview', kw: 'rename symbol refactor across workspace variable', sec: 'edits' },
         extract_function_code: { sig: 'extract_function_code(path, startLine, endLine, functionName, params)', brief: 'extract a line range into a new function', kw: 'extract refactoring block extraire bloc plage refactor décomposer', sec: 'edits' },
@@ -211,7 +211,7 @@ export function compactCatalogIndex(): string {
                 sections.set(meta.sec, list);
         }
         const lines: string[] = [
-                'TOOL INDEX (lookup_tool_code(query) returns the full card — how to call it, params, RO/MUT/DST — of every tool matching a task):'
+                `TOOL INDEX (${Object.keys(CATALOG).length} tools — lookup_tool_code(query) returns the full card: how to call it, params, RO/MUT/DST):`
         ];		for (const [sec, tools] of sections) {
 			lines.push(`${sec}: ${tools.join(' ')}`);
         }

@@ -81,7 +81,7 @@ Ops mirror the real tools: "replace_lines" (path, startLine, endLine, content, o
             path: z.string().optional().describe('Target file (replace_lines/rename: file to modify)'),
             startLine: z.number().optional().describe('replace_lines: 1-based start line'),
             endLine: z.number().optional().describe('replace_lines: 1-based end line (inclusive)'),
-            content: z.string().optional().describe('replace_lines/create: the new content'),
+            content: z.string().optional().describe('replace_lines/create: the new content (replace_lines: omit to preview a deletion)'),
             originalCode: z.string().optional().describe('replace_lines: if given, must match the current lines exactly (same rule as replace_lines_code)'),
             sourcePath: z.string().optional().describe('move: file to move'),
             targetPath: z.string().optional().describe('move: destination path'),
@@ -92,8 +92,8 @@ Ops mirror the real tools: "replace_lines" (path, startLine, endLine, content, o
         async ({ op, path: p, startLine, endLine, content, originalCode, sourcePath, targetPath, newName, overwrite = false, workspace }): Promise<CallToolResult> => {
             try {
                 if (op === 'replace_lines') {
-                    if (!p || startLine === undefined || endLine === undefined || content === undefined) {
-                        throw new Error('replace_lines requires path, startLine, endLine and content');
+                    if (!p || startLine === undefined || endLine === undefined) {
+                        throw new Error('replace_lines requires path, startLine and endLine (omit content to preview a deletion)');
                     }
                     const target = resolveRelativeToolPath(p, workspace);
                     const current = readTextFile(target.fsPath, p);
@@ -106,7 +106,7 @@ Ops mirror the real tools: "replace_lines" (path, startLine, endLine, content, o
                     if (originalCode !== undefined && originalCode !== original) {
                         throw new Error(`originalCode does not match current lines ${startLine}-${endLine}. Read the exact lines again with read_file_code.`);
                     }
-                    const next = [...lines.slice(0, s), ...content.split('\n'), ...lines.slice(e + 1)].join('\n');
+                    const next = [...lines.slice(0, s), ...(content === undefined ? [] : content.split('\n')), ...lines.slice(e + 1)].join('\n');
                     const d = unifiedDiff(current, next);
                     const text = `--- a/${p}\n+++ b/${p}\n${d.text}`;
                     return { content: [{ type: 'text', text: `Preview (replace_lines ${startLine}-${endLine} in ${p}): ${diffSummaryLine(d)}\n\n${text}\n\nNothing was written. Apply with replace_lines_code(path="${p}", startLine=${startLine}, endLine=${endLine}, ...).` }] };
