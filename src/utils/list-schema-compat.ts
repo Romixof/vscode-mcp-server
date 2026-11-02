@@ -7,7 +7,17 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
  * every .int() gains ±2^53-1 bounds, and records gain propertyNames. Clients
  * that cached or validated the old shape (or reject propertyNames, as some
  * model providers do) would see a different contract for the same tools.
+ * zod 4 also writes "description" before "type"; keywords are put back in
+ * zod 3 order so the listing is byte-for-byte what clients already knew.
  */
+const KEY_ORDER = ['type', 'properties', 'required', 'items', 'enum', 'minimum', 'maximum', 'additionalProperties', 'default', 'description', '$schema'];
+
+function rank(key: string): number {
+        const i = KEY_ORDER.indexOf(key);
+        // Unknown keywords sit before default/description, as zod 3 emitted constraints.
+        return i === -1 ? KEY_ORDER.indexOf('additionalProperties') + 0.5 : i;
+}
+
 export function normalizeListedSchema(node: unknown): unknown {
         if (Array.isArray(node)) {
                 return node.map(normalizeListedSchema);
@@ -17,7 +27,16 @@ export function normalizeListedSchema(node: unknown): unknown {
         }
         const out: Record<string, unknown> = {};
         for (const [key, value] of Object.entries(node)) {
-                out[key] = normalizeListedSchema(value);
+                if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
+                        // Parameter names, not keywords: keep their order, normalize each schema.
+                        const props: Record<string, unknown> = {};
+                        for (const [name, schema] of Object.entries(value)) {
+                                props[name] = normalizeListedSchema(schema);
+                        }
+                        out[key] = props;
+                } else {
+                        out[key] = normalizeListedSchema(value);
+                }
         }
         if (out.minimum === -Number.MAX_SAFE_INTEGER) {
                 delete out.minimum;
@@ -32,7 +51,7 @@ export function normalizeListedSchema(node: unknown): unknown {
         if (out.type === 'object' && out.properties && Object.keys(out.properties).length > 0 && !('additionalProperties' in out)) {
                 out.additionalProperties = false;
         }
-        return out;
+        return Object.fromEntries(Object.entries(out).sort(([a], [b]) => rank(a) - rank(b)));
 }
 
 /** Wraps the SDK's tools/list handler; call after the first tool is registered. */

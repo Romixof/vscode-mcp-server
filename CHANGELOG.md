@@ -4,6 +4,11 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.46] - 2026-11-02
+### Fixed
+
+- Relay calls (session_bootstrap_code with action="call") failed with "Relay call incomplete" in Mammouth after 0.20.45. The tool list sent to clients is again byte-for-byte the one from before the zod 4 upgrade, including keyword order.
+
 ## [0.20.45] - 2026-11-02
 ### Security
 
