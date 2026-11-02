@@ -120,7 +120,8 @@ export const TOOL_HINTS: Record<string, ToolHints> = {
     memory_clear_code: DST,
     move_file_code: DST,
     rename_file_code: DST,
-    copy_file_code: DST
+    copy_file_code: DST,
+    delete_file_code: DST
 };
 
 export function applyToolAnnotations(server: McpServer): AnnotationReport {

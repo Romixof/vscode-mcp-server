@@ -16,6 +16,7 @@ import { readAuthConfig } from './auth';
 import { setTwilightConfigSource } from './server';
 import { resolveAgentInstructions } from './utils/agent-instructions';
 import { disposeBrowserBridge } from './tools/browser-tools';
+import { ownedTerminal } from './utils/owned-terminal';
 
 export { MCPServer };
 
@@ -78,22 +79,21 @@ function findGitBash(): string | undefined {
 
 export function getExtensionTerminal(context: vscode.ExtensionContext): vscode.Terminal {
 
-    const existingTerminal = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
-
-    if (existingTerminal && existingTerminal.exitStatus === undefined) {
-        logger.info('[getExtensionTerminal] Reusing existing terminal for shell commands');
-        return existingTerminal;
-    }
-
-    const bashPath = findGitBash();
-    if (bashPath) {
-        sharedTerminal = vscode.window.createTerminal({ name: TERMINAL_NAME, shellPath: bashPath });
-        logger.info(`[getExtensionTerminal] Created new terminal using Git Bash (${bashPath})`);
-    } else {
-        sharedTerminal = vscode.window.createTerminal(TERMINAL_NAME);
-        logger.info('[getExtensionTerminal] Created new terminal with default profile');
-    }
-    context.subscriptions.push(sharedTerminal);
+    // A terminal revived from an earlier window or extension version runs
+    // what we send but never reports its output back; see owned-terminal.ts.
+    sharedTerminal = ownedTerminal(TERMINAL_NAME, () => {
+        const bashPath = findGitBash();
+        let created: vscode.Terminal;
+        if (bashPath) {
+            created = vscode.window.createTerminal({ name: TERMINAL_NAME, shellPath: bashPath });
+            logger.info(`[getExtensionTerminal] Created new terminal using Git Bash (${bashPath})`);
+        } else {
+            created = vscode.window.createTerminal(TERMINAL_NAME);
+            logger.info('[getExtensionTerminal] Created new terminal with default profile');
+        }
+        context.subscriptions.push(created);
+        return created;
+    }, () => logger.info('[getExtensionTerminal] Closing a terminal revived from an earlier session; its output cannot be captured'));
 
     return sharedTerminal;
 }

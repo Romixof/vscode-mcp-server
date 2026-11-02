@@ -100,7 +100,7 @@ suite('shell clamp and shell disclosure', () => {
         test('the clamp keeps the payload under the ceiling', async () => {
                 const tools = await listedTools();
                 const tokens = Math.round(JSON.stringify(tools).length / 4);
-                assert.ok(tokens <= 27500, `payload ${tokens} tok exceeds ceiling 27500`);
-                console.log(`  payload ${tokens} tok / 27500`);
+                assert.ok(tokens <= 27600, `payload ${tokens} tok exceeds ceiling 27600`);
+                console.log(`  payload ${tokens} tok / 27600`);
         });
 });

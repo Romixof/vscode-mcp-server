@@ -11,6 +11,7 @@ import { quoteArg, shellSafeInputPath } from '../utils/shell-quote';
 import { compactOcrText, rememberOriginal, formatCompactionNotice } from '../utils/token-efficiency';
 import { assertUrlSafe } from '../utils/security-helpers';
 import { WINDOWS_FALLBACK_DIRS, findGitBash, POPPLER_HINT, windowsBinaryExists } from '../utils/binaries';
+import { ownedTerminal } from '../utils/owned-terminal';
 
 const DEFAULT_MIN_CHARS_PER_PAGE = 20;
 const DEFAULT_DPI = 300;
@@ -36,14 +37,12 @@ const PDFINFO_TIMEOUT_MS = 2000;
 const shellSingleQuote = quoteArg;
 const OCR_TERMINAL_NAME = 'MCP OCR';
 function getOcrTerminal(): vscode.Terminal {
-    const existing = vscode.window.terminals.find(t => t.name === OCR_TERMINAL_NAME && t.exitStatus === undefined);
-    if (existing) {
-        return existing;
-    }
-    const bashPath = findGitBash();
-    return bashPath
-        ? vscode.window.createTerminal({ name: OCR_TERMINAL_NAME, shellPath: bashPath })
-        : vscode.window.createTerminal(OCR_TERMINAL_NAME);
+    return ownedTerminal(OCR_TERMINAL_NAME, () => {
+        const bashPath = findGitBash();
+        return bashPath
+            ? vscode.window.createTerminal({ name: OCR_TERMINAL_NAME, shellPath: bashPath })
+            : vscode.window.createTerminal(OCR_TERMINAL_NAME);
+    });
 }
 // A resolved binary path is stable for the process lifetime, and re-resolving
 // costs 2+ shell round-trips per binary — on a slow Windows machine that burned

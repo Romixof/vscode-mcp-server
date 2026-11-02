@@ -393,7 +393,9 @@ async function executeAndWait(terminal: vscode.Terminal, fullCommand: string, ti
 
                     cleaned += `\n\n[Timed out after ${timeout}ms — showing the output captured so far. The process may still be running in the terminal; retry with a larger timeout if you need the rest.]`;
 
-                    if (!markerFound && /command not found|syntax error|unexpected token|is not recognized|ParserError/i.test(sanitized)) {
+                    if (output === '') {
+                        cleaned += `\n\n[The terminal sent back nothing at all, not even the command echo. The command was typed and may have run anyway: check its effect (list or read the file) before retrying, so it does not run twice.]`;
+                    } else if (!markerFound && /command not found|syntax error|unexpected token|is not recognized|ParserError/i.test(sanitized)) {
                         cleaned += `\n\n[No exit marker came back and the output above looks like shell parse errors — this terminal is probably running a different shell than expected.]`;
                     }
                     resolve({ output: cleaned, exitCode: 124 });

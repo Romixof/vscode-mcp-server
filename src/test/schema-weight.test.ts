@@ -2,10 +2,10 @@ import * as assert from 'assert';
 import { fetchToolList } from './helpers/tool-list';
 import { WORKSPACE_PARAM_DESCRIPTION } from '../utils/workspace';
 
-const EXPECTED_TOOL_COUNT = 100;
+const EXPECTED_TOOL_COUNT = 101;
 const MAX_TOKENS_PER_TOOL = 950;
 const P95_TOKENS_PER_TOOL = 480;
-const PAYLOAD_CEILING = 27500; // +7 browser tools (Chrome DevTools MCP bridge), measured 27464
+const PAYLOAD_CEILING = 27600; // +delete_file_code (0.20.47), measured 27577
 const WORKSPACE_DESC_MAX_CHARS = 90;
 const REPEATED_WORKSPACE_DESC_MAX_CHARS = 48;
 const MAMMOTH_PER_TOOL_CAP = 32768;

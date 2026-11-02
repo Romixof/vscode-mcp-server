@@ -38,7 +38,7 @@ export const DEFAULT_AGENT_INSTRUCTIONS: string = [
         'APPROVALS: [RO] tools are auto-approved - call them freely. [MUT] and [DST] may require manual approval - for multi-step modifications present a short plan first, then execute it.'
 ].join('\n');
 
-export const AGENT_INSTRUCTIONS_VERSION = '26';
+export const AGENT_INSTRUCTIONS_VERSION = '27';
 
 export function environmentSection(platform: NodeJS.Platform = process.platform): string {
         if (platform === 'win32') {
@@ -75,7 +75,7 @@ const WORKFLOW_RULES = [
                 '1. EVERY user message opens with session_bootstrap_code() — default mode="compact": a light re-anchor (workspace state only). Escalate ONLY if the task needs more: mode="full" for memory + layout + skills + guide, subfolder="<topic dir>" to scope a topic. Small one-off tasks stay compact.',
         '2. Explore: list_files_code (root: never recursive=true), read_file_code with ranges; get_document_symbols_code to outline, search_symbols_code to locate and define.',
         '3. Search text with search_workspace_code — NEVER shell commands for reading or searching files.',
-        '4. Edit with edit_file_code (exact match, refuses ambiguity); create_file_code for new files; replace_lines_code to insert/delete a line range (long lines: firstLine+lastLine anchors instead of originalCode; omit content to delete); rename_symbol_code for renames.',
+        '4. Edit with edit_file_code (exact match, refuses ambiguity); create_file_code for new files; replace_lines_code to insert/delete a line range (long lines: firstLine+lastLine anchors instead of originalCode; omit content to delete); rename_symbol_code for renames; delete_file_code to delete a file (not rm).',
         '5. After EVERY change batch run get_diagnostics_code(). Before ANY commit run find_secrets_code() then security_scan_code().',
         '6. Builds/tests: run_task_code / run_tests_code / build_project_code. Shell is LAST RESORT (~27s max); long runs: background_task_code, poll action="output".',
         '7. Web: browser_open_code(url) -> browser_snapshot_code() for uids -> browser_click_code / browser_fill_code -> snapshot again; browser_screenshot_code to see it (to show the user, paste the ![screenshot](url) it returns); the rest via browser_call_code(tool, args), tool="list" lists them. Sensitive calls wait for approval in VS Code.',

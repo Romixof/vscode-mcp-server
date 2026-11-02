@@ -96,7 +96,7 @@ suite('compact guide over resolveAgentInstructions', () => {
                 assert.ok(guide.length < DEFAULT_AGENT_INSTRUCTIONS.length / 4, `compact guide should be far smaller: ${guide.length} vs ${DEFAULT_AGENT_INSTRUCTIONS.length}`);
         });
 
-        test('carries the version tag and all 100 tool names', () => {
+        test('carries the version tag and all 101 tool names', () => {
                 const guide = resolveAgentInstructions();
                 const names = Object.keys(CATALOG).filter(n => !guide.includes(n));
                 assert.deepStrictEqual(names, [], `tools missing from the compact index: ${names.join(', ')}`);

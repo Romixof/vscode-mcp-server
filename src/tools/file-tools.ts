@@ -8,6 +8,7 @@ import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { fileFingerprint, recentReads, unchangedReadNotice, recordRead, repeatSavings } from '../utils/read-cache';
 import { looksBinary } from './safety-tools';
 import { writeLine as trafficWriteLine } from '../traffic-log';
+import { CLIENT_BUDGET_MS } from '../utils/client-budget';
 
 const readCache = recentReads();
 
@@ -216,6 +217,30 @@ function assertNotWorkspaceRoot(uri: vscode.Uri, action: string): void {
 		if (target === root || target.toLowerCase() === root.toLowerCase()) {
 			throw new Error(`Refusing to ${action} the workspace root "${folder.name}" itself — pass a path inside it.`);
 		}
+	}
+}
+
+// Answered before the client's 30 s disconnect, so the model gets a reply.
+const DELETE_CONFIRM_TIMEOUT_MS = CLIENT_BUDGET_MS - 2000;
+
+async function confirmDeletion(target: string, isDir: boolean): Promise<true | false | 'timeout'> {
+	const choice = 'Delete';
+	let timer: NodeJS.Timeout | undefined;
+	const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), DELETE_CONFIRM_TIMEOUT_MS); });
+	try {
+		const answer = await Promise.race([
+			Promise.resolve(vscode.window.showWarningMessage(
+				`MCP: delete ${isDir ? 'directory ' : ''}"${target}"?`,
+				{ modal: true, detail: `An MCP client asks to delete ${isDir ? 'this directory and everything in it' : 'this file'}. It goes to the trash.` },
+				choice
+			)),
+			timeout
+		]);
+		return answer === 'timeout' ? 'timeout' : answer === choice;
+	} catch {
+		return false;
+	} finally {
+		if (timer) { clearTimeout(timer); }
 	}
 }
 
@@ -566,6 +591,50 @@ Uses refactoring, so all references to the renamed file are updated across the w
                 console.error('[rename_file] Error in tool:', error);
                 throw error;
             }
+        }
+    );
+
+    server.tool(
+        'delete_file_code',
+        'Deletes a file inside the workspace (a directory needs recursive=true). The user approves in VS Code; it goes to the trash. Use instead of rm.',
+        {
+            path: z.string().describe('File or directory to delete'),
+            recursive: z.boolean().optional().default(false).describe('Needed for a directory'),
+            workspace: z.string().optional().describe(WORKSPACE_PARAM_DESCRIPTION)
+        },
+        async ({ path: target, recursive = false, workspace }): Promise<CallToolResult> => {
+            const refuse = (text: string): CallToolResult => ({ content: [{ type: 'text', text }], isError: true });
+            const uri = resolveInputPath(target, workspace, 'delete_file_code');
+            if (!findOwningFolder(uri)) {
+                return refuse(`Refusing to delete "${target}": it is outside the workspace folders. Nothing was deleted.`);
+            }
+            assertNotWorkspaceRoot(uri, 'delete');
+
+            let stat: vscode.FileStat;
+            try {
+                stat = await vscode.workspace.fs.stat(uri);
+            } catch {
+                return refuse(`Nothing to delete: "${target}" does not exist.`);
+            }
+            const isDir = (stat.type & vscode.FileType.Directory) !== 0;
+            if (isDir && !recursive) {
+                return refuse(`"${target}" is a directory. Pass recursive=true to delete it and everything in it. Nothing was deleted.`);
+            }
+
+            const approved = await confirmDeletion(target, isDir);
+            if (approved !== true) {
+                return refuse(approved === 'timeout'
+                    ? `Not deleted: nobody approved deleting "${target}" in VS Code in time. Ask the user to approve, then call again.`
+                    : `Not deleted: the user declined deleting "${target}".`);
+            }
+
+            try {
+                await vscode.workspace.fs.delete(uri, { recursive: isDir, useTrash: true });
+            } catch (error) {
+                return refuse(`Could not move "${target}" to the trash: ${error instanceof Error ? error.message : String(error)}. Nothing was deleted.`);
+            }
+            trafficWriteLine(`delete_file_code ${uri.fsPath}`);
+            return { content: [{ type: 'text', text: `Deleted ${target}${isDir ? ' (directory)' : ''}. It is in the trash if it needs restoring.` }] };
         }
     );
 

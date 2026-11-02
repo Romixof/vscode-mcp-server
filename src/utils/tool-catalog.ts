@@ -21,6 +21,7 @@ export const CATALOG: Record<string, ToolMeta> = {
         move_file_code: { sig: 'move_file_code(sourcePath, targetPath, overwrite)', brief: 'move a file to a new path', kw: 'move déplacer relocate file path', sec: 'files' },
         copy_file_code: { sig: 'copy_file_code(sourcePath, targetPath, overwrite)', brief: 'copy a file', kw: 'copy copier duplicate file annex', sec: 'files' },
         rename_file_code: { sig: 'rename_file_code(filePath, newName, overwrite)', brief: 'rename a file', kw: 'rename renommer file new name', sec: 'files' },
+        delete_file_code: { sig: 'delete_file_code(path, recursive)', brief: 'delete a file, or a directory with recursive=true; the user approves and it goes to the trash', kw: 'delete remove rm erase trash unlink file supprimer effacer', sec: 'files' },
         convert_encoding_code: { sig: 'convert_encoding_code(path, action="detect"|"convert", from, to)', brief: 'detect or convert a file encoding', kw: 'encoding utf8 latin1 convert détecter encodage', sec: 'files' },
         snapshot_workspace_code: { sig: 'snapshot_workspace_code(action="save"|"compare", name, baseline)', brief: 'SHA-256 point-in-time snapshots of every file', kw: 'snapshot save compare checksum files compare', sec: 'files' },
         diff_preview_code: { sig: 'diff_preview_code(op, ...)', brief: 'dry-run of replace_lines/create/move/rename: prints the unified diff, applies nothing', kw: 'diff preview dry-run validate before edits', sec: 'files' },

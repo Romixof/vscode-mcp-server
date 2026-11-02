@@ -36,7 +36,7 @@ const SCOPE_TOOLS: Record<Scope, string[]> = {
         'diff_preview_code', 'call_graph_code', 'test_impact_code', 'migration_diff_code'
     ],
     'fs:write': [
-        'create_file_code', 'move_file_code', 'copy_file_code', 'rename_file_code',
+        'create_file_code', 'move_file_code', 'copy_file_code', 'rename_file_code', 'delete_file_code',
         'edit_file_code',
         'replace_lines_code', 'format_document_code', 'generate_docstring_code',
         'generate_ics_code', 'rename_symbol_code',

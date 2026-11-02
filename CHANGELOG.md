@@ -4,6 +4,15 @@ All notable changes to the "vscode-mcp-server" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.20.47] - 2026-11-02
+### Added
+
+- `delete_file_code(path, recursive)`: deletes a file, or a directory with `recursive=true`. The user approves each deletion in VS Code, the item goes to the trash, and paths outside the workspace (or the workspace root itself) are refused. Listed in the tool index and the agent guide (v27).
+
+### Fixed
+
+- Shell commands could time out at 25 s with no output after a window reload or an extension update, even though the command ran. VS Code revives the old terminal, and a revived terminal no longer reports its output to the extension. The extension now closes a revived "MCP" terminal and opens a fresh one (same for the OCR terminal). When a terminal returns nothing at all, the timeout message now says the command may have run.
+
 ## [0.20.46] - 2026-11-02
 ### Fixed
 
